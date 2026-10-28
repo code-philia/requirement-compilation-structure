@@ -9,24 +9,19 @@ from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import validate_schema
-from infrastructure.utils.files import read_artifact, save_json
+from infrastructure.utils.files import read_artifact
+from infrastructure.utils.presentation.formatting import format_obligations, format_requirement_schema_relations
 
 
 def check_db_obligations(arc_dir: Path, pause: bool = False) -> dict:
-    """Validate node IDs and field symbols, preserving each node's inferred read/write sets."""
+    """Print the schema ER graph and requirement-to-field/read-write relations."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     schema = read_artifact(arc_dir, "db_schema.json")
     validate_schema(schema)
-    # This boundary checks representation and references only. Requirement,
-    # child, and step effects remain independent; no containment is enforced.
-    result = validate_obligations(
-        read_artifact(arc_dir, "db_obligations.json"), tree, field_symbols(schema),
-    )
-    save_json(arc_dir / "db_obligations_checked.json", result)
+    result = validate_obligations(read_artifact(arc_dir, "db_obligations.json"), tree, field_symbols(schema))
     DemoConsole(pause).show("Step 04 | Obligation records validated", (
-        f"Requirements: {len(result['requirements'])}\nSteps: {len(result['steps'])}\n"
-        "Node IDs and schema field references are valid. Inferred effects are preserved.\n"
-        f"Saved: {arc_dir / 'db_obligations_checked.json'}"
+        format_requirement_schema_relations(schema) + "\n\nOBLIGATIONS\n" +
+        format_obligations(result["requirements"]) + "\nSTEPS\n" + format_obligations(result["steps"])
     ))
     return result
 

@@ -12,7 +12,6 @@ from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
-from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.database.schema import validate_schema
 from infrastructure.utils.files import save_json
 
@@ -20,8 +19,8 @@ from infrastructure.utils.files import save_json
 # --- Extension point 03A: obligation inference policy --------------------------
 # Rewrite how requirement text maps to reads/writes, especially failure paths,
 # fixture setup, and generated keys. The output contract is checked separately
-# in infrastructure/stages/database/obligations/records.py; step 04 validates the saved records.
-INSTRUCTIONS = """Infer field-level dataflow obligations using all existing schema definitions.
+# in infrastructure/stages/database/obligations/records.py.
+INSTRUCTIONS = """Infer field-level dataflow obligations using only the related schema fields supplied for this requirement.
 Return exactly this JSON object, in English:
 {
   "requirement": {"read": ["Entity.field"], "write": ["Entity.field"]},
@@ -32,7 +31,7 @@ Return exactly this JSON object, in English:
 Return every supplied step ID exactly once, and no other IDs; use steps={} when none
 are supplied. All read/write entries must be existing qualified schema field symbols.
 An empty set is []. Never create entities, fields, or substitute a similar but wrong field.
-Use retrieved definitions and the global symbol inventory to bind data concepts.
+Use only the supplied related schema definitions to bind data concepts.
 If necessary persistent data cannot be mapped, list the concepts in unmapped. Do not
 silently omit them or clear unmapped merely to pass validation. UI-only state need not
 map to persistent fields. Password input is verified against a hash, not stored plaintext.
@@ -50,7 +49,10 @@ and inserted records. A generated primary key is still a persisted write when in
 a record; do not exclude it as "system-generated" or "not business data". Lookup/filter
 and join keys are reads even when they are not displayed. Do not read every field merely
 because the entity is retrieved.
-References are context only in this pass; do not blindly inherit another node's effects.
+The requirement read/write union must cover every supplied related field. A field may
+appear in both sets when the behavior reads and modifies it. If any related field is
+not classified, the proposal is invalid and must be corrected. References are context
+only in this pass; do not blindly inherit another node's effects.
 If a correction is supplied, fix the error and return one complete JSON object.
 """
 
@@ -68,7 +70,6 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
     # Inference may select existing fields, but cannot create schema symbols.
     # An unmapped concept should trigger schema review, not a fabricated field.
     symbols = field_symbols(schema)
-    retriever = SchemaRetriever()
     console = DemoConsole(pause)
     model = TextModel()
     # Organizational parents keep empty records; only leaves receive model inference.
@@ -83,17 +84,16 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
             f"{requirement['name']}\n\nDescription:\n{requirement['description']}"
             f"\n\nConcatenated steps:\n{steps_text or '(No steps on this requirement.)'}"
         ))
-        console.show(f"{label} | 2. All existing schema (excerpt)", format_schema(schema["entities"], excerpt=True))
-        # --- Key extension point 03B: retrieval for semantic binding -----------
-        # Compare a whole-requirement query with per-step retrieval or reranking.
-        # Reuse/replace infrastructure/shared/rag/schema.py; keep field identity
-        # intact so generated obligations can be checked against the full schema.
-        query = f"{requirement['name']}\n{requirement['description']}\n{steps_text}"
-        retrieved = retriever.retrieve(query, schema, top_k)
-        ranking = "\n".join(f"{item['symbol']}  BM25={item['score']:.4f}" for item in retrieved["matches"])
-        console.show(f"{label} | 3. Retrieved schema", (
-            (ranking or "No lexical matches.") + "\n\n" + format_schema(retrieved["entities"])
-        ))
+        related_fields = schema["requirements"].get(rid)
+        if not isinstance(related_fields, list):
+            raise ValueError(f"Missing schema relation for requirement: {rid}; rerun step 02")
+        related_entities = {}
+        for symbol in related_fields:
+            entity, field = symbol.split(".", 1)
+            related_entities.setdefault(entity, {"description": schema["entities"][entity]["description"], "fields": {}})
+            related_entities[entity]["fields"][field] = schema["entities"][entity]["fields"][field]
+        related_symbols = set(related_fields)
+        console.show(f"{label} | 2. Related schema fields", format_schema(related_entities))
         # --- Extension point 03C: inference granularity and feedback -----------
         # One call currently predicts a requirement and all its own steps.
         # Try separate calls or richer evidence, while retaining every node ID
@@ -101,14 +101,17 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
         request = {
             "requirement": requirement,
             "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
-            "symbol_inventory": sorted(symbols),
-            "retrieved_schema": {"entities": retrieved["entities"]},
+            "related_fields": sorted(related_fields),
+            "related_schema": {"entities": related_entities},
         }
         for attempt in range(1, 4):
             response = None
             try:
                 response = model.generate_json(INSTRUCTIONS, request)
-                inferred = validate_inference(response, symbols, tree.own_steps[rid])
+                inferred = validate_inference(response, related_symbols, tree.own_steps[rid])
+                classified = set(inferred["requirement"]["read"]) | set(inferred["requirement"]["write"])
+                if classified != related_symbols:
+                    raise ValueError(f"Requirement obligation coverage mismatch: missing={sorted(related_symbols - classified)}, extra={sorted(classified - related_symbols)}")
                 break
             except ValueError as error:
                 if attempt == 3:
@@ -122,9 +125,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
             + format_obligations({rid: inferred["requirement"], **inferred["steps"]})
         ))
 
-    # --- Pass boundary: preserve the raw predictions --------------------------
-    # Step 04 validates IDs and symbols without propagating or comparing effects.
-    obligations = validate_obligations(obligations, tree, symbols)
+    obligations = validate_obligations(obligations, tree, field_symbols(schema))
     save_json(arc_dir / "db_obligations.json", obligations)
     print(f"Obligations saved: {arc_dir / 'db_obligations.json'}", flush=True)
     return obligations

@@ -34,7 +34,7 @@ rule. Do not invent trimming, normalization, value ranges, or default policies. 
 explicit comparison rules exactly. Refine earlier field constraints when the current
 requirement gives more precise evidence; keep unrelated constraints unchanged.
 
-Return exactly {"entities": {...}, "explanation": "..."} in English.
+Return exactly {"entities": {...}, "related_fields": [...], "explanation": "..."} in English.
 entities is an incremental upsert patch keyed by entity name. Each new entity has
 exactly description (nonempty string) and fields (object keyed by field name).
 Each new field has exactly:
@@ -53,7 +53,11 @@ properties are preserved. Set references to null explicitly to clear an edge.
 Return entities={} if the existing schema suffices, explaining what was reused.
 Explain reuse, additions, and modifications using evidence from the current requirement.
 If a correction is supplied, fix the reported error and return one complete JSON object.
-Do not infer or report dataflow obligations yet.
+Also return "related_fields": ["Entity.field", ...], listing every existing or newly
+created field from this requirement's directly relevant persistent data. This is a
+schema relationship, not a read/write obligation; include fields needed for identity,
+lookups, joins, inserts, updates, and required session relationships. Do not include
+unrelated fields. The compiler records this relation after validating the final schema.
 """
 
 
@@ -78,7 +82,7 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
     console = DemoConsole(pause)
     retriever = SchemaRetriever()
     model = TextModel()
-    schema = {"entities": {}}
+    schema = {"entities": {}, "requirements": {}}
     for index, requirement in enumerate(nodes, 1):
         label = f"{index}/{len(nodes)} {requirement['id']}"
         console.show(f"{label} | 1. Current requirement", (
@@ -115,7 +119,15 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
             patch = None
             try:
                 patch = model.generate_json(INSTRUCTIONS, request)
-                updated = apply_patch(schema, patch, retrieved["entities"])
+                if not isinstance(patch, dict) or not isinstance(patch.get("related_fields"), list):
+                    raise ValueError("Model response must include related_fields")
+                updated = apply_patch(schema, {key: patch[key] for key in ("entities", "explanation")}, retrieved["entities"])
+                symbols = {f"{name}.{field}" for name, entity in updated["entities"].items() for field in entity["fields"]}
+                if len(patch["related_fields"]) != len(set(patch["related_fields"])) or any(field not in symbols for field in patch["related_fields"]):
+                    raise ValueError("related_fields must contain unique fields from the accepted schema")
+                updated["requirements"][requirement["id"]] = sorted(patch["related_fields"])
+                from infrastructure.stages.database.schema import validate_schema
+                validate_schema(updated)
                 break
             except ValueError as error:
                 if attempt == 3:

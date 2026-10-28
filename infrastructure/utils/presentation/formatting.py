@@ -72,6 +72,15 @@ def format_obligations(records: dict, empty_label: str = "(empty)") -> str:
     return "\n".join(lines) or "(No nodes.)"
 
 
+def format_requirement_schema_relations(schema: dict) -> str:
+    """Render the schema graph followed by each requirement's related fields and obligations."""
+    lines = ["DATABASE SCHEMA / ER GRAPH", format_schema(schema["entities"]), "REQUIREMENT RELATIONS"]
+    for rid, fields in schema.get("requirements", {}).items():
+        lines.append(rid)
+        lines.append("  RELATED: " + (", ".join(fields) or "(none)"))
+    return "\n".join(lines)
+
+
 def format_apis(apis: dict) -> str:
     """Render API descriptions and their obligations for existing/retrieved API panels."""
     return "\n\n".join(

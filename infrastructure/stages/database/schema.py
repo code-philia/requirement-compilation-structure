@@ -15,8 +15,8 @@ FIELD_PROPERTIES = {"description", "type", "nullable", "primary_key", "unique", 
 # establish that the schema satisfies every requirement.
 def validate_schema(schema: dict) -> None:
     """Reject malformed symbols and dangling or incompatible reference edges."""
-    if not isinstance(schema, dict) or set(schema) != {"entities"} or not isinstance(schema["entities"], dict):
-        raise ValueError("Schema must contain exactly one entities object")
+    if not isinstance(schema, dict) or set(schema) != {"entities", "requirements"} or not isinstance(schema["entities"], dict) or not isinstance(schema["requirements"], dict):
+        raise ValueError("Schema must contain entities and requirements objects")
     symbols = {}
     for name, entity in schema["entities"].items():
         if not isinstance(name, str) or not IDENTIFIER.fullmatch(name):
@@ -64,6 +64,11 @@ def validate_schema(schema: dict) -> None:
             raise ValueError(f"Reference types do not match: {symbol} -> {reference}")
         if not (target["primary_key"] or target["unique"]):
             raise ValueError(f"Reference target must be a primary or unique key: {reference}")
+    for rid, related in schema["requirements"].items():
+        if not isinstance(rid, str) or not rid.strip() or not isinstance(related, list) or len(related) != len(set(related)):
+            raise ValueError(f"Invalid requirement/schema relation: {rid}")
+        if any(not isinstance(symbol, str) or symbol not in symbols for symbol in related):
+            raise ValueError(f"Requirement relation contains unknown field: {rid}")
 
 
 # --- Extension point: incremental merge semantics -----------------------------
