@@ -1,4 +1,4 @@
-"""Step 06: Backend API Decomposition and Obligation Propagation."""
+"""Step 06: decompose APIs, allocate obligations, and design fixed I/O interfaces."""
 
 import json
 from contextlib import ExitStack
@@ -18,9 +18,14 @@ from infrastructure.shared.rag.apis import ApiRetriever
 from infrastructure.utils.files import save_json
 
 
-INSTRUCTIONS = """Perform Backend API Decomposition and Obligation Propagation only.
+INSTRUCTIONS = """Decompose backend APIs, allocate database obligations, then design their interfaces.
+Analyze the requirement's operations first, select reusable APIs and allocate R/W,
+then derive request/response and HTTP signatures from the related schema and effects.
+Return only the final proposal and a concise explanation of these design decisions;
+do not return intermediate reasoning or duplicate planning records.
 Return exactly {"apis": {"API-ID": {"description": "Business operation", "read": [],
-"write": []}}, "requirement_apis": ["API-ID"], "explanation": "Reuse and allocation evidence"}.
+"write": [], "signature": {...}, "request": {...}, "response": {...}}},
+"requirement_apis": ["API-ID"], "explanation": "Reuse, allocation and interface evidence"}.
 apis contains new or updated complete definitions; omit unchanged reused definitions.
 IDs use letters, numbers, underscores or hyphens, starting with a letter. Reuse retrieved
 APIs before creating another operation with the same semantics. One requirement may
@@ -42,7 +47,26 @@ An API's write set describes possible successful effects, not a promise to write
 every invocation: failure paths can write nothing. Read-only operations have write=[].
 Do not invent an endpoint solely to cover a field: every API needs business evidence.
 Return requirement_apis=[] when no backend behavior is needed and obligations are empty.
-Do not infer signature, request, response, precondition or postcondition in this pass.
+Each API includes:
+- signature: {name: TypeScript function identifier, method: GET|POST|PUT|PATCH|DELETE,
+  path: /api/... with optional :named parameters}. /api/health is reserved.
+- request: {params: schema, query: schema, body: schema, headers: schema}.
+- response: {success: {status: 2xx, body: schema, headers: schema},
+  errors: [{status: 4xx/5xx, body: schema, headers: schema}]}.
+Use inline JSON Schemas with explicit type: object,array,string,integer,number,boolean,null.
+Objects declare properties and required; arrays declare items. Empty object schema:
+{"type":"object","properties":{},"required":[]}. No $ref, unions or custom keywords.
+Supported constraints: enum,const,minLength,maxLength,minimum,maximum,pattern,format,
+minItems,maxItems,additionalProperties(boolean). Headers use lower-case names.
+Request sections and response headers are object schemas. Every route parameter must
+be declared and required in params. Function names and method/path routes must be unique.
+Include requirement-defined success and rejection statuses; never use 501 or invent
+generic infrastructure failures. Do not expose password hashes or session secrets in
+response bodies. Preserve shared credential/header conventions across existing APIs.
+Describe any shared cookie/token name explicitly in the header schema description so
+producers and consumers share one convention. Never copy every DB field into I/O:
+generated IDs/hashes can be server-owned, and UI-only confirmation can be request-only.
+Do not return precondition or postcondition; step 07 adds those to the fixed interface.
 Each API may directly implement its business operation with database access.
 Further decomposition into DB Access Primitives is an extension point, not this task.
 If correction is supplied, fix the error and return one complete JSON object.
@@ -73,13 +97,18 @@ def decompose_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6) -
             "\n".join(f"{item['symbol']} BM25={item['score']:.4f}" for item in retrieved["matches"])
             + "\n\n" + format_apis(retrieved["apis"])
         ))
+        related = set(required["read"]) | set(required["write"])
+        related_schema = {name: {"description": entity["description"],
+            "fields": {field: value for field, value in entity["fields"].items() if f"{name}.{field}" in related}}
+            for name, entity in schema["entities"].items()
+            if any(symbol.startswith(name + ".") for symbol in related)}
         request = {
-            "requirement": context, "obligations": required, "db_schema": schema,
+            "requirement": context, "obligations": required, "related_schema": related_schema,
             "retrieved_apis": retrieved["apis"], "api_inventory": list(candidates),
         }
         for attempt in range(1, 4):
             response = None
-            console.show(f"{label} | 4. API Decomposition: attempt {attempt}/3", "Generate API Primitives, then check the union of their READ and WRITE obligations.")
+            console.show(f"{label} | 4. API Decomposition: attempt {attempt}/3", "Decompose operations, allocate R/W, and design signature/request/response; validate coverage and interfaces.")
             try:
                 response = model.generate_json(INSTRUCTIONS, request)
                 updated = apply_decomposition(design, response, rid, retrieved["apis"], obligations, field_symbols(schema), tree=tree)
@@ -94,6 +123,8 @@ def decompose_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6) -
                 print(f"Retrying {rid} ({attempt + 1}/3): {error}", flush=True)
                 request["correction"] = correction
         selected = {aid: updated["apis"][aid] for aid in updated["requirements"][rid]}
+        console.show(f"{label} | API interfaces", json.dumps({aid: {key: api[key]
+            for key in ("signature", "request", "response")} for aid, api in selected.items()}, ensure_ascii=False, indent=2))
         console.show(f"{label} | 4. API Decomposition / Obligation Propagation", (
             response["explanation"] + "\n\n" + format_apis(selected)
             + "\nRequired direct obligations:\n" + format_obligations({rid: required})

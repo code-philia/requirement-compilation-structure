@@ -1,4 +1,4 @@
-"""Step 07: Contract Inference for Backend API Primitives."""
+"""Step 07: infer P/Q conditions over fixed API interfaces and obligations."""
 
 import json
 from contextlib import ExitStack
@@ -18,25 +18,15 @@ from infrastructure.utils.files import save_json
 
 
 INSTRUCTIONS = """Perform Contract Inference for the selected Backend API Primitive:
-API = <signature, I, O, R, W, P, Q>. R/W are fixed. Infer signature, request (I),
-response (O), precondition (P), and postcondition (Q), using ALL supplied requirement
+API = <signature, I, O, R, W, P, Q>. Signature, I/O and R/W are fixed by step 06.
+Infer ONLY precondition (P) and postcondition (Q), using ALL supplied requirement
 uses and their success/failure steps. Do not invent business policy or new operations.
 Return exactly {"contract": {...}, "explanation": "..."}.
 contract contains exactly:
-- signature: {name: TypeScript function identifier, method: GET|POST|PUT|PATCH|DELETE,
-  path: /api/... with optional :named parameters}. /api/health is reserved.
-- request: {params: schema, query: schema, body: schema, headers: schema}.
-- response: {success: {status: 2xx, body: schema, headers: schema},
-  errors: [{status: 4xx/5xx, body: schema, headers: schema}]}.
 - precondition: [{id, description, request_fields: [JSON pointers], error_status}].
 - postcondition: [{id, description, response_fields: [JSON pointers], status}].
-Use inline JSON Schemas with explicit type (object,array,string,integer,number,boolean,
-null). Objects declare properties and required; arrays declare items. No $ref, unions,
-or custom keywords. Empty object: {type:"object",properties:{},required:[]}.
-Supported constraints: enum,const,minLength,maxLength,minimum,maximum,pattern,format,
-minItems,maxItems,additionalProperties(boolean). Headers use lower-case names.
-Request params/query/body/headers and response headers are object schemas.
-Every :parameter must be declared and required in params. Request field pointers look
+Use the supplied fixed request/response schemas; do not regenerate them.
+Request field pointers look
 like /body/username or /headers/cookie. Postcondition pointers look like /body/user,
 /headers/set-cookie, or /status. Each condition must bind at least one declared field.
 Each response status must have at least one postcondition. Precondition error_status
@@ -48,8 +38,10 @@ Do not add generic infrastructure-error branches without requirement evidence. H
 is reserved for the temporary TDD stub and must not appear in the contract.
 An empty precondition list is valid for an unconditional operation; postconditions are
 not empty. Align shared session/cookie conventions with existing_contracts. Explain
-signature, request, response, P and Q separately. A shared API gets one canonical contract
-covering all its uses. If correction is supplied, fix it without changing R or W.
+P and Q briefly. Do not return or repeat signature, request, response, description,
+read or write. A shared API gets one canonical contract covering all its uses.
+If the fixed interface cannot express required behavior, report the mismatch rather
+than inventing fields or statuses. If correction is supplied, change only P/Q.
 """
 
 
@@ -81,15 +73,24 @@ def infer_api_contracts(arc_dir: Path, pause: bool = False) -> dict:
                 api = result["apis"][aid]
                 explanation = "Reused the canonical contract already inferred for all requirement uses."
             else:
-                request = {"api_id": aid, "api": design["apis"][aid], "requirement": requirement_context(tree, rid), "all_requirement_uses": uses, "db_schema": schema, "existing_contracts": result["apis"]}
+                selected = design["apis"][aid]
+                related = set(selected["read"]) | set(selected["write"])
+                related_schema = {name: {"description": entity["description"],
+                    "fields": {field: value for field, value in entity["fields"].items() if f"{name}.{field}" in related}}
+                    for name, entity in schema["entities"].items()
+                    if any(symbol.startswith(name + ".") for symbol in related)}
+                request = {"api_id": aid, "api": selected, "all_requirement_uses": uses,
+                    "related_schema": related_schema, "existing_contracts": result["apis"]}
                 for attempt in range(1, 4):
                     response = None
                     try:
                         response = model.generate_json(INSTRUCTIONS, request)
                         if not isinstance(response, dict) or set(response) != {"contract", "explanation"} or not isinstance(response["explanation"], str):
                             raise ValueError("Return contract and explanation")
-                        validate_contract(response["contract"])
+                        if not isinstance(response["contract"], dict) or set(response["contract"]) != {"precondition", "postcondition"}:
+                            raise ValueError("Return only precondition and postcondition inside contract; the interface is fixed")
                         api = {**design["apis"][aid], **response["contract"]}
+                        validate_contract({key: api[key] for key in ("signature", "request", "response", "precondition", "postcondition")})
                         validate_registry({**result["apis"], aid: api})
                         explanation = response["explanation"]
                         break

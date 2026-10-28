@@ -1,10 +1,11 @@
-"""Validate signature, I/O schemas, and P/Q bindings without changing R/W."""
+"""Validate step 06 API interfaces and step 07 conditions over those fixed interfaces."""
 
 import re
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 CONTRACT_KEYS = {"signature", "request", "response", "precondition", "postcondition"}
+INTERFACE_KEYS = {"signature", "request", "response"}
 SCHEMA_KEYS = {"type", "description", "properties", "required", "additionalProperties", "items", "enum", "const", "minLength", "maxLength", "minimum", "maximum", "pattern", "format", "minItems", "maxItems"}
 
 
@@ -46,10 +47,10 @@ def resolve_field(schema: dict, pointer: str) -> None:
             raise ValueError(f"Condition references an unknown I/O field: {pointer}")
 
 
-def validate_contract(contract: dict) -> None:
-    """Validate the API signature, request/response branches, and P/Q field bindings without changing its obligations."""
-    if not isinstance(contract, dict) or set(contract) != CONTRACT_KEYS:
-        raise ValueError(f"Contract must contain exactly {sorted(CONTRACT_KEYS)}")
+def validate_interface(contract: dict) -> None:
+    """Validate the fixed API interface independently of its P/Q conditions."""
+    if not isinstance(contract, dict) or set(contract) != INTERFACE_KEYS:
+        raise ValueError(f"API interface must contain exactly {sorted(INTERFACE_KEYS)}")
     # 1. The public function and HTTP route form the API signature.
     signature = contract["signature"]
     if not isinstance(signature, dict) or set(signature) != {"name", "method", "path"}:
@@ -88,7 +89,17 @@ def validate_contract(contract: dict) -> None:
         validate_shape(branch["headers"])
         if branch["headers"]["type"] != "object":
             raise ValueError("Response headers must be an object schema")
-    # 4. Bind P to request fields and Q to fields of a declared response branch.
+
+
+def validate_contract(contract: dict) -> None:
+    """Validate fixed I/O and bind P/Q to declared request/response fields."""
+    if not isinstance(contract, dict) or set(contract) != CONTRACT_KEYS:
+        raise ValueError(f"Contract must contain exactly {sorted(CONTRACT_KEYS)}")
+    validate_interface({key: contract[key] for key in INTERFACE_KEYS})
+    request = contract["request"]
+    branches = [contract["response"]["success"], *contract["response"]["errors"]]
+    statuses = {branch["status"] for branch in branches}
+    # Bind P to request fields and Q to fields of a declared response branch.
     ids = set()
     for kind, fields_key in (("precondition", "request_fields"), ("postcondition", "response_fields")):
         conditions = contract[kind]
@@ -120,11 +131,14 @@ def validate_contract(contract: dict) -> None:
         raise ValueError("Each response status needs a corresponding postcondition")
 
 
-def validate_registry(apis: dict) -> None:
+def validate_registry(apis: dict, *, conditions: bool = True) -> None:
     """Validate all API contracts and reject duplicate function names or equivalent HTTP routes."""
     routes, names = set(), set()
     for api in apis.values():
-        validate_contract({key: api[key] for key in CONTRACT_KEYS})
+        if conditions:
+            validate_contract({key: api[key] for key in CONTRACT_KEYS})
+        else:
+            validate_interface({key: api[key] for key in INTERFACE_KEYS})
         signature = api["signature"]
         route = (signature["method"], re.sub(r":[A-Za-z_][A-Za-z0-9_]*", ":parameter", signature["path"]))
         if route in routes or signature["name"] in names:
@@ -134,12 +148,12 @@ def validate_registry(apis: dict) -> None:
 
 
 def validate_contracts(value: dict, design: dict) -> None:
-    """Ensure completed contracts preserve the API decomposition, requirement bindings, descriptions, and read/write sets."""
+    """Ensure P/Q inference preserves allocations, descriptions, R/W and I/O interfaces."""
     if not isinstance(value, dict) or set(value) != {"apis", "requirements"} or not isinstance(value["apis"], dict) or value["requirements"] != design["requirements"] or set(value["apis"]) != set(design["apis"]):
         raise ValueError("Contract bindings must exactly match Backend API Decomposition")
     for aid, api in value["apis"].items():
         if not isinstance(api, dict) or set(api) != CONTRACT_KEYS | {"description", "read", "write"}:
             raise ValueError(f"Invalid completed API Primitive: {aid}")
-        if {key: api[key] for key in ("description", "read", "write")} != design["apis"][aid]:
-            raise ValueError(f"Contract Inference cannot change Dataflow Obligations: {aid}")
+        if {key: api[key] for key in ("description", "read", "write", "signature", "request", "response")} != design["apis"][aid]:
+            raise ValueError(f"Contract Inference cannot change API decomposition, obligations, or interface: {aid}")
     validate_registry(value["apis"])

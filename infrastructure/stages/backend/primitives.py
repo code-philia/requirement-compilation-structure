@@ -5,6 +5,7 @@ import re
 
 from infrastructure.stages.database.obligations.records import validate_record
 from infrastructure.stages.database.obligations.rules import difference, union
+from infrastructure.stages.backend.contracts import INTERFACE_KEYS, validate_registry
 
 API_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
 
@@ -42,11 +43,12 @@ def validate_design(design: dict, obligations: dict, symbols: set[str], complete
         if not API_ID.fullmatch(aid) or aid.lower() in names:
             raise ValueError(f"Invalid or duplicate API identity: {aid}")
         names.add(aid.lower())
-        if not isinstance(api, dict) or set(api) != {"description", "read", "write"}:
-            raise ValueError(f"API Primitive {aid} must contain only description, read, and write at this stage")
+        if not isinstance(api, dict) or set(api) != {"description", "read", "write"} | INTERFACE_KEYS:
+            raise ValueError(f"API Primitive {aid} needs description, read, write, signature, request, response")
         if not isinstance(api["description"], str) or not api["description"].strip():
             raise ValueError(f"API description is required: {aid}")
         validate_record({key: api[key] for key in ("read", "write")}, symbols, aid)
+    validate_registry(design["apis"], conditions=False)
     for rid, ids in design["requirements"].items():
         if rid not in obligations["requirements"] or not isinstance(ids, list) or any(not isinstance(aid, str) for aid in ids):
             raise ValueError(f"Invalid requirement/API binding: {rid}")
