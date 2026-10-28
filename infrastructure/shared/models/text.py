@@ -72,7 +72,21 @@ class TextModel:
             raise ValueError(f"Text model refused the request: {response.choices[0].message.refusal}")
         if not response.choices or not response.choices[0].message.content:
             raise ValueError("Text model returned empty content")
-        result = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content.strip()
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError as error:
+            # Some compatible endpoints append a second JSON object or a short
+            # explanation after an otherwise complete object. Decode the first
+            # object only; the stage's schema/semantic gate still decides whether
+            # that object is acceptable.
+            try:
+                candidate, end = json.JSONDecoder().raw_decode(content)
+            except json.JSONDecodeError:
+                raise error
+            if not isinstance(candidate, dict) or not content[end:].strip():
+                raise error
+            result = candidate
         if not isinstance(result, dict):
             raise ValueError("Text model must return a JSON object")
         return result

@@ -45,7 +45,9 @@ Keep initial values type-correct. Defaults are real initial UI state, not fake A
 Visibility is either a boolean or {"var":"registration.error","equals":"Example error"}.
 For ordinary nonempty error visibility, prefer a boolean local variable such as errorVisible.
 Use only this simple equality predicate; complex conditions belong to later events.
-fixtures.default must be {}. Add at most the supplied max_fixtures total states per page;
+fixtures.default must be {}. The compiler-owned default baseline is free; add at most
+the supplied max_fixtures named display states per page (so max_fixtures=3 permits
+default plus signedOut, signedIn, and loading);
 fixtures override named frontend variables only, to render conditional UI without events.
 Include fixtures reaching each visibility branch and meaningful list/data display states.
 Fixtures are explicit browser-test display data, not production business data.
@@ -56,7 +58,9 @@ step_ui associates every supplied own step ID with its directly involved UI IDs,
 for a purely backend step. Do not duplicate child UI mappings into a parent.
 No UI requirement may be silently omitted; use explanation for a non-UI requirement.
 No triggers/events, executable code, API calls, handlers or interaction implementation
-are generated here. Later phases implement those. Images provide layout/labels/style,
+are generated here. Later phases implement those. When creating a new page for an
+image with an explicit page hint, include that page root in requirement_ui; the
+compiler also binds that root automatically. Images provide layout/labels/style,
 not hidden business rules.
 """
 
@@ -212,8 +216,9 @@ def validate_design(design: dict, tree, images: dict, max_fixtures: int = 3, com
         if not isinstance(page["images"], list) or any(not isinstance(image, str) or image not in images for image in page["images"]):
             raise ValueError(f"Unknown image reference: {pid}")
         fixtures = page["fixtures"]
-        if not isinstance(fixtures, dict) or fixtures.get("default") != {} or not 1 <= len(fixtures) <= max_fixtures:
-            raise ValueError(f"Provide default={{}} and at most {max_fixtures} UI fixtures: {pid}")
+        named_count = len(fixtures) - 1 if isinstance(fixtures, dict) and "default" in fixtures else -1
+        if not isinstance(fixtures, dict) or fixtures.get("default") != {} or not 0 <= named_count <= max_fixtures:
+            raise ValueError(f"Provide default={{}} and at most {max_fixtures} named UI fixtures: {pid}")
         subtree = page_elements(design, pid)
         for name, fixture in fixtures.items():
             if not ID.fullmatch(name) or not isinstance(fixture, dict) or any(var not in descriptors or not matches_type(value, descriptors[var]["dtype"]) for var, value in fixture.items()):

@@ -12,6 +12,33 @@ from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
 
 
+def bind_requirement_image_pages(design, requirement, rid):
+    """Bind image-backed pages to the current requirement when the page hint is unambiguous."""
+    owned = set(design["requirements"].get(rid, []))
+    images = requirement.get("images", {})
+    image_records = images.values() if isinstance(images, dict) else images
+    for image in image_records:
+        if not isinstance(image, dict):
+            continue
+        image_id, page_hint = image.get("id"), image.get("page")
+        # The requirement's explicit page hint is authoritative. The model may
+        # omit the redundant page.images entry when creating a new page.
+        if page_hint in design["pages"]:
+            page = design["pages"][page_hint]
+            page.setdefault("images", [])
+            if image_id not in page["images"]:
+                page["images"].append(image_id)
+            candidates = [page_hint]
+        else:
+            candidates = [pid for pid, page in design["pages"].items() if image_id in page.get("images", [])]
+        if len(candidates) != 1:
+            continue
+        root = design["pages"][candidates[0]]["root"]
+        if root in design["elements"]:
+            owned.add(root)
+    design["requirements"][rid] = sorted(owned)
+
+
 def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, contexts, model, console, top_k=3, max_fixtures=3):
     """Design UI/data for all leaf requirements using page-first retrieval.
 
@@ -47,6 +74,7 @@ def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, context
                 response = model.generate_json(INSTRUCTIONS + "\n\n" + PATCH_INSTRUCTIONS, request)
                 proposal = validate_proposal(response, design, tree.own_steps[rid])
                 updated = apply_proposal(design, proposal, rid, tree, images, retrieved["pages"], max_fixtures)
+                bind_requirement_image_pages(updated, requirement, rid)
                 for image in requirement["images"]:
                     if not any(image in page["images"] and set(page_elements(updated, pid)).intersection(updated["requirements"][rid])
                             for pid, page in updated["pages"].items()):

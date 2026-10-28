@@ -24,8 +24,7 @@ from its retrieved subtree even if that root is not a direct requirement UI asso
 Use a canonical page root for mount and a form for native submit; buttons use click.
 guard is null or a nonempty English enabling rule. read covers guard and event inputs;
 write exactly summarizes event frontend writes. No executable expressions/code.
-Event keyed by ID: {"description":"...","read":[],"write":[],
-"obligations":{"read":[],"write":[]},"actions":[]}.
+Event keyed by ID: {"description":"...","read":[],"write":[],"actions":[]}.
 Actions are ordered, with unique IDs scoped to this event. Every action has exactly
 id,kind,description,when,read,write; api actions additionally have api; navigate actions
 additionally have page. kind is local,api,navigate. when is null or an English branch
@@ -42,8 +41,9 @@ Native input values are trigger inputs, not invented frontend variables. Include
 error handling and ordinary navigation with empty DB obligations. Do not invent loading
 or intermediate state variables missing from the UI design; use existing variables and
 semantic conditions. Missing essential UI data requires revisiting step 09, not fabrication.
-Event obligations use DB Entity.field symbols, separately from frontend variables. They
-must equal the union of called APIs' READ/WRITE sets. Local-only events have empty sets.
+Event database obligations are compiler-derived from the APIs in its actions. Do not
+return, copy, or reason about an obligations field in the proposal. The compiler adds
+the final DB Entity.field read/write union; local-only events receive empty sets.
 Call ONLY allowed_api_ids allocated directly to this leaf. Cover every allocated API
 with an event call, including APIs with empty DB effects. Existing page lifecycle events
 owned by another requirement continue to run globally; do not claim them as a direct
@@ -297,6 +297,8 @@ def decomposition_example(case, include_input=False):
     cases = [EXAMPLES["input"], case] if include_input else [case]
     triggers = {tid: deepcopy(trigger) for item in cases for tid, trigger in item["triggers"].items()}
     events = {item["event_id"]: deepcopy(item["event"]) for item in cases}
+    for event in events.values():
+        event.pop("obligations", None)
     steps = {f"STEP-EXAMPLE-{number}": list(item["triggers"]) for number, item in enumerate(cases, 1)}
     variables = set().union(*(set(item["event"]["read"]) | set(item["event"]["write"]) for item in cases))
     return {"given": {

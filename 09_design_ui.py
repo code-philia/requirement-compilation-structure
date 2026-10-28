@@ -26,7 +26,7 @@ def design_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False, top_
 def main() -> None:
     parser = create_parser("Step 09: UI/data Design with Page RAG")
     parser.add_argument("--top-k", type=int, default=3, help="Number of coarse page RAG candidates")
-    parser.add_argument("--max-fixtures", type=int, default=3, help="Maximum display states/tests per page, including default")
+    parser.add_argument("--max-fixtures", type=int, default=3, help="Maximum named display states per page; compiler-owned default is free")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:

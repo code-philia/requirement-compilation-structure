@@ -69,6 +69,11 @@ def api_ids(event):
     return {action["api"] for action in event["actions"] if action["kind"] == "api"}
 
 
+def event_obligations(event, backend):
+    """Derive an event's database effects from the APIs in its ordered actions."""
+    return union(backend["apis"][aid] for aid in api_ids(event))
+
+
 def check_coverage(label, required, actual, allowed=None):
     """Compare required and combined read/write sets, rejecting missing fields and any disallowed extra symbols."""
     gaps = {"missing": difference(required, actual)}
@@ -215,6 +220,11 @@ def apply_decomposition(current, proposal, rid, retrieved, ui, tree, schema, obl
         if (set(proposal[kind]) & set(current[kind])) - set(retrieved[kind]):
             raise ValueError(f"Retrieve existing {kind} before changing them")
         updated[kind].update(deepcopy(proposal[kind]))
+    # Event DB effects are a derived value. Recompute them from the APIs actually
+    # called by each event so a model cannot accidentally copy requirement-level
+    # or step-level obligations into one event.
+    for event in updated["events"].values():
+        event["obligations"] = event_obligations(event, backend)
     if not isinstance(proposal["step_triggers"], dict) or set(proposal["step_triggers"]) != set(tree.own_steps[rid]):
         raise ValueError("Return exactly the current leaf's own step IDs")
     updated["requirements"][rid] = deepcopy(proposal["requirement_triggers"])
