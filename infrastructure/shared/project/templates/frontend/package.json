@@ -1,0 +1,22 @@
+{
+  "name": "@arc/frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "typescript": "5.9.2",
+    "@types/react": "18.3.23",
+    "@types/react-dom": "18.3.7",
+    "vite": "7.1.4",
+    "@vitejs/plugin-react": "5.0.2"
+  }
+}

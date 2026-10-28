@@ -1,0 +1,125 @@
+id: ROOT
+name: User authentication module
+description:
+  text: Provide a homepage, username-based registration, and login for the user authentication module.
+scenarios: []
+children:
+  - id: REQ-1
+    name: Homepage and session display
+    description:
+      text: |-
+        The home page / owns the authentication entry links and the current user's display. When signed out, show a Register link whose href is /register and a Login link whose href is /login. These routes are navigation targets; this requirement does not define or create their page contents.
+        On entering or refreshing the home page, resolve the current user from the existing session credential. A valid existing session displays the exact username and hides Register and Login. A missing or unrecognized session leaves the visitor signed out, with both links visible and no authenticated username. Do not briefly display a previously cached username while session identity is unresolved. A failed session lookup must not leave a stale authenticated display.
+        Homepage session resolution is read-only: it must not create accounts or sessions, change account details or credentials, or verify a password. Do not display passwords, password hashes, or session credentials. Registration forms, personal-detail fields, registration submission and account/session creation belong to REQ-2; login forms, credential submission and new-session creation belong to REQ-3. Homepage only reads and displays the authentication outcome produced by those requirements.
+        The reference image supplies the homepage layout, header and surrounding visual style. Search, booking, travel guides, language switching, carousel behavior and unrelated links are outside this requirement's functional scope. Surrounding reference content may be presented visually, but must not introduce new backend entities, APIs or interactive business behavior.
+      image:
+        - id: IMG-HOMEPAGE
+          reference: reference/homepage.png
+          page: home
+    scenarios:
+      - id: SCN-REQ-1-01
+        name: Display the signed-out homepage
+        steps:
+          - id: STEP-REQ-1-01-01
+            Given: The visitor has no session credential.
+            When: Open the home page /.
+            Then: Display Register and Login links with href values /register and /login. Display no authenticated username and create no account or session.
+            references:
+              - \ref[image](IMG-HOMEPAGE)
+      - id: SCN-REQ-1-02
+        name: Navigate to authentication pages
+        steps:
+          - id: STEP-REQ-1-02-01
+            Given: The visitor is on the signed-out home page.
+            When: Click Register.
+            Then: Navigate to /register. Its form and submission behavior are defined by REQ-2; clicking the link creates no account or session.
+            references:
+              - \ref[image](IMG-HOMEPAGE)
+              - \ref[requirement](REQ-2)
+          - id: STEP-REQ-1-02-02
+            Given: The visitor is on the signed-out home page.
+            When: Click Login.
+            Then: Navigate to /login. Its form and submission behavior are defined by REQ-3; clicking the link creates no session and changes no account.
+            references:
+              - \ref[image](IMG-HOMEPAGE)
+              - \ref[requirement](REQ-3)
+      - id: SCN-REQ-1-03
+        name: Restore the current user's display after refresh
+        steps:
+          - id: STEP-REQ-1-03-01
+            Given: The account taken_traveler and its valid session already exist, and the browser carries that session's credential.
+            When: Open or refresh the home page /.
+            Then: Resolve the existing session, display taken_traveler, and hide Register and Login. Preserve all existing account and session records without creating or modifying any record.
+            references:
+              - \ref[image](IMG-HOMEPAGE)
+      - id: SCN-REQ-1-04
+        name: Reject an unrecognized session display
+        steps:
+          - id: STEP-REQ-1-04-01
+            Given: The browser carries a session credential that does not match an existing session.
+            When: Open or refresh the home page /.
+            Then: Show the signed-out homepage with Register and Login visible and no authenticated username. Create no account or session and leave existing database records unchanged.
+            references:
+              - \ref[image](IMG-HOMEPAGE)
+    children: []
+  - id: REQ-2
+    name: Register
+    description:
+      text: |-
+        The registration page /register contains Nationality, Name, Passport number, Passport expiration date, Date of birth, Gender, Username, Password, Confirm Password, and Email address fields. Labels match the reference image. Nationality includes Vietnam; Gender offers Male and Female. Password fields conceal typed characters.
+        The agreement checkbox is labeled "I have read and agree to abide by Terms of Service and Privacy Policy of 12306.cn." The submit button is labeled "Next step".
+        Submitting complete details, matching passwords, and agreement consent saves the account and signs the user in automatically if the username is unused. If the username already exists, display an error with role=alert and create neither an account nor a session. Compare usernames by exact value. Store passwords as hashes; do not store Confirm Password.
+      image:
+        - id: IMG-REGISTER
+          reference: reference/register.png
+          page: registration
+    scenarios:
+      - id: SCN-REQ-2-01
+        name: Register successfully
+        steps:
+          - id: STEP-REQ-2-01-01
+            Given: The visitor is signed out and has complete traveler details, an unused username and email address, and matching passwords.
+            When: Click Register, fill in the form, select the agreement checkbox, and click Next step.
+            Then: Save the traveler details, username, email address, password hash, and agreement consent. Create a session and return to the home page. Display the username and hide Register and Login. The user remains signed in after a page refresh.
+            references:
+              - \ref[image](IMG-REGISTER)
+      - id: SCN-REQ-2-02
+        name: Reject a duplicate username
+        steps:
+          - id: STEP-REQ-2-02-01
+            Given: The database already contains the username taken_traveler. The visitor is signed out and has that username, an unused email address, complete traveler details, and matching passwords.
+            When: Click Register, fill in the form, select the agreement checkbox, and click Next step.
+            Then: Display a username-already-used error with role=alert. Create neither an account nor a session and leave existing accounts unchanged. Register and Login remain visible after refreshing the home page.
+            references:
+              - \ref[image](IMG-REGISTER)
+    children: []
+  - id: REQ-3
+    name: Login
+    description:
+      text: |-
+        The login page /login accepts a username and password. The username field has the placeholder and accessible name "Email/Username/Mobile number". The password field is labeled "Password" and conceals typed characters. The submit button is labeled "LOGIN".
+        Submit an existing username and a nonempty password. A correct password creates a session and returns the user to the home page. An incorrect password displays an error with role=alert and creates no session. Login does not create accounts or change account details or credentials.
+      image:
+        - id: IMG-LOGIN
+          reference: reference/login.png
+          page: login
+    scenarios:
+      - id: SCN-REQ-3-01
+        name: Log in successfully
+        steps:
+          - id: STEP-REQ-3-01-01
+            Given: The database contains the account taken_traveler with password TakenSmoke!2026. The visitor is signed out.
+            When: Click Login, enter username taken_traveler and password TakenSmoke!2026, and click LOGIN.
+            Then: Verify the password hash, create a session, and return to the home page. Display taken_traveler and hide Register and Login. The user remains signed in after a page refresh.
+            references:
+              - \ref[image](IMG-LOGIN)
+      - id: SCN-REQ-3-02
+        name: Reject an incorrect password
+        steps:
+          - id: STEP-REQ-3-02-01
+            Given: The database contains the account taken_traveler with the correct password TakenSmoke!2026. The visitor is signed out.
+            When: Click Login, enter username taken_traveler and the incorrect password WrongSmoke!2026, and click LOGIN.
+            Then: Display an invalid-credentials error with role=alert. Create no session and leave existing accounts unchanged. Register and Login remain visible after refreshing the home page.
+            references:
+              - \ref[image](IMG-LOGIN)
+    children: []

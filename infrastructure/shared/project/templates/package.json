@@ -1,0 +1,16 @@
+{
+  "name": "arc-application",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.12.0" },
+  "workspaces": ["backend", "frontend"],
+  "allowScripts": { "better-sqlite3": true, "esbuild": true },
+  "scripts": {
+    "build": "npm run build -w @arc/frontend && npm run build -w @arc/backend",
+    "start": "npm run start -w @arc/backend",
+    "dev:backend": "npm run dev -w @arc/backend",
+    "dev:frontend": "npm run dev -w @arc/frontend",
+    "db:init": "npm run db:init -w @arc/backend",
+    "test:backend": "npm run test -w @arc/backend"
+  }
+}

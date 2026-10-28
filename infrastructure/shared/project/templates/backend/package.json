@@ -1,0 +1,23 @@
+{
+  "name": "@arc/backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-db.mjs",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "db:init": "tsx src/db/setup.ts",
+    "test": "node scripts/test-api.mjs"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "better-sqlite3": "12.2.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2",
+    "tsx": "4.20.5",
+    "@types/node": "22.18.0",
+    "@types/express": "5.0.3",
+    "@types/better-sqlite3": "7.6.13"
+  }
+}
