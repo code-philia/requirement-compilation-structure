@@ -50,9 +50,13 @@ owned by another requirement continue to run globally; do not claim them as a di
 current-leaf operation when its upstream API allocation does not include them.
 The event DB obligation union must cover this leaf and stay within its declared DB
 obligations. Every supplied step needs a trigger list (possibly [] for backend-only
-steps). Step triggers are a subset of this leaf's triggers and their DB union covers the
-step obligations. A rejection step can reference the same submit event as success: the
-API's possible writes are not a claim that rejection writes; contracts describe that branch.
+steps). Step triggers are a subset of this leaf's triggers and provide behavioral
+traceability only; no step-level database coverage is required. A scenario can span
+local input, submission, navigation, and another page's existing lifecycle events.
+Do not call another requirement's API just to cover a scenario's database reads.
+User input updates frontend data and has no DB effects until an API is called.
+A rejection step can reference the same submit event as success: an API's possible
+writes do not imply that its rejection branch writes; contracts describe that branch.
 Cover local UI steps even if their DB obligations are empty. Include lifecycle/session
 resolution when directly required. Navigation can target any existing page, but do not
 invent new pages. All source/data references must belong to the retrieved page subtrees.
@@ -309,7 +313,6 @@ def decomposition_example(case, include_input=False):
         "existing_pages": {pid: {"route": page["route"], "root": page["root"]} for pid, page in case["ui"]["pages"].items()},
         "allowed_api_ids": list(case["backend"]["apis"]), "backend_apis": case["backend"]["apis"],
         "obligations": case["event"]["obligations"],
-        "step_obligations": {sid: item["event"]["obligations"] for sid, item in zip(steps, cases)},
     }, "response": {"triggers": triggers, "events": events, "requirement_triggers": list(triggers),
         "step_triggers": steps, "explanation": "Use only existing UI/data/APIs; allocate frontend and database effects separately."}}
 

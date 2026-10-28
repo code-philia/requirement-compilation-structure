@@ -56,9 +56,9 @@ def synthesize_interactions(arc_dir, ui, tree, schema, obligations, backend, con
     for number, rid in enumerate(tree.leaves, 1):
         label = f"Interaction Decomposition {number}/{len(tree.leaves)} {rid}"
         pages = relevant_pages(ui, rid)
-        console.show(label + " | 1. Requirement, steps and DB obligations", json.dumps({
+        console.show(label + " | 1. Requirement and directly owned DB obligations", json.dumps({
             "requirement": contexts[rid], "obligations": obligations["requirements"][rid],
-            "steps": {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]}}, ensure_ascii=False, indent=2))
+        }, ensure_ascii=False, indent=2))
         console.show(label + " | 2. Relevant page subtrees and frontend data", json.dumps(pages, ensure_ascii=False, indent=2))
         console.show(label + " | 3. All Existing Events", json.dumps({eid: event["description"] for eid, event in result["events"].items()}, ensure_ascii=False, indent=2))
         retrieved = retriever.retrieve(contexts[rid], pages, result, top_k)
@@ -73,7 +73,6 @@ def synthesize_interactions(arc_dir, ui, tree, schema, obligations, backend, con
             "retrieved_interactions": retrieved, "event_inventory": {eid: event["description"] for eid, event in result["events"].items()},
             "allowed_api_ids": allowed, "backend_apis": api_context, "api_matches": ranked["matches"],
             "obligations": obligations["requirements"][rid],
-            "step_obligations": {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]},
             "step_ui": {sid: ui["steps"][sid] for sid in tree.own_steps[rid]}}
         result, response = propose(model, DECOMPOSE, request,
             lambda value: apply_decomposition(result, value, rid, retrieved, ui, tree, schema, obligations, backend, analyzed), console, label, max_attempts)

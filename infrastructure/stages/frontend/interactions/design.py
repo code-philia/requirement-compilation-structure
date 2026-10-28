@@ -71,7 +71,11 @@ def api_ids(event):
 
 def event_obligations(event, backend):
     """Derive an event's database effects from the APIs in its ordered actions."""
-    return union(backend["apis"][aid] for aid in api_ids(event))
+    called = api_ids(event)
+    unknown = called - set(backend["apis"])
+    if unknown:
+        raise ValueError(f"Unknown backend APIs in event actions: {sorted(unknown)}")
+    return union(backend["apis"][aid] for aid in called)
 
 
 def check_coverage(label, required, actual, allowed=None):
@@ -189,9 +193,10 @@ def validate_interactions(result, ui, tree, schema, obligations, backend, analyz
             step_tids = result["steps"][sid]
             if not set(step_tids).issubset(tids):
                 raise ValueError(f"Step triggers must be directly assigned to their requirement: {sid}")
-            check_coverage(sid, obligations["steps"][sid], union(result["events"][eid]["obligations"] for eid in event_ids(result, step_tids)))
-            # A rejection step may call an API that writes on success. Its lack
-            # of writes is a branch contract, not a reason to forbid that call.
+            # Step bindings trace behavior, not database-effect containment.
+            # A scenario can include local input and a later page's lifecycle
+            # API owned by another requirement. Its aggregate DB effects cannot
+            # be required from this leaf's directly allocated events alone.
             if ui["steps"][sid] and not step_tids:
                 raise ValueError(f"Provide interaction traceability for the UI step: {sid}")
         # Check current-leaf editable bindings inside the bounded proposal loop,
