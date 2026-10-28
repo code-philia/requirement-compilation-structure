@@ -18,7 +18,7 @@ from infrastructure.utils.files import save_json
 def design_ui_interactions(input_dir: Path, arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
     if top_k < 1:
         raise ValueError("--top-k must be positive")
-    tree, schema, obligations, backend, images, contexts, _ = load_frontend_context(arc_dir, input_dir)
+    tree, schema, obligations, backend, images, contexts = load_frontend_context(arc_dir, input_dir)
     ui = load_ui_design(arc_dir, tree, images)
     checks = read_artifact(arc_dir, "ui_checks.json")
     expected_status = "GREEN" if ui["pages"] else "NO_UI"

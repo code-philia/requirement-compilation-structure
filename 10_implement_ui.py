@@ -21,7 +21,7 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
     report = {"status": "VALIDATING", "pages": {}}
     save_json(arc_dir / "ui_checks.json", report)
     try:
-        tree, _, _, _, images, contexts, _ = load_frontend_context(arc_dir, input_dir)
+        tree, _, _, _, images, contexts = load_frontend_context(arc_dir, input_dir)
         design = load_ui_design(arc_dir, tree, images)
         console = DemoConsole(pause)
         console.show("Step 10 | Saved UI/data design", f"Loaded {arc_dir / 'ui_design.json'}\nPages: {', '.join(design['pages']) or '(none)'}\nGenerate existence tests and implement this design without rerunning synthesis.")

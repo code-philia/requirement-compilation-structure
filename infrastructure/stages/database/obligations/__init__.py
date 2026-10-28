@@ -1,1 +1,1 @@
-"""Steps 03-04: field-symbol validation and bottom-up read/write propagation."""
+"""Field-symbol validation and read/write set algebra for obligation inference and decomposition."""

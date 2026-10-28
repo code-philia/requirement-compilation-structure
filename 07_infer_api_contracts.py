@@ -54,7 +54,7 @@ covering all its uses. If correction is supplied, fix it without changing R or W
 
 
 def infer_api_contracts(arc_dir: Path, pause: bool = False) -> dict:
-    tree, schema, obligations, _ = load_context(arc_dir)
+    tree, schema, obligations = load_context(arc_dir)
     design = read_artifact(arc_dir, "backend_apis.json")
     validate_design(design, obligations, field_symbols(schema), tree=tree)
     result = {"apis": {}, "requirements": design["requirements"]}

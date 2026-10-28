@@ -96,7 +96,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         raise ValueError("--max-turns must be positive")
     if max_tests < 1:
         raise ValueError("--max-tests must be positive")
-    tree, schema, obligations, _ = load_context(arc_dir)
+    tree, schema, obligations = load_context(arc_dir)
     design = read_artifact(arc_dir, "backend_apis.json")
     contracts = read_artifact(arc_dir, "backend_contracts.json")
     validate_design(design, obligations, field_symbols(schema), tree=tree)

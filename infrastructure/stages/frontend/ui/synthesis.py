@@ -11,7 +11,7 @@ from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
 
 
-def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, contexts, todos, model, console, top_k=3, max_fixtures=3):
+def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, contexts, model, console, top_k=3, max_fixtures=3):
     """Design UI/data for all leaf requirements using page-first retrieval.
 
     Show existing/retrieved pages, ask for an incremental proposal, and feed
@@ -38,7 +38,6 @@ def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, context
             "step_obligations": {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]},
             "direct_apis": {aid: contracts["apis"][aid] for aid in contracts["requirements"][rid]},
             "max_fixtures": max_fixtures,
-            "upstream_todos": [todo for todo in todos if todo["requirement"] == rid],
         }
         for attempt in range(1, 4):
             response = None

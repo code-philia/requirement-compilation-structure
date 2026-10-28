@@ -10,15 +10,16 @@ from infrastructure.stages.database.schema import validate_schema
 
 
 def load_context(arc_dir: Path):
-    """Load the requirement tree, validated schema, checked obligations, and unresolved coverage TODOs."""
+    """Load the requirement tree, validated schema, and symbol-checked obligations."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     schema = read_artifact(arc_dir, "db_schema.json")
     validate_schema(schema)
     checked = read_artifact(arc_dir, "db_obligations_checked.json")
-    if not isinstance(checked, dict) or set(checked) != {"requirements", "steps", "todos"}:
-        raise ValueError("Expected checked obligations with requirements, steps, and todos")
+    # Accept older checked artifacts, but ignore their retired containment TODOs.
+    if not isinstance(checked, dict) or set(checked) not in ({"requirements", "steps"}, {"requirements", "steps", "todos"}):
+        raise ValueError("Expected validated obligations with requirements and steps")
     obligations = validate_obligations({key: checked[key] for key in ("requirements", "steps")}, tree, field_symbols(schema))
-    return tree, schema, obligations, checked["todos"]
+    return tree, schema, obligations
 
 
 def requirement_context(tree, rid: str) -> dict:

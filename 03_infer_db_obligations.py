@@ -20,7 +20,7 @@ from infrastructure.utils.files import save_json
 # --- Extension point 03A: obligation inference policy --------------------------
 # Rewrite how requirement text maps to reads/writes, especially failure paths,
 # fixture setup, and generated keys. The output contract is checked separately
-# in infrastructure/stages/database/obligations/records.py; propagation belongs to step 04.
+# in infrastructure/stages/database/obligations/records.py; step 04 validates the saved records.
 INSTRUCTIONS = """Infer field-level dataflow obligations using all existing schema definitions.
 Return exactly this JSON object, in English:
 {
@@ -39,8 +39,9 @@ map to persistent fields. Password input is verified against a hash, not stored 
 
 Infer the requirement's obligations from its description and overall scenario behavior.
 Independently infer each step's actual reads/writes using its Given, When, Then and
-the owning requirement's context. Do not force containment equality or perform propagation
-yet; that is the next pass. Never copy the requirement's writes into every step.
+the owning requirement's context. Requirement and step obligations are independent;
+do not force containment equality or propagate effects between nodes. Never copy
+the requirement's writes into every step.
 Given fixtures describe existing state, not writes performed by the current behavior.
 An instruction to leave data unchanged is not a write. Rejection/failure steps that
 create no account or session have no such writes. A field can appear in both sets if
@@ -70,7 +71,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
     retriever = SchemaRetriever()
     console = DemoConsole(pause)
     model = TextModel()
-    # Parent records remain empty until the explicit bottom-up propagation pass.
+    # Organizational parents keep empty records; only leaves receive model inference.
     obligations = {"requirements": {rid: {"read": [], "write": []} for rid in tree.requirements},
         "steps": {sid: {"read": [], "write": []} for sid in tree.steps}}
 
@@ -122,8 +123,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
         ))
 
     # --- Pass boundary: preserve the raw predictions --------------------------
-    # Save before any upward completion, allowing step 04's effects to be
-    # inspected independently from the model's original predictions.
+    # Step 04 validates IDs and symbols without propagating or comparing effects.
     obligations = validate_obligations(obligations, tree, symbols)
     save_json(arc_dir / "db_obligations.json", obligations)
     print(f"Obligations saved: {arc_dir / 'db_obligations.json'}", flush=True)

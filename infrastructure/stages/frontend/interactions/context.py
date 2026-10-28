@@ -13,7 +13,7 @@ from infrastructure.stages.frontend.interactions.runtime import PROTECTED
 
 def load_e2e_context(arc_dir, input_dir):
     """Validate step 08/10/11 artifacts, frozen UI tests, and recorded API/page entrypoints before interaction TDD."""
-    tree, schema, obligations, backend, images, contexts, _ = load_frontend_context(arc_dir, input_dir)
+    tree, schema, obligations, backend, images, contexts = load_frontend_context(arc_dir, input_dir)
     ui = load_ui_design(arc_dir, tree, images)
     interactions = read_artifact(arc_dir, "ui_interactions.json")
     validate_interactions(interactions, ui, tree, schema, obligations, backend, tree.leaves, complete=True)

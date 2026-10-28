@@ -72,18 +72,6 @@ def format_obligations(records: dict, empty_label: str = "(empty)") -> str:
     return "\n".join(lines) or "(No nodes.)"
 
 
-def format_todos(todos: list) -> str:
-    """Render unresolved lower-level coverage gaps and explain the semantic decisions needed for downward allocation."""
-    lines = []
-    for todo in todos:
-        lines.append(f"TODO: {todo['requirement']} is not covered by the union of its {todo['coverage']}.")
-        lines.append("  Uncovered READ : " + (", ".join(todo["read"]) or "(empty)"))
-        lines.append("  Uncovered WRITE: " + (", ".join(todo["write"]) or "(empty)"))
-    if lines:
-        lines.append("Decide which lower node needs the fields, whether a behavior is missing, or whether the upper inference is excessive.")
-    return "\n".join(lines) or "Coverage passes for the decompositions checked at this node."
-
-
 def format_apis(apis: dict) -> str:
     """Render API descriptions and their obligations for existing/retrieved API panels."""
     return "\n\n".join(

@@ -29,29 +29,6 @@ def coverage(required: dict, apis: list[dict]) -> dict:
     return {"missing": difference(required, combined), "excess": difference(combined, required)}
 
 
-def requirement_scope(tree, obligations: dict, rid: str) -> dict:
-    """Separate a node's direct responsibilities from its subtree aggregation."""
-    total = obligations["requirements"][rid]
-    children = union(obligations["requirements"][cid] for cid in tree.children[rid])
-    steps = union(obligations["steps"][sid] for sid in tree.own_steps[rid])
-    if any(difference(union([children, steps]), total).values()):
-        raise ValueError(f"Checked obligations are not upward-complete at {rid}; rerun step 04")
-    required = union([difference(total, children), steps])
-    # A parent's own operation may read shared keys already used by children.
-    # Child writes are not inherited as permission for another parent operation.
-    allowed = {"read": total["read"], "write": required["write"]}
-    return {"required": required, "allowed": allowed, "children": children}
-
-
-def descendant_apis(tree, design: dict, rid: str) -> set[str]:
-    """Collect APIs owned by descendant requirements for context without assigning them to the parent."""
-    result = set()
-    for child in tree.children[rid]:
-        result.update(design["requirements"].get(child, []))
-        result.update(descendant_apis(tree, design, child))
-    return result
-
-
 def validate_design(design: dict, obligations: dict, symbols: set[str], complete: bool = True, tree=None) -> None:
     """Validate API definitions, requirement ownership, symbol references, and decomposition coverage."""
     if not isinstance(design, dict) or set(design) != {"apis", "requirements"}:
@@ -75,22 +52,17 @@ def validate_design(design: dict, obligations: dict, symbols: set[str], complete
             raise ValueError(f"Invalid requirement/API binding: {rid}")
         if len(ids) != len(set(ids)) or set(ids) - set(design["apis"]):
             raise ValueError(f"Duplicate or unknown API binding: {rid}")
+        # Organizational parents have no API allocation and no coverage check.
+        # Leaf requirements are checked against their own inferred obligations,
+        # independently of child/step obligation sets.
+        if tree is not None and tree.children[rid]:
+            if ids:
+                raise ValueError(f"Parent {rid} must not bind APIs; only leaf requirements own API allocations")
+            continue
         assigned = [design["apis"][aid] for aid in ids]
         combined = union(assigned)
         required = obligations["requirements"][rid]
-        if tree is None:
-            report = coverage(required, assigned)
-        else:
-            inherited = set(ids) & descendant_apis(tree, design, rid)
-            if inherited:
-                raise ValueError(f"Parent {rid} must not bind descendant APIs {sorted(inherited)}; regenerate steps 06 and 07")
-            scope = requirement_scope(tree, obligations, rid)
-            required = scope["required"]
-            report = {
-                "missing": difference(scope["required"], combined),
-                "excess": difference(combined, scope["allowed"]),
-                "subtree_missing": difference(obligations["requirements"][rid], union([scope["children"], combined])),
-            }
+        report = coverage(required, assigned)
         if any(fields for gap in report.values() for fields in gap.values()):
             raise ObligationCoverageError(rid, required, combined, report)
     used = {aid for ids in design["requirements"].values() for aid in ids}

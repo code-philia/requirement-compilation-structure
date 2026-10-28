@@ -200,9 +200,6 @@ def validate_interactions(result, ui, tree, schema, obligations, backend, analyz
                 if not changes or not {item["var"] for item in node["data"]}.issubset({var for tr in changes for var in tr["write"]}):
                     raise ValueError(f"Editable UI data needs a directly associated input/change trigger: {uid}")
     if complete:
-        for rid in tree.postorder:
-            if tree.children[rid]:
-                check_coverage(rid + " subtree", obligations["requirements"][rid], union(obligations["requirements"][child] for child in tree.children[rid]))
         if set(analyzed) != set(tree.leaves):
             raise ValueError("All leaves must complete interaction design")
 

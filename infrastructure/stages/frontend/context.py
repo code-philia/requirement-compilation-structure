@@ -27,7 +27,7 @@ def load_ui_design(arc_dir, tree, images):
 
 def load_frontend_context(arc_dir, input_dir):
     """Load validated DB/API artifacts and resolve reference images into per-requirement frontend contexts."""
-    tree, schema, obligations, todos = load_context(arc_dir)
+    tree, schema, obligations = load_context(arc_dir)
     raw = read_artifact(arc_dir, "requirements.json")
     analysis = read_artifact(arc_dir, "visual_analysis.json")
     backend = read_artifact(arc_dir, "backend_apis.json")
@@ -71,4 +71,4 @@ def load_frontend_context(arc_dir, input_dir):
         if unknown:
             raise ValueError(f"Unknown image references at {rid}: {sorted(unknown)}")
         contexts[rid] = {**requirement_context(tree, rid), "images": {key: images[key] for key in sorted(refs)}}
-    return tree, schema, obligations, contracts, images, contexts, todos
+    return tree, schema, obligations, contracts, images, contexts

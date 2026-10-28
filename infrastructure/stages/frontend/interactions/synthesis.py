@@ -143,7 +143,7 @@ def synthesize_interactions(arc_dir, ui, tree, schema, obligations, backend, con
     retriever, api_retriever = InteractionRetriever(), ApiRetriever()
     for rid in tree.requirements:
         if tree.children[rid]:
-            console.show(rid + " | Skip non-leaf interaction analysis", "Parents retain empty direct bindings. Leaf behavior and subtree obligation coverage are checked separately.")
+            console.show(rid + " | Skip non-leaf interaction analysis", "Parents retain empty direct bindings. Only leaf interaction decompositions are checked.")
     for number, rid in enumerate(tree.leaves, 1):
         label = f"Interaction Decomposition {number}/{len(tree.leaves)} {rid}"
         pages = relevant_pages(ui, rid)
