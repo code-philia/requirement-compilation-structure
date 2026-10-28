@@ -33,11 +33,19 @@ class TeeStream:
         return getattr(self.terminal, name)
 
 
+def configure_console() -> None:
+    """Use UTF-8 for real terminal/redirected streams while leaving capture streams usable."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 @contextmanager
 def console_log(output_dir: Path):
     """Append a timestamped step session to compiler.log while mirroring stdout/stderr and recording uncaught failures."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    with (output_dir / "compiler.log").open("a", encoding="utf-8") as log:
+    configure_console()
+    with (output_dir / "compiler.log").open("a", encoding="utf-8", newline="\n") as log:
         lock = RLock()
         stdout = TeeStream(sys.stdout, log, lock)
         stderr = TeeStream(sys.stderr, log, lock)

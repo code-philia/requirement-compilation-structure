@@ -1,6 +1,9 @@
 """Create a minimal React/Express/SQLite workspace without replacing user files."""
 
 from pathlib import Path
+import json
+
+from infrastructure.utils.files import save_json
 
 
 DEFAULT_STACK = "react-express-sqlite"
@@ -14,6 +17,18 @@ STACKS = {
         "directories": ("backend/src/db/tables",),
     },
 }
+
+
+def enable_import_case_checks(output_dir: Path, workspace: str) -> str:
+    """Upgrade existing TypeScript projects to detect case-dependent module imports."""
+    relative = f"{workspace}/tsconfig.json"
+    path = output_dir / relative
+    configuration = json.loads(path.read_text(encoding="utf-8-sig"))
+    options = configuration.setdefault("compilerOptions", {})
+    if options.get("forceConsistentCasingInFileNames") is not True:
+        options["forceConsistentCasingInFileNames"] = True
+        save_json(path, configuration)
+    return relative
 
 
 def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK) -> list[str]:
@@ -37,8 +52,8 @@ def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK) -> list[str
             raise ValueError(f"Project path escapes the output directory: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with target.open("x", encoding="utf-8") as stream:
-                stream.write(source.read_text(encoding="utf-8"))
+            with target.open("x", encoding="utf-8", newline="\n") as stream:
+                stream.write(source.read_text(encoding="utf-8-sig"))
         except FileExistsError:
             if not target.is_file():
                 raise ValueError(f"Expected a project file: {target}")

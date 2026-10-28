@@ -5,6 +5,8 @@ import json
 import re
 from pathlib import PurePosixPath
 
+from infrastructure.utils.paths import relative_path
+
 NODE_TYPES = {"page", "container", "form", "input", "checkbox", "select", "button", "text", "heading", "link", "list", "item", "image", "alert", "table"}
 DATA_TYPES = {"string", "number", "integer", "boolean", "array", "object", "null"}
 ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
@@ -196,9 +198,14 @@ def validate_design(design: dict, tree, images: dict, max_fixtures: int = 3, com
                 raise ValueError(f"Invalid visibility predicate: {uid}")
         elif not isinstance(rule, bool):
             raise ValueError(f"Visibility must be boolean or a variable equality: {uid}")
+    page_filenames = set()
     for pid, page in design["pages"].items():
         if not isinstance(pid, str) or not ID.fullmatch(pid) or not isinstance(page, dict):
             raise ValueError(f"Invalid page identity or page object: {pid}")
+        relative_path(f"frontend/tests/ui/{pid}.spec.ts")
+        if pid.casefold() in page_filenames:
+            raise ValueError(f"Page IDs must not differ only in filename case: {pid}")
+        page_filenames.add(pid.casefold())
         if not isinstance(page.get("name", pid), str) or not page.get("name", pid).strip():
             raise ValueError(f"Page {pid}: name must be nonempty text")
         if "root" not in page or "route" not in page:

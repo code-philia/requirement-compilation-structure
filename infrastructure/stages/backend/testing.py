@@ -7,6 +7,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from infrastructure.utils.processes import capture_process
+from infrastructure.utils.files import save_bytes
+
 
 def condition_tokens(api: dict) -> set[str]:
     """Collect P/Q condition IDs and R/W field tokens that test titles must trace."""
@@ -47,16 +50,18 @@ class BackendChecks:
         self.output = output.resolve()
         self.timeout = timeout
         self.node = shutil.which("node")
+        if self.node:
+            self.node = str(Path(self.node).resolve())
         if not self.node or not (self.output / "node_modules/typescript/bin/tsc").is_file() or not (self.output / "node_modules/tsx").is_dir():
             raise ValueError("Node.js and workspace dev dependencies (typescript/tsx) are required for backend checks")
 
     def execute(self, argv: list[str]) -> dict:
         """Run a fixed Node command in the workspace and return its exit code and captured output."""
         try:
-            result = subprocess.run([self.node, *argv], cwd=self.output, capture_output=True, text=True, timeout=self.timeout)
+            result = capture_process([self.node, *argv], cwd=self.output, timeout=self.timeout)
         except subprocess.TimeoutExpired as error:
             raise ValueError(f"Backend check timed out after {self.timeout}s") from error
-        return {"returncode": result.returncode, "output": (result.stdout + result.stderr)[-24000:]}
+        return {"returncode": result["returncode"], "output": result["output"]}
 
     def typecheck(self, files: list[str] | None = None) -> dict:
         """Compile selected backend tests with TypeScript, using and cleaning a temporary test configuration."""
@@ -70,9 +75,9 @@ class BackendChecks:
             if not path.is_relative_to(self.output / "backend/tests"):
                 raise ValueError(f"Test path is outside backend/tests: {relative}")
             includes.append(path.relative_to(self.output / "backend").as_posix())
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix=".tsconfig-tdd-", dir=self.output / "backend", delete=False) as config:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", suffix=".json", prefix=".tsconfig-tdd-", dir=self.output / "backend", delete=False) as config:
             temporary = Path(config.name)
-            json.dump({"extends": "./tsconfig.test.json", "files": [], "include": includes}, config)
+            json.dump({"extends": "./tsconfig.test.json", "compilerOptions": {"forceConsistentCasingInFileNames": True}, "files": [], "include": includes}, config)
         try:
             return self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "-p", str(temporary)])
         finally:
@@ -119,5 +124,5 @@ def assert_frozen(output: Path, snapshot: dict) -> None:
         # Restore trusted test text before reporting the rejected execution.
         for relative, content in snapshot.items():
             (output / relative).parent.mkdir(parents=True, exist_ok=True)
-            (output / relative).write_bytes(content)
+            save_bytes(output / relative, content)
         raise ValueError("Frozen tests were modified during implementation")

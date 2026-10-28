@@ -14,7 +14,7 @@ class VisualModel:
     """Extract visible image evidence without inferring hidden business behavior."""
     def __init__(self) -> None:
         """Read compiler/.env and configure the image-capable model, falling back to text-model settings."""
-        load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+        load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
         self.name = os.getenv("VISUAL_MODEL") or os.getenv("MODEL")
         api_key = os.getenv("VISUAL_API_KEY") or os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("VISUAL_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"

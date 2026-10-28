@@ -63,8 +63,8 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
             raise ValueError(f"Run {previous} first to create .arc/{filename}")
     if top_k < 1:
         raise ValueError("--top-k must be positive")
-    tree = RequirementTree(json.loads((arc_dir / "requirements.json").read_text(encoding="utf-8")))
-    schema = json.loads((arc_dir / "db_schema.json").read_text(encoding="utf-8"))
+    tree = RequirementTree(json.loads((arc_dir / "requirements.json").read_text(encoding="utf-8-sig")))
+    schema = json.loads((arc_dir / "db_schema.json").read_text(encoding="utf-8-sig"))
     validate_schema(schema)
     # --- Pass boundary: use the existing database symbol space ----------------
     # Inference may select existing fields, but cannot create schema symbols.

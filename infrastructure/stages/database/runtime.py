@@ -7,7 +7,7 @@ from pathlib import Path
 def initializer_source(implementations: dict) -> str:
     """Render the database initializer template with the validated SQL filenames in implementation order."""
     template = Path(__file__).resolve().parents[2] / "shared/project/templates/backend/src/db/initialize.ts"
-    source = template.read_text(encoding="utf-8")
+    source = template.read_text(encoding="utf-8-sig")
     marker = "export const tableFiles: readonly string[] = [];"
     if marker not in source:
         raise ValueError("The DB initializer template is missing its table-list marker")

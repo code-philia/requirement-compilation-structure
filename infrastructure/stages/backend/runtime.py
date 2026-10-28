@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 
 from infrastructure.shared.project.entrypoints import import_path, resolve_entrypoint
+from infrastructure.shared.project.initialize import enable_import_case_checks
 from infrastructure.utils.files import save_text
 
 
@@ -98,10 +99,11 @@ def prepare_runtime(output: Path, apis: dict, index, requirements: dict) -> None
     for relative in ("package.json", "backend/package.json", "backend/src/app.ts", "backend/src/server.ts", "backend/src/api/types.ts", "backend/tests/support/context.ts", "backend/tsconfig.test.json"):
         if not (output / relative).is_file():
             raise ValueError(f"Missing {relative}; run 00_project_initialization.py first")
+    index.record([enable_import_case_checks(output, "backend")], [], "project:backend")
     # Upgrade the original teaching scaffold through its stable extension seam.
     # Unknown custom layouts are reported rather than replacing application code.
     app = output / "backend/src/app.ts"
-    source = app.read_text(encoding="utf-8")
+    source = app.read_text(encoding="utf-8-sig")
     if 'import { registerApis }' not in source:
         marker = '  // Later backend passes add business routes before this API fallback.'
         if "export function createApp() {" not in source or marker not in source:
@@ -111,14 +113,14 @@ def prepare_runtime(output: Path, apis: dict, index, requirements: dict) -> None
         source = source.replace(marker, '  if (connection) registerApis(app, connection);\n' + marker)
         save_text(app, source)
     server = output / "backend/src/server.ts"
-    source = server.read_text(encoding="utf-8")
+    source = server.read_text(encoding="utf-8-sig")
     if "createApp().listen(" in source:
         save_text(server, source.replace("createApp().listen(", "createApp(connection).listen("))
     migrate_legacy_adapters(output, apis, index, requirements)
     sync_implementations(output, apis, index, requirements)
     for relative, name, command in (("package.json", "test:backend", "npm run test -w @arc/backend"), ("backend/package.json", "test", "node scripts/test-api.mjs")):
         path = output / relative
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
         existing = value.setdefault("scripts", {}).get(name)
         if existing not in (None, command):
             raise ValueError(f"Existing {name} command differs; keep a separate API test command")
@@ -136,7 +138,7 @@ def migrate_legacy_adapters(output: Path, apis: dict, index, requirements: dict)
         target = output / relative
         if not target.is_file():
             continue
-        source = target.read_text()
+        source = target.read_text(encoding="utf-8-sig")
         proxy = re.fullmatch(r'// Compiler-owned adapter for a model-selected implementation\.\s*export \{ ([A-Za-z_$][A-Za-z0-9_$]*) as ([A-Za-z_$][A-Za-z0-9_$]*) \} from ([\'"])([^\'"]+)\3;\s*', source)
         module = f"backend:{aid}"
         if module not in index.data["entrypoints"]:
@@ -152,7 +154,7 @@ def migrate_legacy_adapters(output: Path, apis: dict, index, requirements: dict)
         if proxy and entry["path"] != relative:
             retired.append(relative)
     for test in (output / "backend/tests").rglob("*.test.ts"):
-        source = test.read_text()
+        source = test.read_text(encoding="utf-8-sig")
         changed = source
         for aid in apis:
             old = f"backend/src/api/{aid}.js"
@@ -172,5 +174,5 @@ def migrate_legacy_adapters(output: Path, apis: dict, index, requirements: dict)
         (output / relative).unlink()
         compiled = output / relative.replace("backend/src/", "backend/dist/", 1)
         compiled = compiled.with_suffix(".js")
-        if compiled.is_file() and compiled.read_text().startswith("// Compiler-owned adapter for a model-selected implementation."):
+        if compiled.is_file() and compiled.read_text(encoding="utf-8-sig").startswith("// Compiler-owned adapter for a model-selected implementation."):
             compiled.unlink()

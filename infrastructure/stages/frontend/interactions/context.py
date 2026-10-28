@@ -1,6 +1,6 @@
 """Validate immutable design inputs before interaction implementation starts."""
 
-from infrastructure.utils.files import read_artifact
+from infrastructure.utils.files import read_artifact, read_source
 from infrastructure.stages.backend.runtime import api_entrypoint
 from infrastructure.stages.frontend.context import load_frontend_context, load_ui_design
 from infrastructure.stages.frontend.interactions.contracts import validate_contract
@@ -27,7 +27,7 @@ def load_e2e_context(arc_dir, input_dir):
     output, index = arc_dir.parent.resolve(), FileIndex(arc_dir.parent)
     for pid in ui["pages"]:
         relative = test_path(pid)
-        if not isinstance(checks["pages"][pid], dict) or checks["pages"][pid].get("status") != "GREEN" or not (output / relative).is_file() or (output / relative).read_text() != existence_suite(ui, pid):
+        if not isinstance(checks["pages"][pid], dict) or checks["pages"][pid].get("status") != "GREEN" or not (output / relative).is_file() or read_source(output / relative) != existence_suite(ui, pid):
             raise ValueError(f"UI design/existence tests changed for {pid}; rerun steps 10 and 11")
         if not resolve_entrypoint(output, index, f"frontend:page:{pid}", "frontend/src", (".ts", ".tsx"), PROTECTED):
             raise ValueError(f"Missing page implementation: {pid}")

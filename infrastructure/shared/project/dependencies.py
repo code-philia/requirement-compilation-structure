@@ -1,21 +1,20 @@
 """Install the generated workspace's npm dependencies before each TDD run."""
 
 from pathlib import Path
-import shutil
 import subprocess
 from threading import Thread
+
+from infrastructure.utils.processes import npm_command, start_process, stop_process
 
 
 def install_dependencies(output_dir: Path) -> None:
     """Run npm install in the generated workspace, stream its output, and fail on timeout or nonzero exit."""
     if not (output_dir / "package.json").is_file():
         raise ValueError("Run 00_project_initialization.py before installing project dependencies")
-    npm = shutil.which("npm")
-    if npm is None:
-        raise ValueError("npm is not available; install Node.js and npm first")
+    command = npm_command()
     print(f"Installing dependencies in {output_dir}: npm install --include=dev --no-audit --no-fund", flush=True)
-    with subprocess.Popen(
-        [npm, "install", "--include=dev", "--no-audit", "--no-fund"],
+    with start_process(
+        [*command, "install", "--include=dev", "--no-audit", "--no-fund"],
         cwd=output_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace", bufsize=1,
     ) as process:
@@ -30,9 +29,11 @@ def install_dependencies(output_dir: Path) -> None:
         try:
             process.wait(timeout=600)
         except subprocess.TimeoutExpired as error:
-            process.kill()
-            process.wait()
+            stop_process(process)
             raise RuntimeError("npm install timed out after 600 seconds") from error
+        except BaseException:
+            stop_process(process)
+            raise
         finally:
             reader.join()
         if process.returncode:

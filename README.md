@@ -6,7 +6,7 @@ Compile a requirement tree into a database, backend APIs, and an interactive fro
 
 Requires Python 3.11+, Node.js 22.12+, and npm. Building `better-sqlite3` from source may also require Python, make, and a C++ compiler.
 
-Run commands from the `compiler` project root:
+Linux/macOS setup (start from the directory containing `compiler`):
 
 ```bash
 cd compiler
@@ -15,6 +15,23 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp -n .env.example .env
 ```
+
+Windows PowerShell setup (Python 3.11+ and Node/npm must be on PATH):
+
+```powershell
+cd compiler
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+Activation is optional. On Windows, replace `python` in the commands below with `.\.venv\Scripts\python.exe`. This avoids PowerShell activation-policy differences. For example:
+
+```powershell
+.\.venv\Scripts\python.exe run_all.py --input input --output "outputs/demo"
+```
+
+Generated source uses UTF-8/LF; UTF-8 inputs may include a BOM. Keep workspace-relative paths and TypeScript imports in forward-slash form with exact filename case. Native absolute CLI paths may use Windows separators and should be quoted when they contain spaces. Native npm dependencies must be installed on each OS; do not copy Linux `node_modules` to Windows. A source build of `better-sqlite3` on Windows requires the appropriate MSVC C++ build tools as well as Python.
 
 Configure `.env`:
 
@@ -31,6 +48,8 @@ TDD steps 08, 10, and 12 install the generated application's npm dependencies au
 ```bash
 npx playwright install-deps chromium
 ```
+
+The OS-library installation command above is for supported Linux environments. Windows browser installation is handled by steps 10/12; use `npx.cmd playwright install chromium` for a manual retry from the generated workspace.
 
 ## Project architecture
 
@@ -52,7 +71,7 @@ compiler/
     │   ├── rag/             # BM25 retrieval for schemas, APIs, pages and events
     │   ├── agent/           # Shared prompts, edit tools, bounded loop and file index
     │   └── project/         # Stack templates, dependencies and entrypoint resolution
-    └── utils/               # CLI, artifact loading/writing, console views and logging
+    └── utils/               # CLI, portable I/O/paths/processes, console views and logging
 ```
 
 Start reading with a numbered script, then follow its explicit imports. `stages` defines compilation meaning and validation; `shared` provides reusable execution services; `utils` contains small helpers independent of stage logic. Some orchestration and prompts remain in the numbered scripts.
@@ -95,6 +114,8 @@ Each step can also run independently after its prerequisites have completed. Add
 
 Use `python <script>.py --help` for stage-specific options, including retrieval size, test budgets, and agent turn limits. Step 00 exposes `--stack` as the extension point for other technology stacks.
 
+Interaction `read`/`write` names refer to frontend data. Event DB obligations are derived from called APIs; input-only or navigation-only events have empty DB sets. Step-to-trigger bindings provide behavioral traceability, without requiring a step's DB effects to be covered by that requirement's events: a scenario may include another page's lifecycle behavior. Direct API allocation and requirement-level API coverage remain checked; cross-page outcomes are verified by step 12 E2E tests.
+
 Generated files are organized as follows:
 
 ```text
@@ -118,6 +139,18 @@ npm run build
 npm start
 ```
 
+On Windows PowerShell, use the explicit npm launcher if the `npm.ps1` shim is blocked:
+
+```powershell
+cd outputs/demo
+npm.cmd install
+npm.cmd run db:init
+npm.cmd run build
+npm.cmd start
+```
+
+The Python compiler resolves npm's JavaScript CLI directly and does not depend on PowerShell script execution.
+
 Expected result: tables are initialized in `backend/data/app.db`, the frontend and backend build into their `dist/` directories, and the application is served at `http://localhost:3000`. Set `PORT` or `DATABASE_URL` to override the port or database path. Steps 10 and 12 also build the workspace after their checks pass.
 
 Rerun tests from the generated workspace after the corresponding implementation step:
@@ -127,3 +160,12 @@ Rerun tests from the generated workspace after the corresponding implementation 
 | `npm run test:backend` | Key API contract tests against isolated in-memory databases. |
 | `npm run test:ui` | Playwright verifies component presence and display fixtures; business events are disabled during these checks. |
 | `npm run test:e2e` | Playwright runs real frontend/backend scenarios with a temporary SQLite database, then cleans up its servers and database. |
+
+
+Portability checks can be run without model calls:
+
+```bash
+python -m unittest discover -s tests -p test_portability.py -v
+```
+
+On Windows, use `.\.venv\Scripts\python.exe` for that command. See [Windows compatibility review](WINDOWS_COMPATIBILITY.md) for the per-step audit, fixes, and validation limits.

@@ -13,6 +13,9 @@ Each edit has exactly path, operation, old_content, and new_content.
 Use workspace-relative paths within the supplied writable scope. Preserve unrelated
 content exactly and make the smallest necessary change. Never invent old_content:
 copy it verbatim from file_context.files, including whitespace and line breaks.
+Paths use one workspace-relative representation, for example
+backend/src/handlers/login.ts. Use / separators and exact filename case in paths
+and imports. The compiler handles filesystem access and source serialization.
 Do not use placeholders, ellipses, abbreviated code, or line numbers as edit targets.
 
 Operation rules:

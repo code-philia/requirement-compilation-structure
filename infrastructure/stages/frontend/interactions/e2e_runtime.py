@@ -27,11 +27,11 @@ export default defineConfig({
   webServer: [
     { command: "node --import tsx ../backend/src/server.ts",
       url: `http://127.0.0.1:${backendPort}/api/health`, reuseExistingServer: false, timeout: 30000,
-      gracefulShutdown: { signal: "SIGTERM", timeout: 3000 },
+      ...(process.platform === "win32" ? {} : { gracefulShutdown: { signal: "SIGTERM" as const, timeout: 3000 } }),
       env: { PORT: backendPort, DATABASE_URL: database } },
     { command: `node ../node_modules/vite/bin/vite.js --config vite.e2e.config.ts --host 127.0.0.1 --port ${frontendPort} --strictPort`,
       url: `http://127.0.0.1:${frontendPort}`, reuseExistingServer: false, timeout: 30000,
-      gracefulShutdown: { signal: "SIGTERM", timeout: 3000 },
+      ...(process.platform === "win32" ? {} : { gracefulShutdown: { signal: "SIGTERM" as const, timeout: 3000 } }),
       env: { ARC_BACKEND_URL: `http://127.0.0.1:${backendPort}` } },
   ],
 });
@@ -43,7 +43,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 async function freePort() {
   const server = createServer();
@@ -62,12 +62,16 @@ try {
     cwd: root, stdio: "inherit", env: { ...process.env, ARC_E2E_BACKEND_PORT: String(backend),
       ARC_E2E_FRONTEND_PORT: String(frontend), ARC_E2E_DB_FILE: join(directory, "app.db") },
   });
-  const forward = signal => { child.kill(signal); };
+  const forward = signal => {
+    if (process.platform === "win32" && child.pid)
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    else child.kill(signal);
+  };
   process.on("SIGINT", forward); process.on("SIGTERM", forward);
   try {
-    process.exitCode = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", code => resolve(code ?? 1)); });
+    process.exitCode = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", code => resolve(code ?? 1)); });
   } finally { process.off("SIGINT", forward); process.off("SIGTERM", forward); }
-} finally { rmSync(directory, { recursive: true, force: true }); }
+} finally { rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
 '''
 
 FIXTURE_SOURCE = '''// Compiler-owned Given/observation fixture. When actions go through the browser.
@@ -128,7 +132,7 @@ def prepare_e2e(output, backend, index):
     for relative, source in sources.items():
         save_text(output / relative, source)
     path = output / "package.json"
-    package = json.loads(path.read_text())
+    package = json.loads(path.read_text(encoding="utf-8-sig"))
     package.setdefault("scripts", {})["test:e2e"] = "node frontend/scripts/test-e2e.mjs"
     save_text(path, json.dumps(package, indent=2) + "\n")
     index.record([*sources, "package.json"], [], "frontend:e2e-runtime")

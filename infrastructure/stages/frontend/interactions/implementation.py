@@ -179,7 +179,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
 
         def test_gate():
             """Accept generated tests only when their structure and compilation pass; allow behavioral RED before implementation."""
-            validate_test_source((output / relative).read_text(), steps, new_events, max_tests)
+            validate_test_source((output / relative).read_text(encoding="utf-8-sig"), steps, new_events, max_tests)
             compiled = generation_checks()
             if compiled["returncode"]:
                 raise ValueError(compiled["output"])
@@ -191,7 +191,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             return {"typecheck": compiled, "behavior": behavior}
 
         called = {aid for event in selected.values() for aid in api_ids(event)}
-        sources = {FIXTURE: (output / FIXTURE).read_text()}
+        sources = {FIXTURE: (output / FIXTURE).read_text(encoding="utf-8-sig")}
         for aid in called:
             sources.update(supplied_sources(output, backend["apis"][aid], schema))
         test_context = {"requirement": contexts[rid], "page_subtrees": pages,
@@ -261,7 +261,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
                 "page_dependencies": dependencies,
                 "event_module_ids": {eid: event_module(eid) for eid in sorted(eids)},
                 "backend_apis": {aid: backend["apis"][aid] for aid in sorted(called)},
-                "frozen_tests": {path: (output / path).read_text() for path in regression_files},
+                "frozen_tests": {path: (output / path).read_text(encoding="utf-8-sig") for path in regression_files},
                 "project_structure": project_structure(output, "frontend"), "initial_feedback": current}
             agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context,
                 FileTools(output, None, implementation_checks, roots=("frontend/src",), read_roots=("frontend",),

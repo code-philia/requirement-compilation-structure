@@ -5,13 +5,13 @@ import os
 from pathlib import Path
 import re
 import shutil
-import signal
 import socket
 import subprocess
 import tempfile
 
 from infrastructure.stages.frontend.ui.design import page_elements, visible
-from infrastructure.utils.files import save_text
+from infrastructure.utils.files import save_bytes
+from infrastructure.utils.processes import capture_process, npm_command
 
 KEY_TYPES = {"page", "form", "input", "checkbox", "select", "button", "heading", "link", "list", "image", "alert", "table", "text"}
 
@@ -141,22 +141,6 @@ def parse_playwright_result(result: dict, include_files: bool = False) -> dict:
     return result
 
 
-def stop_process(process):
-    """Allow the browser runner to stop its owned servers before forced cleanup."""
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    try:
-        process.communicate(timeout=5)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.communicate()
-
-
 class FrontendChecks:
     """Compiler-owned browser installation, TypeScript, Playwright, and workspace build commands."""
     def __init__(self, output: Path, timeout: int = 180) -> None:
@@ -165,21 +149,15 @@ class FrontendChecks:
         self.node = shutil.which("node")
         if not self.node:
             raise ValueError("Node.js is required for UI checks")
+        self.node = str(Path(self.node).resolve())
 
     def execute(self, args: list[str], timeout: int | None = None, env: dict | None = None, executable: str | None = None) -> dict:
         """Run a fixed check command, capture its output, and stop its process group on timeout or interruption."""
-        process = subprocess.Popen([executable or self.node, *args], cwd=self.output, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, start_new_session=True, env=env)
         try:
-            stdout, stderr = process.communicate(timeout=timeout or self.timeout)
+            return capture_process([executable or self.node, *args], cwd=self.output,
+                timeout=timeout or self.timeout, env=env)
         except subprocess.TimeoutExpired as error:
-            stop_process(process)
             raise ValueError(f"Frontend check timed out after {timeout or self.timeout}s") from error
-        except BaseException:
-            # Includes Ctrl-C: terminate the owned browser/server process group.
-            stop_process(process)
-            raise
-        return {"returncode": process.returncode, "stdout": stdout, "output": (stdout + stderr)[-24000:]}
 
     def install_browser(self) -> None:
         """Install the Chromium browser used by the generated Playwright tests."""
@@ -196,9 +174,9 @@ class FrontendChecks:
             if not any(path.is_relative_to(self.output / root) for root in test_roots):
                 raise ValueError("Typecheck only the supplied frontend test roots")
             includes.append(path.relative_to(self.output / "frontend").as_posix())
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix=".tsconfig-ui-", dir=self.output / "frontend", delete=False) as config:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", suffix=".json", prefix=".tsconfig-ui-", dir=self.output / "frontend", delete=False) as config:
             path = Path(config.name)
-            json.dump({"extends": "./tsconfig.json", "compilerOptions": {"types": ["vite/client", "node"]}, "include": includes}, config)
+            json.dump({"extends": "./tsconfig.json", "compilerOptions": {"types": ["vite/client", "node"], "forceConsistentCasingInFileNames": True}, "include": includes}, config)
         try:
             result = self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "-p", str(path)])
             result.pop("stdout", None)
@@ -219,10 +197,8 @@ class FrontendChecks:
 
     def build(self) -> dict:
         """Run the generated workspace's frontend and backend build command and return the captured result."""
-        npm = shutil.which("npm")
-        if not npm:
-            raise ValueError("npm is required to build the generated application")
-        return self.execute(["run", "build"], executable=npm)
+        command = npm_command()
+        return self.execute([*command[1:], "run", "build"], executable=command[0])
 
 
 def frozen_files(output: Path, files: list[str]) -> dict:
@@ -235,5 +211,5 @@ def assert_frozen(output: Path, frozen: dict) -> None:
     changed = [relative for relative, content in frozen.items() if not (output / relative).is_file() or (output / relative).read_bytes() != content]
     if changed:
         for relative in changed:
-            save_text(output / relative, frozen[relative].decode("utf-8"))
+            save_bytes(output / relative, frozen[relative])
         raise ValueError(f"Compiler-owned UI tests/runtime were modified: {changed}")

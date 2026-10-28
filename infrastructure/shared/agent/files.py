@@ -7,7 +7,8 @@ and records requirement/module ownership through FileIndex after successful writ
 from pathlib import Path
 import re
 
-from infrastructure.utils.files import save_text
+from infrastructure.utils.files import normalize_newlines, read_source, save_bytes, save_text
+from infrastructure.utils.paths import check_path_case, relative_path
 
 EXCLUDED = {"node_modules", ".git", ".arc", "dist", "build", "coverage", "__pycache__", ".venv"}
 
@@ -61,8 +62,8 @@ class FileTools:
 
     def path(self, relative: str, writing: bool = True) -> Path:
         """Resolve a workspace-relative path and reject traversal, excluded trees, or disallowed access."""
-        if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or ".." in Path(relative).parts or "\\" in relative:
-            raise ValueError("Use a workspace-relative path without parent traversal")
+        relative_path(relative)
+        check_path_case(self.output, relative)
         parts = Path(relative).parts
         if any(part in EXCLUDED or part.startswith(".") for part in parts):
             raise ValueError("Dependency, hidden, and generated paths are excluded")
@@ -107,7 +108,7 @@ class FileTools:
             selected.add(relative)
         for relative in sorted(selected):
             target = self.path(relative, writing=False)
-            self.observed[relative] = target.read_bytes().decode("utf-8") if target.is_file() else None
+            self.observed[relative] = read_source(target) if target.is_file() else None
         return {
             "editable_files": sorted(self.editable) if self.editable is not None else None,
             "source_roots": self.roots, "context_roots": self.read_roots, "protected_paths": self.protected,
@@ -127,17 +128,18 @@ class FileTools:
         if set(arguments) - {"edits", "entrypoint", "entrypoints"} or not isinstance(arguments.get("edits"), list) or not arguments["edits"]:
             raise ValueError("Provide a nonempty edits list and optional module entrypoint")
         # Stage changes in memory so a malformed later edit cannot partially apply.
-        staged, originals = {}, {}
+        staged, originals, original_bytes = {}, {}, {}
         for edit in arguments["edits"]:
             if not isinstance(edit, dict) or set(edit) != {"path", "operation", "old_content", "new_content"} or any(not isinstance(value, str) for value in edit.values()):
                 raise ValueError("Each edit needs string path, operation, old_content, new_content")
             relative, operation = edit["path"], edit["operation"]
             target = self.path(relative)
             if relative not in staged:
-                originals[relative] = target.read_bytes().decode("utf-8") if target.is_file() else None
+                original_bytes[relative] = target.read_bytes() if target.is_file() else None
+                originals[relative] = normalize_newlines(original_bytes[relative].decode("utf-8-sig")) if original_bytes[relative] is not None else None
                 staged[relative] = originals[relative]
             content = staged[relative]
-            old, new = edit["old_content"], edit["new_content"]
+            old, new = normalize_newlines(edit["old_content"]), normalize_newlines(edit["new_content"])
             if operation == "create":
                 if content is not None or old:
                     raise ValueError("create requires a nonexistent file and empty old_content")
@@ -188,7 +190,7 @@ class FileTools:
                 if originals[relative] is None:
                     target.unlink(missing_ok=True)
                 else:
-                    save_text(target, originals[relative])
+                    save_bytes(target, original_bytes[relative])
             raise
         self.observed.update(staged)
         return {"paths": list(staged), "edits": len(arguments["edits"]), "entrypoint": arguments.get("entrypoint"), "entrypoints": entries}

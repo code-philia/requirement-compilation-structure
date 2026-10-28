@@ -52,7 +52,7 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
     for required in ("backend/package.json", "backend/src/db/client.ts", "backend/src/db/initialize.ts"):
         if not (output_dir / required).is_file():
             raise ValueError("Run 00_project_initialization.py first to initialize the project structure")
-    schema = json.loads(source.read_text(encoding="utf-8"))
+    schema = json.loads(source.read_text(encoding="utf-8-sig"))
     validate_schema(schema)
     validate_sql_names(schema)
     console = DemoConsole(pause)

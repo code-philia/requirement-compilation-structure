@@ -6,6 +6,8 @@ import subprocess
 import sys
 
 from infrastructure.utils.cli import COMPILER_DIR, resolve_directories
+from infrastructure.utils.processes import start_process, stop_process
+from infrastructure.utils.presentation.logging import configure_console
 
 
 STEPS = (
@@ -25,6 +27,7 @@ STEPS = (
 
 
 def main() -> None:
+    configure_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=COMPILER_DIR / "input", help="Requirement/image directory")
     parser.add_argument("--output", type=Path, required=True, help="Shared output directory for all steps")
@@ -36,10 +39,17 @@ def main() -> None:
         print(f"Input: {input_dir}\nOutput: {output_dir}", flush=True)
         for step in STEPS:
             print(f"\nRunning {step}", flush=True)
-            subprocess.run(
+            process = start_process(
                 [sys.executable, str(COMPILER_DIR / step), "--input", str(input_dir), "--output", str(output_dir)],
-                cwd=COMPILER_DIR, check=True,
+                cwd=COMPILER_DIR,
             )
+            try:
+                code = process.wait()
+            except BaseException:
+                stop_process(process)
+                raise
+            if code:
+                raise subprocess.CalledProcessError(code, [sys.executable, step])
     except subprocess.CalledProcessError as error:
         parser.exit(error.returncode if error.returncode > 0 else 1, f"Pipeline stopped: {step} failed.\n")
     except (OSError, ValueError) as error:

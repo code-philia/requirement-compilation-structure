@@ -162,7 +162,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                 "requirements": [(requirement_contexts or {}).get(rid, {"id": rid}) for rid in uses],
                 "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
                 "module_id": module, "project_structure": project_structure(output, "frontend"),
-                "props_contract": (output / "frontend/src/ui-runtime.ts").read_text(),
+                "props_contract": (output / "frontend/src/ui-runtime.ts").read_text(encoding="utf-8-sig"),
                 "frozen_existence_tests": suite, "initial_feedback": current,
                 "triggers": {}, "events": {}}
             tools = FileTools(output, None, implementation_checks, roots=("frontend/src",), read_roots=("frontend",),

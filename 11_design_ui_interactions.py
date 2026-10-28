@@ -3,7 +3,7 @@
 from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.utils.files import read_artifact
+from infrastructure.utils.files import read_artifact, read_source
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.stages.frontend.context import load_frontend_context, load_ui_design
 from infrastructure.stages.frontend.interactions.synthesis import synthesize_interactions
@@ -34,7 +34,7 @@ def design_ui_interactions(input_dir: Path, arc_dir: Path, pause: bool = False, 
     for pid in ui["pages"]:
         relative = test_path(pid)
         path = arc_dir.parent / relative
-        if pages[pid].get("test_path") != relative or not path.is_file() or path.read_text(encoding="utf-8") != existence_suite(ui, pid):
+        if pages[pid].get("test_path") != relative or not path.is_file() or read_source(path) != existence_suite(ui, pid):
             raise ValueError(f"Step 10 existence tests do not match the current UI/data design for {pid}; rerun step 10")
     console = DemoConsole(pause)
     if not ui["pages"]:

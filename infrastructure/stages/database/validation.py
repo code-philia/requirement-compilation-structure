@@ -3,6 +3,8 @@
 import re
 import sqlite3
 
+from infrastructure.utils.paths import relative_path
+
 
 SQL_TYPES = {
     "string": "TEXT", "uuid": "TEXT", "date": "TEXT", "datetime": "TEXT", "json": "TEXT",
@@ -13,6 +15,8 @@ SQL_TYPES = {
 def validate_sql_names(schema: dict) -> None:
     # SQLite identifiers are case-insensitive, unlike the IR dictionary keys.
     """Reject case-insensitive identifier collisions and SQLite-reserved names before generating SQL."""
+    for name in schema["entities"]:
+        relative_path(f"backend/src/db/tables/{name}.sql")
     groups = [("tables", list(schema["entities"]))]
     groups.extend((name, list(entity["fields"])) for name, entity in schema["entities"].items())
     for label, names in groups:

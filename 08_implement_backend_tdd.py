@@ -128,7 +128,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     budgets = {aid: test_budget(api, max_tests) for aid, api in contracts["apis"].items()}
     # Retire only earlier compiler-owned duplicate suites. Unlisted user tests
     # are preserved; failed migrations retain their retirement list for retry.
-    previous = json.loads((arc_dir / "backend_tdd.json").read_text()) if (arc_dir / "backend_tdd.json").is_file() else {}
+    previous = json.loads((arc_dir / "backend_tdd.json").read_text(encoding="utf-8-sig")) if (arc_dir / "backend_tdd.json").is_file() else {}
     owned = {path for ids in previous.get("tests", {}).values() for path in ids.values()}
     retired = sorted((owned | set(previous.get("retired_tests", []))) - set(targets.values()))
     for relative in retired:
@@ -173,7 +173,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     return checks.typecheck(generation_files)
 
                 def test_gate(relative=relative, api=api):
-                    validate_test_source((output / relative).read_text(encoding="utf-8"), api, budgets[aid])
+                    validate_test_source((output / relative).read_text(encoding="utf-8-sig"), api, budgets[aid])
                     assert_frozen(output, frozen)
                     compiled = checks.typecheck(generation_files)
                     if compiled["returncode"]:
@@ -200,7 +200,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
             # --- Extension point 08A: test-only RED bindings -------------------
             # Exercise the same frozen assertions with 501 test bindings; never
             # overwrite actual business implementations to establish RED.
-            binding_source = (output / TEST_BINDINGS_PATH).read_text()
+            binding_source = (output / TEST_BINDINGS_PATH).read_text(encoding="utf-8-sig")
             try:
                 save_text(output / TEST_BINDINGS_PATH,
                     test_bindings_source(output, contracts["apis"], index, stubbed=pending))
@@ -255,7 +255,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "module_id": f"backend:{aid}",
                         "project_structure": project_structure(output),
                         "related_files": index.files_for(owners[aid], f"backend:{aid}"),
-                        "existing_contracts": contracts["apis"], "frozen_tests": {path: (output / path).read_text() for path in files_by_api[aid]},
+                        "existing_contracts": contracts["apis"], "frozen_tests": {path: (output / path).read_text(encoding="utf-8-sig") for path in files_by_api[aid]},
                         "source_files": supplied_sources(output, api, schema),
                         "initial_feedback": current,
                     }

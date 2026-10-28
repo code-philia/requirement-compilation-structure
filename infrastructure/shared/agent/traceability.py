@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from infrastructure.utils.files import save_json
+from infrastructure.utils.paths import check_path_case, relative_path
 
 
 class FileIndex:
@@ -13,7 +14,7 @@ class FileIndex:
         """Load and validate .arc/file_index.json, or start an empty requirement/module/entrypoint index."""
         self.output = output.resolve()
         self.path = self.output / ".arc/file_index.json"
-        self.data = json.loads(self.path.read_text()) if self.path.is_file() else {
+        self.data = json.loads(self.path.read_text(encoding="utf-8-sig")) if self.path.is_file() else {
             "requirements": {}, "modules": {}, "entrypoints": {},
         }
         if not isinstance(self.data, dict) or set(self.data) != {"requirements", "modules", "entrypoints"} or any(not isinstance(value, dict) for value in self.data.values()):
@@ -31,8 +32,8 @@ class FileIndex:
 
     def validate_path(self, relative: str) -> None:
         """Reject noncanonical paths and paths that resolve outside the generated workspace."""
-        if not isinstance(relative, str) or not relative or "\\" in relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
-            raise ValueError("File index paths must be workspace-relative")
+        relative_path(relative)
+        check_path_case(self.output, relative)
         target = (self.output / relative).resolve()
         if not target.is_relative_to(self.output) or target.relative_to(self.output).as_posix() != relative or target == self.output:
             raise ValueError("File index paths must be canonical workspace-relative paths")

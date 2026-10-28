@@ -10,6 +10,7 @@ import re
 
 from infrastructure.stages.frontend.ui.design import owners
 from infrastructure.shared.project.entrypoints import import_path, resolve_entrypoint
+from infrastructure.shared.project.initialize import enable_import_case_checks
 from infrastructure.utils.files import save_text
 
 PLAYWRIGHT_VERSION = "1.64.1"
@@ -59,19 +60,19 @@ export default defineConfig({
 def configure_tailwind(output: Path, index) -> None:
     """Enable Tailwind for existing initialized projects without replacing page code."""
     package_path = output / "frontend/package.json"
-    package = json.loads(package_path.read_text())
+    package = json.loads(package_path.read_text(encoding="utf-8-sig"))
     dependencies = package.setdefault("devDependencies", {})
     for name in ("tailwindcss", "@tailwindcss/vite"):
         dependencies.setdefault(name, "^4.0.0")
     configuration = output / "frontend/vite.config.ts"
-    source = configuration.read_text()
+    source = configuration.read_text(encoding="utf-8-sig")
     if "@tailwindcss/vite" not in source:
         if "plugins: [react()]" not in source:
             raise ValueError("Enable @tailwindcss/vite in the custom frontend/vite.config.ts first")
         source = 'import tailwindcss from "@tailwindcss/vite";\n' + source.replace(
             "plugins: [react()]", "plugins: [react(), tailwindcss()]")
     stylesheet = output / "frontend/src/style.css"
-    styles = stylesheet.read_text() if stylesheet.is_file() else ""
+    styles = stylesheet.read_text(encoding="utf-8-sig") if stylesheet.is_file() else ""
     # Remove only the original scaffold's global card layout; retain page styles.
     legacy = ('body { margin: 0; font-family: system-ui, sans-serif; color: #172033; background: #f4f6fa; }\n'
         'main { max-width: 48rem; margin: 5rem auto; padding: 2rem; background: white; border-radius: 1rem; }\n')
@@ -91,8 +92,9 @@ def prepare_frontend(output: Path, index) -> None:
         if not (output / relative).is_file():
             raise ValueError(f"Missing {relative}; run 00_project_initialization.py first")
     configure_tailwind(output, index)
+    index.record([enable_import_case_checks(output, "frontend")], [], "project:frontend")
     path = output / "package.json"
-    package = json.loads(path.read_text())
+    package = json.loads(path.read_text(encoding="utf-8-sig"))
     dependencies = package.setdefault("devDependencies", {})
     dependencies.setdefault("@playwright/test", PLAYWRIGHT_VERSION)
     package.setdefault("scripts", {})["test:ui"] = "playwright test --config frontend/playwright.ui.config.ts"

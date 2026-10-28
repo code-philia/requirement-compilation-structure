@@ -1,7 +1,7 @@
 """Shared resolution of model-selected API and component implementation paths."""
 
 import posixpath
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 
 
@@ -23,5 +23,5 @@ def resolve_entrypoint(output: Path, index, module: str, root: str, suffixes=(".
 
 def import_path(source: str, target: str, extension: str = ".js") -> str:
     """Construct an import from the registering file directly to the implementation."""
-    imported = posixpath.relpath(Path(target).with_suffix(extension).as_posix(), str(Path(source).parent))
+    imported = posixpath.relpath(PurePosixPath(target).with_suffix(extension).as_posix(), PurePosixPath(source).parent.as_posix())
     return imported if imported.startswith(".") else "./" + imported

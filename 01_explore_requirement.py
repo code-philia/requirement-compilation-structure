@@ -10,6 +10,7 @@ from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.vision import VisualModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
+from infrastructure.utils.files import save_json, save_text
 
 
 def collect_images(value: object) -> list[str]:
@@ -42,7 +43,7 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
     # containment, scenarios, and step text: later passes depend on these links.
     source = input_dir / "requirements.yaml"
     try:
-        requirements = yaml.safe_load(source.read_text(encoding="utf-8"))
+        requirements = yaml.safe_load(source.read_text(encoding="utf-8-sig"))
     except yaml.YAMLError as error:
         raise ValueError(f"Invalid requirements.yaml: {error}") from error
     if not isinstance(requirements, dict):
@@ -70,7 +71,7 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
     # visual extraction strategies. Keep {layout, elements, style}, or update
     # the response validator and downstream consumers together.
     arc_dir.mkdir(parents=True, exist_ok=True)
-    (arc_dir / "requirements.json").write_text(text + "\n", encoding="utf-8")
+    save_text(arc_dir / "requirements.json", text + "\n")
     analysis = {}
     if references:
         model = VisualModel()
@@ -80,9 +81,7 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
             console.show(f"3. Visual analysis | {reference}", json.dumps(analysis[reference], ensure_ascii=False, indent=2))
     else:
         console.show("3. Visual analysis", "No referenced images; no model call is needed.")
-    (arc_dir / "visual_analysis.json").write_text(
-        json.dumps(analysis, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-    )
+    save_json(arc_dir / "visual_analysis.json", analysis)
     print(f"Results saved: {arc_dir / 'requirements.json'}, {arc_dir / 'visual_analysis.json'}")
 
 
