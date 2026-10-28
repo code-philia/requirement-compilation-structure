@@ -4,14 +4,14 @@ import json
 from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.shared.agent.files import FileTools, project_structure
-from infrastructure.shared.agent.traceability import FileIndex
+from infrastructure.shared.agent.files import FileWorkspace, source_paths
+from infrastructure.shared.project.entrypoints import implementation_path, implementation_entrypoint
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.stages.backend.context import load_context, requirement_context, supplied_sources
+from infrastructure.stages.backend.context import load_context, requirement_context
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.contracts import validate_contracts
 from infrastructure.stages.backend.primitives import validate_design
-from infrastructure.stages.backend.runtime import PROTECTED, TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
+from infrastructure.stages.backend.runtime import TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
 from infrastructure.stages.backend.testing import BackendChecks, assert_frozen, require_green, require_red, snapshot_tests, test_budget, validate_test_source
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
@@ -56,8 +56,7 @@ contract. Tests may not be skipped, focused, mocked, or weaken the contract. No 
 libraries beyond the installed stack and Node standard library. Do not edit app code,
 SQL, test support, or other test files. The gate checks test traceability and TypeScript;
 the explicit RED phase happens once the current requirement's tests are generated. All needed file paths and
-contents are supplied. Submit edit_files with an edits list for this test file.
-Use create only for a nonexistent file; otherwise replace exact old_content.
+contents are supplied in files. Return edits containing complete file contents.
 A passing gate accepts the proposal.
 """
 
@@ -69,26 +68,17 @@ writes, using parameterized better-sqlite3 SQL and transactions for related writ
 An API directly accesses the database; DB Access Primitive decomposition is an extension.
 Return status/body/optional headers, not Express Response objects. Never create a server,
 open another database, alter schema, seed production data, or modify test files.
-You choose implementation filenames and paths within backend/src. The shallow project
-structure and requirement/module file associations are supplied. The compiler supplies
-relevant files' complete current contents in file_context.files each turn; edit only
-those existing files. You may create modules and shared helpers at new source paths.
-Import ApiRequest and ApiResponse from the supplied backend/src/api/types.ts using the
-correct relative .js ESM import for your chosen location. Compiler-owned routing and test bindings are protected. Routes import your selected
-implementation directly; no per-API proxy source file is generated. In edit_files, include
-entrypoint: {"path": "your/chosen/source.ts", "export": "yourNamedFunction"} to bind the
-current API to your module. Preserve its required function arguments and return type.
-app.ts and register.ts are wired deterministically by Python, never by this agent.
+Implement only implementation_path and export the async function handle.
+The compiler supplies all current backend sources and frozen tests in files.
+Import ApiRequest and ApiResponse from backend/src/api/types.ts using the correct
+relative .js ESM path. Routing and test bindings are maintained by Python.
 Use node:crypto for UUIDs and credential handling; no new dependencies. For credential
 APIs verify existing scrypt$saltHex$hashHex fixtures with scryptSync(...,64). Store salted
 hashes, never plaintext. Keep exact username comparison and shared cookie conventions
 from contracts. Errors must not leave partial account/session writes. Do not change
 contracts, R/W declarations, assertions, SQL tables, routing infrastructure or test gates.
-Tool checks run TypeScript plus the current and already accepted APIs' frozen suites.
-Use the supplied file contents and project tree to organize your implementation.
-There is no file-reading tool. Propose edit_files with workspace-relative paths,
-operations, exact old_content, and new_content. Inspect feedback and repair until GREEN. Finish is accepted only
-after external checks pass. Do not import
+Automatic checks run TypeScript and the current and already accepted APIs' frozen suites.
+Return complete files in edits and repair feedback until GREEN. Do not import
 test modules or detect tests to fake behavior. API core behavior must also work through
 the deterministic Express adapter used by the application's server.
 """
@@ -110,10 +100,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     for name in schema["entities"]:
         if not (output / f"backend/src/db/tables/{name}.sql").is_file():
             raise ValueError(f"Missing implemented SQL for {name}; run step 05")
-    index = FileIndex(output)
-    prepare_runtime(output, contracts["apis"], index, contracts["requirements"])
+    prepare_runtime(output, contracts["apis"])
     console = DemoConsole(pause)
-    console.show("Backend core project structure", project_structure(output))
     console.show("TDD preparation | Install dependencies", f"Workspace: {output}\nCommand: npm install --include=dev --no-audit --no-fund")
     install_dependencies(output)
     if not contracts["apis"]:
@@ -168,10 +156,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
 
                 generation_files = [targets[key] for key in [*accepted, *generated, aid]]
 
-                def generation_checks():
-                    assert_frozen(output, frozen)
-                    return checks.typecheck(generation_files)
-
                 def test_gate(relative=relative, api=api):
                     validate_test_source((output / relative).read_text(encoding="utf-8-sig"), api, budgets[aid])
                     assert_frozen(output, frozen)
@@ -186,11 +170,9 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     "db_schema": schema, "test_path": relative,
                     "test_budget": budgets[aid],
                     "api_import": "../support/apis.js", "support_import": "../support/context.js",
-                    "source_files": supplied_sources(output, api, schema),
                 }
                 agent = run_file_agent(model, TEST_INSTRUCTIONS, context,
-                    FileTools(output, {relative}, generation_checks, index=index, requirements=api_owners, module=f"tests:{aid}"), test_gate, max_turns, console, label + " / Test Generation")
-                index.record([relative], api_owners, f"tests:{aid}")
+                    FileWorkspace(output, {relative}, references=source_paths(output, "backend/src") + ["backend/tests/support/context.ts", TEST_BINDINGS_PATH]), test_gate, max_turns, console, label + " / Test Generation")
                 for owner in api_owners:
                     report["tests"].setdefault(owner, {})[aid] = relative
                 report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
@@ -203,7 +185,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
             binding_source = (output / TEST_BINDINGS_PATH).read_text(encoding="utf-8-sig")
             try:
                 save_text(output / TEST_BINDINGS_PATH,
-                    test_bindings_source(output, contracts["apis"], index, stubbed=pending))
+                    test_bindings_source(output, contracts["apis"], stubbed=pending))
                 for aid in pending:
                     result = checks.tests(files_by_api[aid])
                     if result.get("tests", 0) > budgets[aid]:
@@ -219,7 +201,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
             save_json(arc_dir / "backend_tdd.json", report)
             for aid in pending:
                 api = contracts["apis"][aid]
-                console.show(f"{aid} | Backend structure and related files", project_structure(output) + "\n\nRelated files:\n" + "\n".join(index.files_for(owners[aid], f"backend:{aid}")))
                 console.show(f"{aid} | Implementation context", (
                     json.dumps(api, ensure_ascii=False, indent=2)
                     + "\nFrozen tests: " + ", ".join(files_by_api[aid])
@@ -228,7 +209,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 regression_files = [relative for key in [*accepted, aid] for relative in files_by_api[key]]
 
                 def implementation_checks():
-                    sync_implementations(output, contracts["apis"], index, contracts["requirements"])
+                    sync_implementations(output, contracts["apis"])
                     assert_frozen(output, frozen)
                     compiled = checks.typecheck(regression_files)
                     if compiled["returncode"]:
@@ -238,6 +219,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     return {"typecheck": compiled, "tests": tested}
 
                 def implementation_gate():
+                    if implementation_entrypoint(output, "api", aid) is None:
+                        raise ValueError(f"Missing API implementation: {implementation_path('api', aid)}")
                     result = implementation_checks()
                     if result["typecheck"]["returncode"]:
                         raise ValueError(result["typecheck"]["output"])
@@ -245,28 +228,20 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     return result
 
                 current = implementation_checks()
-                if current["tests"] and not current["tests"]["returncode"] and current["tests"]["tests"]:
+                if current["tests"] and not current["tests"]["returncode"] and current["tests"]["tests"] and implementation_entrypoint(output, "api", aid):
                     agent = {"turns": 0, "checks": implementation_gate()}
                 else:
                     context = {
                         "requirement": requirement_context(tree, rid),
                         "api_id": aid, "api": api, "db_schema": schema,
                         "requirement_uses": [requirement_context(tree, rid) for rid, bindings in contracts["requirements"].items() if aid in bindings],
-                        "module_id": f"backend:{aid}",
-                        "project_structure": project_structure(output),
-                        "related_files": index.files_for(owners[aid], f"backend:{aid}"),
-                        "existing_contracts": contracts["apis"], "frozen_tests": {path: (output / path).read_text(encoding="utf-8-sig") for path in files_by_api[aid]},
-                        "source_files": supplied_sources(output, api, schema),
-                        "initial_feedback": current,
+                        "implementation_path": implementation_path("api", aid),
+                        "existing_contracts": contracts["apis"],
                     }
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context,
-                        FileTools(output, None, implementation_checks,
-                            roots=("backend/src",), read_roots=("backend",),
-                            context_files=("backend/package.json",),
-                            protected=PROTECTED,
-                            index=index, requirements=owners[aid], module=f"backend:{aid}"),
-                        implementation_gate, max_turns, console, aid + " / Implementation")
-                index.record(index.files_for(module=f"backend:{aid}"), owners[aid], f"backend:{aid}")
+                        FileWorkspace(output, {implementation_path("api", aid)},
+                            references=source_paths(output, "backend/src") + source_paths(output, "backend/tests") + ["backend/package.json"]),
+                        implementation_gate, max_turns, console, aid + " / Implementation", feedback=current)
                 accepted.append(aid)
                 result = agent["checks"]["tests"]
                 report["green"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}
@@ -307,7 +282,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
 
 def main() -> None:
     parser = create_parser("Step 08: TDD-driven API Implementation (P / Q / Dataflow Obligations)")
-    parser.add_argument("--max-turns", type=int, default=18, help="Maximum tool turns per test/implementation agent")
+    parser.add_argument("--max-turns", type=int, default=18, help="Maximum edit rounds per test/implementation agent")
     parser.add_argument("--max-tests", type=int, default=5, help="Maximum key contract tests per API (default: 5)")
     args = parser.parse_args()
     with ExitStack() as stack:

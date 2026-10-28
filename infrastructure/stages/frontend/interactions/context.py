@@ -6,13 +6,11 @@ from infrastructure.stages.frontend.context import load_frontend_context, load_u
 from infrastructure.stages.frontend.interactions.contracts import validate_contract
 from infrastructure.stages.frontend.ui.testing import existence_suite, test_path
 from infrastructure.stages.frontend.interactions.design import validate_interactions
-from infrastructure.shared.agent.traceability import FileIndex
-from infrastructure.shared.project.entrypoints import resolve_entrypoint
-from infrastructure.stages.frontend.interactions.runtime import PROTECTED
+from infrastructure.shared.project.entrypoints import implementation_entrypoint
 
 
 def load_e2e_context(arc_dir, input_dir):
-    """Validate step 08/10/11 artifacts, frozen UI tests, and recorded API/page entrypoints before interaction TDD."""
+    """Validate step 08/10/11 artifacts, frozen UI tests, and fixed API/page implementations before interaction TDD."""
     tree, schema, obligations, backend, images, contexts = load_frontend_context(arc_dir, input_dir)
     ui = load_ui_design(arc_dir, tree, images)
     interactions = read_artifact(arc_dir, "ui_interactions.json")
@@ -24,17 +22,17 @@ def load_e2e_context(arc_dir, input_dir):
     checks = read_artifact(arc_dir, "ui_checks.json")
     if not isinstance(checks, dict) or checks.get("status") != ("GREEN" if ui["pages"] else "NO_UI") or not isinstance(checks.get("pages"), dict) or set(checks["pages"]) != set(ui["pages"]):
         raise ValueError("Complete step 10 successfully before step 12")
-    output, index = arc_dir.parent.resolve(), FileIndex(arc_dir.parent)
+    output = arc_dir.parent.resolve()
     for pid in ui["pages"]:
         relative = test_path(pid)
         if not isinstance(checks["pages"][pid], dict) or checks["pages"][pid].get("status") != "GREEN" or not (output / relative).is_file() or read_source(output / relative) != existence_suite(ui, pid):
             raise ValueError(f"UI design/existence tests changed for {pid}; rerun steps 10 and 11")
-        if not resolve_entrypoint(output, index, f"frontend:page:{pid}", "frontend/src", (".ts", ".tsx"), PROTECTED):
+        if not implementation_entrypoint(output, "page", pid):
             raise ValueError(f"Missing page implementation: {pid}")
     backend_checks = read_artifact(arc_dir, "backend_tdd.json")
     if not isinstance(backend_checks, dict) or backend_checks.get("status") != ("GREEN" if backend["apis"] else "NO_APIS"):
         raise ValueError("Complete backend step 08 successfully before E2E implementation")
     for aid in backend["apis"]:
-        if api_entrypoint(output, index, aid) is None:
+        if api_entrypoint(output, aid) is None:
             raise ValueError(f"Missing backend implementation: {aid}; rerun step 08")
-    return tree, schema, backend, ui, interactions, images, contexts, index
+    return tree, schema, backend, ui, interactions, images, contexts

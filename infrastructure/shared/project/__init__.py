@@ -1,1 +1,1 @@
-"""Scaffold templates, dependency installation, and model-selected entrypoint resolution."""
+"""Scaffold templates, dependency installation and fixed implementation paths."""

@@ -17,7 +17,7 @@ def implement_frontend_interactions(input_dir: Path, arc_dir: Path, pause: bool 
         max_turns: int = 18, max_tests: int = 5) -> dict:
     if min(max_turns, max_tests) < 1:
         raise ValueError("--max-turns and --max-tests must be positive")
-    tree, schema, backend, ui, interactions, images, contexts, index = load_e2e_context(arc_dir, input_dir)
+    tree, schema, backend, ui, interactions, images, contexts = load_e2e_context(arc_dir, input_dir)
     report = {"status": "PREPARING", "requirements": {rid: {"status": "NO_DIRECT_INTERACTIONS", "events": []}
         for rid in tree.requirements if tree.children[rid]},
         "inputs": {name: sha256((arc_dir / name).read_bytes()).hexdigest()
@@ -30,7 +30,7 @@ def implement_frontend_interactions(input_dir: Path, arc_dir: Path, pause: bool 
             return report
         model = TextModel() if any(interactions["requirements"][rid] or tree.own_steps[rid] for rid in tree.leaves) else None
         result = run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
-            contexts, index, model, DemoConsole(pause), report, max_turns, max_tests)
+            contexts, model, DemoConsole(pause), report, max_turns, max_tests)
         print(f"Frontend E2E TDD GREEN: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
         return result
     except BaseException as error:
@@ -44,7 +44,7 @@ def implement_frontend_interactions(input_dir: Path, arc_dir: Path, pause: bool 
 
 def main() -> None:
     parser = create_parser("Step 12: UI Interaction Implementation through Playwright E2E TDD")
-    parser.add_argument("--max-turns", type=int, default=18, help="Maximum tool turns per requirement's test/implementation agent")
+    parser.add_argument("--max-turns", type=int, default=18, help="Maximum edit rounds per requirement's test/implementation agent")
     parser.add_argument("--max-tests", type=int, default=5, help="Maximum key E2E cases per requirement")
     args = parser.parse_args()
     with ExitStack() as stack:

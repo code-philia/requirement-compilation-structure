@@ -122,8 +122,8 @@ export { expect };
 '''
 
 
-def prepare_e2e(output, backend, index):
-    """Write and track E2E configuration, real-server launchers, isolated database fixtures, and the npm test command."""
+def prepare_e2e(output, backend):
+    """Write E2E configuration, real-server launchers, isolated database fixtures, and the npm test command."""
     declared = [{"method": api["signature"]["method"], "path": api["signature"]["path"],
         "statuses": [api["response"]["success"]["status"], *(branch["status"] for branch in api["response"]["errors"])]} for api in backend["apis"].values()]
     sources = {CONFIG: CONFIG_SOURCE, RUNNER: RUNNER_SOURCE,
@@ -135,4 +135,3 @@ def prepare_e2e(output, backend, index):
     package = json.loads(path.read_text(encoding="utf-8-sig"))
     package.setdefault("scripts", {})["test:e2e"] = "node frontend/scripts/test-e2e.mjs"
     save_text(path, json.dumps(package, indent=2) + "\n")
-    index.record([*sources, "package.json"], [], "frontend:e2e-runtime")

@@ -69,8 +69,8 @@ compiler/
     ├── shared/              # Capabilities reused across stages
     │   ├── models/          # Text and image model clients
     │   ├── rag/             # BM25 retrieval for schemas, APIs, pages and events
-    │   ├── agent/           # Shared prompts, edit tools, bounded loop and file index
-    │   └── project/         # Stack templates, dependencies and entrypoint resolution
+    │   ├── agent/           # Shared JSON edits, scoped files and bounded repair loop
+    │   └── project/         # Stack templates, dependencies and fixed implementation paths
     └── utils/               # CLI, portable I/O/paths/processes, console views and logging
 ```
 
@@ -80,7 +80,27 @@ In frontend packages, `design.py` defines and validates representations, `synthe
 
 Design stages retrieve existing definitions, request a structured model proposal, validate it, and publish accepted artifacts. Page retrieval returns the corresponding UI/data subtree for reuse. Obligation propagation in step 04 uses deterministic rules.
 
-Steps 08, 10, and 12 share `shared/agent/loop.py`: the compiler supplies selected file contents and a shallow project tree; the model returns scoped edits or requests fixed checks; the stage accepts the result only after its checks pass. `protocol.py` contains the common prompts and tool schemas. `FileIndex` records requirement/file and module/file associations and model-selected entrypoints in `.arc/file_index.json`. API tests and E2E implementations proceed requirement by requirement; UI implementation proceeds page by page after all UI/data design is complete.
+Steps 08, 10, and 12 share `shared/agent/loop.py`. Each model request contains only `task`, `files`, and the latest `feedback`. Every file has its current `content` (null before creation) and a `writable` flag. Source and test contents appear only in this map. Backend implementation sees existing backend sources; frontend implementation sees existing frontend sources. Tests and compiler-owned runtime files are read-only.
+
+The model returns one JSON object:
+
+```json
+{"edits": [{"path": "the/supplied/writable/path.ts", "content": "complete final file contents"}]}
+```
+
+Creation and replacement use the same format. Only explicitly supplied writable paths are accepted; each may occur once per batch. Arbitrary helper files, file deletion/moves, patch operations, shell tools and model-selected entrypoints are not supported. The compiler validates the whole batch before writing and restores original bytes on a write failure. Valid edits remain on disk after a failed acceptance check; the next request supplies refreshed files and the latest error. Every edit response, including an empty list, automatically runs fixed acceptance checks. An existing passing implementation is reused without an implementation-model call.
+
+Implementation paths are derived from semantic IDs by `shared/project/entrypoints.py`. Filenames use a readable normalized prefix plus a stable ID hash to distinguish case-only IDs and avoid Windows reserved filenames. The exact path is supplied in the task; models do not calculate it.
+
+| Module | Directory | Fixed export |
+| --- | --- | --- |
+| Backend API | `backend/src/handlers/` | `handle` |
+| UI page | `frontend/src/pages/` | `Page` |
+| UI event | `frontend/src/events/` | `handle` |
+
+Routing, test bindings, page registration and event registration import these convention files directly. No file association index is created or read. API tests and E2E implementations proceed requirement by requirement; UI implementation proceeds page by page after all UI/data design is complete. Step 12 may also repair explicitly supplied page files while retaining their presentation boundary and existing regression tests.
+
+This protocol replaces the earlier file tools and `.arc/file_index.json`. Use a fresh output directory for the first run after this change, or regenerate steps 08, 10 and 12 and their downstream prerequisites in a clean workspace. Old model-selected paths are not migrated or inferred from an existing index.
 
 ## Execute the compiler
 
@@ -106,11 +126,11 @@ Each step can also run independently after its prerequisites have completed. Add
 | 05: DB Implementation | `python 05_implement_db.py --output outputs/demo` | One SQL file per table in `backend/src/db/tables/` and an ordered database initializer. |
 | 06: Backend API Decomposition | `python 06_decompose_backend_apis.py --output outputs/demo` | `backend_apis.json`: reusable APIs, R/W obligations, HTTP signatures, and request/response schemas; validates coverage and interface uniqueness. |
 | 07: Contract Inference | `python 07_infer_api_contracts.py --output outputs/demo` | `backend_contracts.json`: adds preconditions and postconditions to the fixed step 06 APIs; preserves signatures, I/O schemas, and R/W. |
-| 08: Backend TDD | `python 08_implement_backend_tdd.py --output outputs/demo` | Key API tests, API implementations, `backend_tdd.json`, and file-index updates. |
+| 08: Backend TDD | `python 08_implement_backend_tdd.py --output outputs/demo` | Key API tests, API implementations, `backend_tdd.json`. |
 | 09: UI/Data Design | `python 09_design_ui.py --input input --output outputs/demo` | `ui_design.json`: pages, UI subtrees, frontend data, and display fixtures for all requirements. |
-| 10: UI Existence TDD | `python 10_implement_ui.py --input input --output outputs/demo` | Playwright component-presence tests, React pages, `ui_checks.json`, and file-index updates; business events remain empty. |
+| 10: UI Existence TDD | `python 10_implement_ui.py --input input --output outputs/demo` | Playwright component-presence tests, React pages, `ui_checks.json`; business events remain empty. |
 | 11: Interaction Design | `python 11_design_ui_interactions.py --input input --output outputs/demo` | `ui_interactions.json`: triggers/events, obligation coverage, typed data mappings, and event contracts. |
-| 12: Interaction E2E TDD | `python 12_implement_frontend_tdd.py --input input --output outputs/demo` | Browser scenarios, event implementations, `frontend_e2e.json`, file-index updates, and a complete application build. |
+| 12: Interaction E2E TDD | `python 12_implement_frontend_tdd.py --input input --output outputs/demo` | Browser scenarios, event implementations, `frontend_e2e.json`, and a complete application build. |
 
 Use `python <script>.py --help` for stage-specific options, including retrieval size, test budgets, and agent turn limits. Step 00 exposes `--stack` as the extension point for other technology stacks.
 
@@ -120,7 +140,7 @@ Generated files are organized as follows:
 
 ```text
 outputs/demo/
-├── .arc/                    # Intermediate designs, reports, and file_index.json
+├── .arc/                    # Intermediate designs and reports
 ├── backend/                 # API source, per-table SQL, and contract tests
 ├── frontend/                # React source and Playwright UI/E2E tests
 ├── package.json             # Generated workspace commands

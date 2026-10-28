@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from infrastructure.shared.agent.files import FileTools
+from infrastructure.shared.agent.files import FileWorkspace
 from infrastructure.shared.project.entrypoints import import_path
 from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.stages.backend.testing import assert_frozen as assert_backend_frozen
@@ -53,32 +53,33 @@ class PortableFiles(unittest.TestCase):
         target = self.root / relative
         target.parent.mkdir(parents=True)
         target.write_bytes(b"export const a = 1;\r\n\r\nexport const b = 2;\r\n")
-        tools = FileTools(self.root, {relative}, lambda: None)
-        original = tools.state()["files"][relative]
+        workspace = FileWorkspace(self.root, {relative})
+        original = workspace.state()[relative]["content"]
         self.assertNotIn("\r", original)
-        tools.edit_files({"edits": [{"path": relative, "operation": "replace",
-            "old_content": "export const a = 1;\r\n", "new_content": "export const a = 3;\r\n"}]})
-        tools.edit_files({"edits": [{"path": relative, "operation": "append",
-            "old_content": "", "new_content": "export const c = 4;\r\n"}]})
+        workspace.apply({"edits": [{"path": relative, "content": original.replace("a = 1", "a = 3")}]})
+        workspace.state()
+        workspace.apply({"edits": [{"path": relative, "content": read_source(target) + "export const c = 4;\r\n"}]})
         self.assertEqual(target.read_bytes(), b"export const a = 3;\n\nexport const b = 2;\nexport const c = 4;\n")
 
     def test_failed_batch_restores_exact_original_bytes(self):
-        """Rejected index publication must preserve original BOM/CRLF bytes."""
+        """A later write failure must restore prior writes with exact BOM/CRLF bytes."""
         relative = "backend/src/source.ts"
         target = self.root / relative
         target.parent.mkdir(parents=True)
         original = b"\xef\xbb\xbfexport const a = 1;\r\n"
         target.write_bytes(original)
-        index = Mock()
-        index.files_for.return_value = []
-        index.data = {"entrypoints": {}}
-        index.record.side_effect = ValueError("Rejected index publication")
-        tools = FileTools(self.root, {relative}, lambda: None, index=index, module="tests:sample")
-        tools.state()
-        with self.assertRaisesRegex(ValueError, "Rejected index"):
-            tools.edit_files({"edits": [{"path": relative, "operation": "replace",
-                "old_content": "a = 1", "new_content": "a = 2"}]})
+        second = "backend/src/second.ts"
+        workspace = FileWorkspace(self.root, {relative, second})
+        workspace.state()
+        def write(path, content):
+            if path.name == "second.ts":
+                raise OSError("Simulated write failure")
+            save_text(path, content)
+        with patch("infrastructure.shared.agent.files.save_text", side_effect=write):
+            with self.assertRaisesRegex(OSError, "Simulated write"):
+                workspace.apply({"edits": [{"path": relative, "content": "changed"}, {"path": second, "content": "new"}]})
         self.assertEqual(target.read_bytes(), original)
+        self.assertFalse((self.root / second).exists())
 
     def test_frozen_file_restore_is_byte_exact(self):
         """Frozen tests must not change encoding/newlines during rejected repair."""
@@ -103,7 +104,7 @@ class PortableFiles(unittest.TestCase):
                 relative_path(name)
         relative_path("backend/src/My Source \u793a\u4f8b.ts")
         save_text(self.root / "backend/src/Auth.ts", "// canonical\n")
-        tools = FileTools(self.root, None, lambda: None, roots=("backend/src",))
+        tools = FileWorkspace(self.root, set())
         with self.assertRaisesRegex(ValueError, "case"):
             tools.path("backend/src/auth.ts")
 
@@ -123,9 +124,9 @@ class PortableFiles(unittest.TestCase):
         target = self.root / relative
         target.parent.mkdir(parents=True)
         target.write_bytes(b"\xef\xbb\xbfexport const ready = true;\r\n")
-        tools = FileTools(self.root, None, lambda: None, roots=("backend/src",), context_files=(relative,))
+        tools = FileWorkspace(self.root, set(), references=[relative])
         state = tools.state()
-        self.assertEqual(state["files"], {relative: "export const ready = true;\n"})
+        self.assertEqual(state, {relative: {"content": "export const ready = true;\n", "writable": False}})
         self.assertNotIn(str(self.root), json.dumps(state))
         for invalid in ("backend/src/auth.ts", "backend/src/CON.ts"):
             with self.subTest(path=invalid), self.assertRaises(ValueError) as rejected:

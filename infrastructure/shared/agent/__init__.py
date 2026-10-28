@@ -1,1 +1,1 @@
-"""Bounded model/tool execution, scoped edit batches, and persistent file provenance."""
+"""Scoped file contexts, whole-file JSON edits and bounded repair loops."""

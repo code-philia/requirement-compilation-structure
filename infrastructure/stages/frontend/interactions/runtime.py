@@ -1,4 +1,4 @@
-"""Step 12 lowering: bind DOM triggers to model-selected event functions.
+"""Step 12 lowering: bind DOM triggers to fixed-path event functions.
 
 Compiler-owned TypeScript strings provide UI state, guarded API calls, navigation,
 and event registration. The model implements each event's business logic; the
@@ -6,15 +6,13 @@ compiler activates only the events accepted or currently being implemented."""
 
 import json
 
-from infrastructure.stages.frontend.ui.design import owners
-from infrastructure.stages.frontend.ui.runtime import OWNED, UI_RUNTIME
-from infrastructure.stages.frontend.interactions.design import api_ids, event_ids
-from infrastructure.shared.project.entrypoints import import_path, resolve_entrypoint
+from infrastructure.stages.frontend.ui.runtime import UI_RUNTIME
+from infrastructure.stages.frontend.interactions.design import api_ids
+from infrastructure.shared.project.entrypoints import import_path, implementation_entrypoint
 from infrastructure.utils.files import save_text
 
 EVENT_REGISTRY = "frontend/src/ui-events.ts"
 API_CLIENT = "frontend/src/ui-api.ts"
-PROTECTED = (*OWNED, EVENT_REGISTRY, API_CLIENT)
 
 EVENT_TYPES = '''
 export interface UiApiRequest {
@@ -153,13 +151,8 @@ export function App() {
 '''
 
 
-def event_module(eid):
-    """Return the stable file-index module ID used to associate an event with its implementation."""
-    return f"frontend:event:{eid}"
-
-
-def sync_interactions(output, ui, interactions, backend, index, active_events):
-    """Import model-selected functions directly; placeholders never touch their source."""
+def sync_interactions(output, ui, interactions, backend, active_events):
+    """Import fixed handle exports directly; placeholders never touch their source."""
     active = set(active_events)
     if active - set(interactions["events"]):
         raise ValueError("Unknown active interaction event")
@@ -170,17 +163,11 @@ def sync_interactions(output, ui, interactions, backend, index, active_events):
     imports = ['import type { UiEventHandler } from "./ui-runtime";']
     registrations = []
     for number, eid in enumerate(sorted(active)):
-        module = event_module(eid)
-        entry = resolve_entrypoint(output, index, module, "frontend/src", (".ts", ".tsx"), PROTECTED)
+        entry = implementation_entrypoint(output, "event", eid)
         if entry:
             imported = import_path(EVENT_REGISTRY, entry["path"], extension="")
             imports.append(f'import {{ {entry["export"]} as event{number} }} from {json.dumps(imported)};')
             registrations.append(f"  {json.dumps(eid)}: event{number},")
-        uses = [rid for rid, tids in interactions["requirements"].items() if eid in event_ids(interactions, tids)]
-        paths = [EVENT_REGISTRY, API_CLIENT, "frontend/src/App.tsx", "frontend/src/ui-runtime.ts"]
-        if entry:
-            paths.append(entry["path"])
-        index.record(paths, uses, module)
     save_text(output / EVENT_REGISTRY, "\n".join([*imports, "", "export const handlers: Record<string, UiEventHandler> = {", *registrations, "};", ""]))
     imports = ['import { useEffect, useRef, useState } from "react";',
         'import type { ComponentType, SyntheticEvent, KeyboardEvent } from "react";',
@@ -188,13 +175,12 @@ def sync_interactions(output, ui, interactions, backend, index, active_events):
         'import { initialPageData } from "./ui-runtime";', 'import { callApi } from "./ui-api";', 'import { handlers } from "./ui-events";']
     pages, components = [], []
     for number, (pid, page) in enumerate(ui["pages"].items()):
-        entry = resolve_entrypoint(output, index, f"frontend:page:{pid}", "frontend/src", (".ts", ".tsx"), PROTECTED)
+        entry = implementation_entrypoint(output, "page", pid)
         if not entry:
             raise ValueError(f"Missing implemented page {pid}; complete step 10 first")
         imports.append(f'import {{ {entry["export"]} as Page{number} }} from {json.dumps(import_path("frontend/src/App.tsx", entry["path"], extension=""))};')
         pages.append({"id": pid, "route": page["route"], "root": page["root"]})
         components.append(f"{json.dumps(pid)}: Page{number}")
-        index.record(["frontend/src/App.tsx"], owners(ui, pid), f"frontend:page:{pid}")
     effects = {eid: {"write": event["write"], "apis": sorted(api_ids(event)),
         "pages": [action["page"] for action in event["actions"] if action["kind"] == "navigate"]} for eid, event in interactions["events"].items() if eid in active}
     triggers = [{"id": tid, **{key: trigger[key] for key in ("source", "event", "guard", "action")}}

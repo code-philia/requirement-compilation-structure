@@ -7,11 +7,11 @@ included in its checks. Trusted tests and compiler-owned wiring stay frozen."""
 import json
 from pathlib import Path
 
-from infrastructure.shared.agent.files import FileTools, project_structure
+from infrastructure.shared.agent.files import FileWorkspace, source_paths
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.shared.agent.traceability import FileIndex
+from infrastructure.shared.project.entrypoints import implementation_path, implementation_entrypoint
 from infrastructure.stages.frontend.ui.design import owners, page_context
-from infrastructure.stages.frontend.ui.runtime import OWNED, prepare_frontend, sync_pages
+from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pages
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, assert_frozen, existence_suite, frozen_files, require_green, require_red, test_path
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
@@ -25,10 +25,9 @@ colors, typography and spacing. Tailwind v4 is configured through the Vite plugi
 Use complete literal class strings, including arbitrary values when necessary; do not
 construct utility names dynamically. Do not create component CSS files, CSS modules,
 style tags or inline style objects. The global stylesheet is compiler-owned.
-You choose component/helper filenames under frontend/src. The compiler supplies
-complete current file contents each turn; edit only supplied existing files or create
-new files. There is no file-reading tool. Use edit_files and entrypoint:{path,export} for a
-named React component accepting UiPageProps; the compiler owns routing and fixtures.
+Implement only implementation_path and export Page, a named React component
+accepting UiPageProps. Current source, types and tests are supplied once in files;
+the compiler owns routing and fixtures. Return complete file contents in edits.
 Import UiPageProps from the compiler-owned frontend/src/ui-runtime.ts, using a correct
 relative import. React/ReactDOM and Tailwind CSS are available; do not add dependencies.
 Put data-testid=<stable UI ID> on the ACTUAL element, including the page root. A test ID
@@ -84,12 +83,11 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     """Implement the complete saved UI/data design through component-existence TDD.
 
     Prepare the project and browser, generate and freeze presence tests, then
-    repair model-selected page components until checks pass. Update the caller's
-    report and file index; runtime wiring remains compiler-owned."""
+    repair fixed-path page components until checks pass. Update the caller's
+    report; runtime wiring remains compiler-owned."""
     output = arc_dir.parent.resolve()
-    index = FileIndex(output)
-    prepare_frontend(output, index)
-    sync_pages(output, design, index)
+    prepare_frontend(output)
+    sync_pages(output, design)
     console.show("UI TDD preparation | Dependencies", "Install workspace dependencies and Playwright Chromium. No backend is started.")
     install_dependencies(output)
     checks = FrontendChecks(output)
@@ -101,11 +99,10 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "ui_checks.json", report)
     for number, pid in enumerate(design["pages"], 1):
-        module, uses = f"frontend:page:{pid}", owners(design, pid)
+        uses = owners(design, pid)
         relative = test_path(pid)
         suite = existence_suite(design, pid)
         save_text(output / relative, suite)
-        index.record([relative], uses, f"tests:ui:{pid}")
         frozen.update(frozen_files(output, [relative]))
         report["pages"][pid] = {"status": "TESTS_READY", "requirements": uses, "test_path": relative}
         save_json(arc_dir / "ui_checks.json", report)
@@ -116,13 +113,12 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         def implementation_checks():
             """Refresh page registration and check selected page tests plus the frontend TypeScript sources."""
             assert_frozen(output, frozen)
-            sync_pages(output, design, index)
+            sync_pages(output, design)
             compiled = checks.typecheck(files)
             if compiled["returncode"]:
                 return {"typecheck": compiled, "presentation": None, "tests": None}
-            sources = sorted({path for key in [*accepted, pid]
-                for path in index.files_for(module=f"frontend:page:{key}")
-                if path not in OWNED and Path(path).suffix in {".ts", ".tsx", ".js", ".jsx"} and (output / path).is_file()})
+            sources = [implementation_path("page", key) for key in [*accepted, pid]
+                if implementation_entrypoint(output, "page", key)]
             presentation = checks.execute(["--input-type=module", "-e", PRESENTATION_CHECK, *sources])
             presentation.pop("stdout", None)
             if presentation["returncode"]:
@@ -133,8 +129,8 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
 
         def implementation_gate():
             """Accept the current page only after test integrity, compilation, and presence tests pass."""
-            if module not in index.data["entrypoints"]:
-                raise ValueError("Select a React page component using edit_files.entrypoint")
+            if not implementation_entrypoint(output, "page", pid):
+                raise ValueError(f"Missing Page implementation: {implementation_path('page', pid)}")
             result = implementation_checks()
             for kind in ("typecheck", "presentation"):
                 if result[kind] and result[kind]["returncode"]:
@@ -145,7 +141,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         # Compile tests separately before deciding whether browser failure is RED.
         current = implementation_checks()
         if current["typecheck"]["returncode"]:
-            if module not in index.data["entrypoints"]:
+            if not implementation_entrypoint(output, "page", pid):
                 raise ValueError(f"UI infrastructure/test compilation failed before implementation: {current['typecheck']['output']}")
         elif current["tests"] is not None:
             if current["tests"]["returncode"]:
@@ -155,36 +151,26 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             else:
                 require_green(current["tests"])
         save_json(arc_dir / "ui_checks.json", report)
-        if current["tests"] and current["tests"]["returncode"] == 0 and module in index.data["entrypoints"]:
+        if current["tests"] and current["tests"]["returncode"] == 0 and implementation_entrypoint(output, "page", pid):
             agent = {"turns": 0, "checks": implementation_gate()}
         else:
             context = {"page": page_context(design, pid),
                 "requirements": [(requirement_contexts or {}).get(rid, {"id": rid}) for rid in uses],
                 "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
-                "module_id": module, "project_structure": project_structure(output, "frontend"),
-                "props_contract": (output / "frontend/src/ui-runtime.ts").read_text(encoding="utf-8-sig"),
-                "frozen_existence_tests": suite, "initial_feedback": current,
+                "implementation_path": implementation_path("page", pid),
                 "triggers": {}, "events": {}}
-            tools = FileTools(output, None, implementation_checks, roots=("frontend/src",), read_roots=("frontend",),
-                context_files=("frontend/src/ui-runtime.ts", "frontend/src/main.tsx", "frontend/src/App.tsx",
-                    "frontend/src/style.css", "frontend/package.json", "frontend/tsconfig.json"),
-                protected=OWNED, index=index, requirements=uses, module=module)
-            agent = run_file_agent(model, INSTRUCTIONS, context, tools, implementation_gate, max_turns, console, label + " / Implementation")
+            workspace = FileWorkspace(output, {implementation_path("page", pid)},
+                references=source_paths(output, "frontend/src") + files +
+                    ["frontend/package.json", "frontend/tsconfig.json"])
+            agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
+                max_turns, console, label + " / Implementation", feedback=current)
         accepted.append(pid)
         report["pages"][pid].update({"status": "GREEN", "turns": agent["turns"],
-            "entrypoint": index.data["entrypoints"][module],
+            "implementation_path": implementation_path("page", pid),
             "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"}})
         save_json(arc_dir / "ui_checks.json", report)
         console.show(label + " | GREEN", agent["checks"]["tests"]["output"])
     console.show("UI final regression", "Run all current pages' existence suites and build both frontend and backend for npm start. Business triggers/events remain empty.")
-    # Remove only obsolete compiler-owned UI suites; preserve unlisted user tests.
-    current_tests = {test_path(pid) for pid in accepted}
-    for module, paths in index.data["modules"].items():
-        if module.startswith("tests:ui:"):
-            for relative in set(paths) - current_tests:
-                target = (output / relative).resolve()
-                if target.is_relative_to(output / "frontend/tests/ui") and target.name.endswith(".spec.ts"):
-                    target.unlink(missing_ok=True)
     final = checks.tests([test_path(pid) for pid in accepted])
     require_green(final)
     compiled = checks.typecheck([test_path(pid) for pid in accepted])

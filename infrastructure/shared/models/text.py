@@ -9,7 +9,7 @@ from openai import OpenAI, OpenAIError
 
 
 class TextModel:
-    """Transport for structured stage proposals and one-action-at-a-time agent calls."""
+    """Transport for structured stage proposals and file-edit responses."""
     def __init__(self) -> None:
         """Read compiler/.env and configure the text model client; reject missing credentials or model name."""
         load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
@@ -31,7 +31,7 @@ class TextModel:
         )
 
     def _request(self, **arguments):
-        """Apply one output budget to JSON and tool calls, with legacy endpoint compatibility."""
+        """Apply one output budget to JSON calls, with legacy endpoint compatibility."""
         try:
             response = self.client.chat.completions.create(
                 **arguments, **{self._token_parameter: self.max_output_tokens},
@@ -51,7 +51,7 @@ class TextModel:
         if response.choices and response.choices[0].finish_reason == "length":
             raise ValueError(
                 f"Model output was truncated (finish_reason=length; MAX_OUTPUT_TOKENS={self.max_output_tokens}). "
-                "Increase MAX_OUTPUT_TOKENS if the model supports a larger budget, or request a smaller incremental response."
+                "Increase MAX_OUTPUT_TOKENS if the model supports a larger budget, or implement smaller files."
             )
         return response
 
@@ -90,27 +90,3 @@ class TextModel:
         if not isinstance(result, dict):
             raise ValueError("Text model must return a JSON object")
         return result
-
-    def generate_action(self, instructions: str, payload: dict, definitions: list[dict]) -> dict:
-        """Use one native function call; retain JSON fallback for older endpoints."""
-        if getattr(self, "_tool_mode", "native") == "json":
-            return self.generate_json(instructions, payload)
-        try:
-            response = self._request(
-                model=self.name,
-                messages=[
-                    {"role": "system", "content": instructions + "\nCall exactly one provided tool."},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                tools=definitions, tool_choice="required", parallel_tool_calls=False,
-            )
-        except OpenAIError as error:
-            # Capability fallback is explicit and remembered for this session.
-            if getattr(error, "status_code", None) in {400, 404, 422} and any(word in str(error).lower() for word in ("tools", "tool_choice", "parallel_tool_calls", "function calling")):
-                self._tool_mode = "json"
-                return self.generate_json(instructions, payload)
-            raise RuntimeError(f"Agent model request failed: {error}") from error
-        calls = response.choices[0].message.tool_calls if response.choices else None
-        if not calls or len(calls) != 1:
-            raise ValueError("Expected exactly one native tool call")
-        return {"tool": calls[0].function.name, "arguments": json.loads(calls[0].function.arguments)}

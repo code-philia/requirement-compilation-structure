@@ -1,20 +1,17 @@
 """Step 10 lowering: generate UI types, page wiring, and presence-test setup.
 
-Compiler-owned TypeScript/configuration strings define a stable host for model-
-selected React components. This stage exposes UI/data only; business interactions
+Compiler-owned TypeScript/configuration strings define a stable host for fixed-path React components. This stage exposes UI/data only; business interactions
 are designed in step 11 and installed by the interaction runtime in step 12."""
 
 import json
 from pathlib import Path
 import re
 
-from infrastructure.stages.frontend.ui.design import owners
-from infrastructure.shared.project.entrypoints import import_path, resolve_entrypoint
+from infrastructure.shared.project.entrypoints import import_path, implementation_entrypoint
 from infrastructure.shared.project.initialize import enable_import_case_checks
 from infrastructure.utils.files import save_text
 
 PLAYWRIGHT_VERSION = "1.64.1"
-OWNED = ("frontend/src/App.tsx", "frontend/src/ui-runtime.ts", "frontend/src/main.tsx", "frontend/src/style.css")
 
 UI_RUNTIME = '''// Compiler-owned UI/data boundary. Business events are intentionally absent.
 export interface UiPageProps { data: Readonly<Record<string, unknown>> }
@@ -57,7 +54,7 @@ export default defineConfig({
 '''
 
 
-def configure_tailwind(output: Path, index) -> None:
+def configure_tailwind(output: Path) -> None:
     """Enable Tailwind for existing initialized projects without replacing page code."""
     package_path = output / "frontend/package.json"
     package = json.loads(package_path.read_text(encoding="utf-8-sig"))
@@ -83,16 +80,15 @@ def configure_tailwind(output: Path, index) -> None:
     save_text(package_path, json.dumps(package, indent=2) + "\n")
     save_text(configuration, source)
     save_text(stylesheet, styles)
-    index.record(["frontend/package.json", "frontend/vite.config.ts", "frontend/src/style.css"], [], "frontend:runtime")
 
 
-def prepare_frontend(output: Path, index) -> None:
-    """Write compiler-owned UI types, application wiring, and browser-test configuration, then record file ownership."""
+def prepare_frontend(output: Path) -> None:
+    """Write compiler-owned UI types, application wiring, and browser-test configuration."""
     for relative in ("package.json", "frontend/package.json", "frontend/src/main.tsx", "frontend/tsconfig.json", "frontend/vite.config.ts"):
         if not (output / relative).is_file():
             raise ValueError(f"Missing {relative}; run 00_project_initialization.py first")
-    configure_tailwind(output, index)
-    index.record([enable_import_case_checks(output, "frontend")], [], "project:frontend")
+    configure_tailwind(output)
+    enable_import_case_checks(output, "frontend")
     path = output / "package.json"
     package = json.loads(path.read_text(encoding="utf-8-sig"))
     dependencies = package.setdefault("devDependencies", {})
@@ -101,16 +97,14 @@ def prepare_frontend(output: Path, index) -> None:
     save_text(path, json.dumps(package, indent=2) + "\n")
     save_text(output / "frontend/playwright.ui.config.ts", PLAYWRIGHT_CONFIG)
     save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
-    index.record(["package.json", "frontend/playwright.ui.config.ts", "frontend/src/ui-runtime.ts"], [], "frontend:runtime")
 
 
-def sync_pages(output: Path, design: dict, index) -> None:
-    """Regenerate the page registry from model-selected component entrypoints and record each page's owners."""
+def sync_pages(output: Path, design: dict) -> None:
+    """Regenerate the page registry from fixed Page exports."""
     imports, routes = ['import { initialPageData } from "./ui-runtime";'], []
     defaults = {var: binding["initial"] for var, binding in design["bindings"].items()}
     for number, (pid, page) in enumerate(design["pages"].items()):
-        module = f"frontend:page:{pid}"
-        entry = resolve_entrypoint(output, index, module, "frontend/src", (".ts", ".tsx"), OWNED)
+        entry = implementation_entrypoint(output, "page", pid)
         component = f"Page{number}"
         if entry:
             imported = import_path("frontend/src/App.tsx", entry["path"], extension="")
@@ -121,10 +115,8 @@ def sync_pages(output: Path, design: dict, index) -> None:
         routes.append(f'    case {json.dumps(page["route"])}: {{\n'
             f'      const data = initialPageData({json.dumps(pid)}, defaults);\n'
             f'      return <div onSubmit={{event => event.preventDefault()}}>{body}</div>;\n    }}')
-        index.record(["frontend/src/App.tsx", "frontend/src/ui-runtime.ts", "frontend/src/main.tsx"], owners(design, pid), module)
     source = "// Compiler-owned routes and display data. No business triggers/events.\n" + "\n".join(imports)
     source += "\n\nconst defaults: Record<string, unknown> = " + json.dumps(defaults, ensure_ascii=False, indent=2) + ";\n"
     source += '\nexport function App() {\n  switch (window.location.pathname) {\n' + "\n".join(routes)
     source += '\n    default: return <main><h1>Page not found</h1></main>;\n  }\n}\n'
     save_text(output / "frontend/src/App.tsx", source)
-    index.record(["frontend/src/App.tsx"], [], "frontend:runtime")
