@@ -11,7 +11,7 @@ class PageRetriever:
     def retrieve(self, requirement: dict, design: dict, top_k: int = 3) -> dict:
         """Select explicit page/image matches plus lexical hits, returning each page with its complete UI/data subtree."""
         hints = {image.get("page") for image in requirement["images"].values() if image.get("page")}
-        evidence = requirement["description"] + "\n" + requirement["concatenated_steps"]
+        evidence = requirement["description"] + "\n" + json.dumps(requirement["steps"], ensure_ascii=False)
         explicit = [pid for pid, page in design["pages"].items() if pid in hints or page["name"] in hints
             or set(page["images"]) & set(requirement["images"])
             or (page["route"] != "/" and page["route"] in evidence)]

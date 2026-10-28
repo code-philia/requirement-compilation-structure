@@ -1,6 +1,7 @@
 """Deterministic UI existence suites and bounded browser/typecheck commands."""
 
 import json
+from hashlib import sha256
 import os
 from pathlib import Path
 import re
@@ -10,10 +11,79 @@ import subprocess
 import tempfile
 
 from infrastructure.stages.frontend.ui.design import page_elements, visible
-from infrastructure.utils.files import save_bytes
+from infrastructure.utils.files import save_bytes, read_artifact, read_source
 from infrastructure.utils.processes import capture_process, npm_command
+from infrastructure.shared.project.entrypoints import implementation_path, implementation_entrypoint
 
 KEY_TYPES = {"page", "form", "input", "checkbox", "select", "button", "heading", "link", "list", "image", "alert", "table", "text"}
+
+
+# This is a teaching phase check, not a general JavaScript security analyzer.
+PRESENTATION_CHECK = r'''
+import ts from "typescript";
+import fs from "node:fs";
+const errors = [];
+for (const path of process.argv.slice(1)) {
+  const source = ts.createSourceFile(path, fs.readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true,
+    /\.[jt]sx$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const visit = node => {
+    if (ts.isJsxAttribute(node) && /^on[A-Z]/.test(node.name.getText(source)))
+      errors.push(`${path}: business handlers belong in event modules`);
+    if (ts.isCallExpression(node)) {
+      const called = node.expression.getText(source);
+      if (/(?:^|\.)(?:fetch|useEffect|useLayoutEffect|useState|useReducer|sendBeacon|setTimeout|setInterval)$/.test(called))
+        errors.push(`${path}: ${called} is not part of UI/data presentation`);
+    }
+    if (ts.isIdentifier(node) && /^(?:XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage)$/.test(node.text))
+      errors.push(`${path}: browser effects belong in event modules`);
+    if (ts.isPropertyAccessExpression(node) && node.getText(source) === "document.cookie")
+      errors.push(`${path}: cookies do not belong in page components`);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+}
+if (errors.length) { console.error([...new Set(errors)].join("\n")); process.exitCode = 1; }
+'''
+
+
+def check_presentation(output, checks, page_ids):
+    """Keep page repairs presentation-only in both steps 10 and 12."""
+    sources = [implementation_path("page", pid) for pid in page_ids if implementation_entrypoint(output, "page", pid)]
+    result = checks.execute(["--input-type=module", "-e", PRESENTATION_CHECK, *sources])
+    result.pop("stdout", None)
+    return result
+
+
+def presentation_run_status(result):
+    """Repair existing page runtime failures; only assertion failures establish valid RED."""
+    if result["returncode"] == 0:
+        require_green(result)
+        return "GREEN"
+    headlines = [message.split("\n", 1)[0] for message in result.get("failures", [])]
+    if not result.get("errors") and not result.get("skipped") and not result.get("flaky") and result.get("failed") and any("UI_RUNTIME_ERROR" in message or "UI_BUSINESS_CALL" in message for message in headlines):
+        return "REPAIR_REQUIRED"
+    require_red(result)
+    return "RED_CONFIRMED"
+
+
+def design_fingerprint(design):
+    """Tie a successful presentation report to the full UI/data design, including styles."""
+    return sha256(json.dumps(design, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+
+
+def validate_ui_baseline(arc_dir, design):
+    """Share the exact step 10 prerequisite check across steps 11 and 12."""
+    report = read_artifact(arc_dir, "ui_checks.json")
+    if not isinstance(report, dict) or report.get("status") != ("GREEN" if design["pages"] else "NO_UI") or report.get("design_hash") != design_fingerprint(design):
+        raise ValueError("Complete step 10 for the current UI/data design before steps 11/12")
+    pages = report.get("pages")
+    if not isinstance(pages, dict) or set(pages) != set(design["pages"]):
+        raise ValueError("Step 10 report must cover every current page")
+    for pid in pages:
+        relative = test_path(pid)
+        target = arc_dir.parent / relative
+        if not isinstance(pages[pid], dict) or pages[pid].get("status") != "GREEN" or pages[pid].get("test_path") != relative or not target.is_file() or read_source(target) != existence_suite(design, pid):
+            raise ValueError(f"UI existence tests changed for {pid}; rerun step 10")
 
 
 def test_path(pid: str) -> str:
@@ -64,7 +134,7 @@ def existence_suite(design: dict, pid: str) -> str:
                     for option in prop.get("options", []):
                         lines.append(f'  await expect({locator}.getByRole("option", {{ name: {json.dumps(option)}, exact: true }})).toHaveCount(1);')
                 if node.get("data"):
-                    initial = values[node["data"][0]["var"]]
+                    initial = values[node["data"][0]]
                     if kind == "checkbox" and isinstance(initial, bool):
                         lines.append(f"  await expect({locator}){'' if initial else '.not'}.toBeChecked();")
                     elif kind in {"input", "select"} and isinstance(initial, (str, int, float)) and not isinstance(initial, bool):
@@ -74,8 +144,8 @@ def existence_suite(design: dict, pid: str) -> str:
             if kind == "alert":
                 lines.append(f'  await expect({locator}).toHaveAttribute("role", "alert");')
             if kind in {"text", "heading", "alert"}:
-                for data in node.get("data", []):
-                    value = values[data["var"]]
+                for var in node["data"]:
+                    value = values[var]
                     if isinstance(value, str) and value:
                         lines.append(f'  await expect({locator}).toContainText({json.dumps(value)});')
         lines.extend([

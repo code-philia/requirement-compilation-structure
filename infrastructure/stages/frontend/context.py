@@ -3,7 +3,8 @@
 import json
 import re
 
-from infrastructure.stages.backend.context import load_context, requirement_context
+from infrastructure.stages.backend.context import load_context
+from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.contracts import validate_contracts
 from infrastructure.stages.backend.primitives import validate_design
@@ -19,21 +20,15 @@ def load_ui_design(arc_dir, tree, images):
     design = read_artifact(arc_dir, "ui_design.json")
     if not isinstance(design, dict) or not isinstance(design.get("pages"), dict):
         raise ValueError("Saved UI design must contain a pages object")
-    max_fixtures = max([1, *(len(set(page["fixtures"]) | {"default"}) for page in design["pages"].values()
-        if isinstance(page, dict) and isinstance(page.get("fixtures"), dict))])
-    validate_ui_design(design, tree, images, max_fixtures, complete=True)
+    validate_ui_design(design, tree, images, max_fixtures=None, complete=True)
     return design
 
 
-def load_frontend_context(arc_dir, input_dir):
-    """Load validated DB/API artifacts and resolve reference images into per-requirement frontend contexts."""
-    tree, schema, obligations = load_context(arc_dir)
+def load_ui_context(arc_dir, input_dir):
+    """Load only requirement and image evidence; presentation does not depend on backend artifacts."""
     raw = read_artifact(arc_dir, "requirements.json")
+    tree = RequirementTree(raw)
     analysis = read_artifact(arc_dir, "visual_analysis.json")
-    backend = read_artifact(arc_dir, "backend_apis.json")
-    contracts = read_artifact(arc_dir, "backend_contracts.json")
-    validate_design(backend, obligations, field_symbols(schema), tree=tree)
-    validate_contracts(contracts, backend)
     images, nodes = {}, {}
 
     def visit(node):
@@ -70,5 +65,23 @@ def load_frontend_context(arc_dir, input_dir):
         unknown = refs - set(images)
         if unknown:
             raise ValueError(f"Unknown image references at {rid}: {sorted(unknown)}")
-        contexts[rid] = {**requirement_context(tree, rid), "images": {key: images[key] for key in sorted(refs)}}
+        contexts[rid] = {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
+            "images": {key: images[key] for key in sorted(refs)}}
+    return tree, images, contexts
+
+
+def load_frontend_context(arc_dir, input_dir):
+    """Combine visual requirements with validated database and API artifacts for design stages."""
+    tree, schema, obligations = load_context(arc_dir)
+    _, images, contexts = load_ui_context(arc_dir, input_dir)
+    backend = read_artifact(arc_dir, "backend_apis.json")
+    contracts = read_artifact(arc_dir, "backend_contracts.json")
+    validate_design(backend, obligations, field_symbols(schema), tree=tree)
+    validate_contracts(contracts, backend)
     return tree, schema, obligations, contracts, images, contexts
+
+
+def behavior_contexts(contexts):
+    """Behavior stages use structured requirement text without repeated visual evidence."""
+    return {rid: {key: value for key, value in context.items() if key != "images"}
+        for rid, context in contexts.items()}

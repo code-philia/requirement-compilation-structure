@@ -4,9 +4,10 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.utils.cli import create_parser, resolve_directories
-from infrastructure.stages.frontend.context import load_frontend_context, load_ui_design
+from infrastructure.stages.frontend.context import load_ui_context, load_ui_design
 from infrastructure.stages.frontend.ui.implementation import implement_ui
 from infrastructure.shared.models.text import TextModel
+from infrastructure.stages.frontend.ui.testing import design_fingerprint
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
@@ -21,8 +22,9 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
     report = {"status": "VALIDATING", "pages": {}}
     save_json(arc_dir / "ui_checks.json", report)
     try:
-        tree, _, _, _, images, contexts = load_frontend_context(arc_dir, input_dir)
+        tree, images, contexts = load_ui_context(arc_dir, input_dir)
         design = load_ui_design(arc_dir, tree, images)
+        report["design_hash"] = design_fingerprint(design)
         console = DemoConsole(pause)
         console.show("Step 10 | Saved UI/data design", f"Loaded {arc_dir / 'ui_design.json'}\nPages: {', '.join(design['pages']) or '(none)'}\nGenerate existence tests and implement this design without rerunning synthesis.")
         if not design["pages"]:

@@ -16,8 +16,8 @@ def test_path(rid):
     return f"frontend/tests/e2e/{slug}.spec.ts"
 
 
-def validate_test_source(source, step_ids, event_ids, maximum):
-    """Require a small browser-driven suite tracing all selected steps/events; reject skips, API mocks, and direct API calls."""
+def validate_test_source(source, step_ids, maximum):
+    """Require a small browser-driven suite tracing all selected scenario steps; reject skips, API mocks, and direct API calls."""
     titles = re.findall(r"\btest\(\s*(['\"])(.*?)\1\s*,", source, re.DOTALL)
     if not titles or len(titles) > maximum or not re.search(r"from\s+['\"]\./support/context(?:\.js)?['\"]", source):
         raise ValueError(f"Use 1..{maximum} literal test(...) cases importing test/expect from ./support/context.js")
@@ -40,10 +40,10 @@ def validate_test_source(source, step_ids, event_ids, maximum):
         if not re.search(r"(?:toHaveText|toContainText)\s*\(", source):
             raise ValueError("Alert assertions must await toHaveText or toContainText")
     names = "\n".join(title for _, title in titles)
-    tokens = {f"STEP:{sid}" for sid in step_ids} | {f"EVENT:{eid}" for eid in event_ids}
+    tokens = {f"STEP:{sid}" for sid in step_ids}
     missing = [token for token in sorted(tokens) if not re.search(r"(?<![A-Za-z0-9_.:-])" + re.escape(token) + r"(?![A-Za-z0-9_.:-])", names)]
     if missing:
-        raise ValueError(f"Trace every required scenario step and newly implemented event in test titles: {missing}")
+        raise ValueError(f"Trace every required scenario step in test titles: {missing}")
     return len(titles)
 
 

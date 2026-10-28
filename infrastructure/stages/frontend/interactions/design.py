@@ -4,7 +4,6 @@ from copy import deepcopy
 import re
 
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
-from infrastructure.stages.database.obligations.records import validate_record, field_symbols
 from infrastructure.stages.database.obligations.rules import difference, union
 
 IDENTITY = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
@@ -48,11 +47,6 @@ def text(value, label, optional=False):
         raise ValueError(f"{label} must be nonempty text")
 
 
-def data_types(ui):
-    """Index frontend data variable names and types from the UI element descriptors."""
-    return {data["var"]: data["dtype"] for node in ui["elements"].values() for data in node.get("data", [])}
-
-
 def relevant_pages(ui, rid):
     """Return the UI page contexts directly used by the selected requirement."""
     selected = set(ui["requirements"][rid])
@@ -94,15 +88,13 @@ def validate_interactions(result, ui, tree, schema, obligations, backend, analyz
         raise ValueError("Interaction registries must be objects")
     if set(result["requirements"]) != set(tree.requirements) or set(result["steps"]) != set(tree.steps):
         raise ValueError("Interaction bindings must retain every requirement/step ID")
-    variables, symbols = set(ui["bindings"]), field_symbols(schema)
+    variables = set(ui["bindings"])
     for eid, event in result["events"].items():
-        if not IDENTITY.fullmatch(eid):
+        if not isinstance(eid, str) or not IDENTITY.fullmatch(eid):
             raise ValueError(f"Invalid event ID: {eid}")
-        require_fields(event, {"description", "read", "write", "obligations", "actions"}, eid)
+        require_fields(event, {"description", "write", "actions"}, eid)
         text(event["description"], eid)
-        identifiers(event["read"], variables, eid + ".read")
         identifiers(event["write"], variables, eid + ".write")
-        validate_record(event["obligations"], symbols, eid)
         if not isinstance(event["actions"], list) or not event["actions"]:
             raise ValueError(f"Provide ordered actions for {eid}")
         action_ids = set()
@@ -110,32 +102,22 @@ def validate_interactions(result, ui, tree, schema, obligations, backend, analyz
             if not isinstance(action, dict) or not isinstance(action.get("kind"), str) or action["kind"] not in {"local", "api", "navigate"}:
                 raise ValueError(f"Invalid action kind in {eid}")
             kind = action["kind"]
-            require_fields(action, {"id", "kind", "description", "when", "read", "write"} |
+            require_fields(action, {"id", "kind", "description"} |
                 ({"api"} if kind == "api" else {"page"} if kind == "navigate" else set()), eid + " action")
             aid = action["id"]
             if not isinstance(aid, str) or not IDENTITY.fullmatch(aid) or aid in action_ids:
                 raise ValueError(f"Action IDs must be unique within {eid}")
             action_ids.add(aid)
             text(action["description"], aid)
-            text(action["when"], aid + ".when", optional=True)
-            identifiers(action["read"], variables, aid + ".read")
-            identifiers(action["write"], variables, aid + ".write")
             if kind == "api" and (not isinstance(action["api"], str) or action["api"] not in backend["apis"]):
                 raise ValueError(f"Unknown backend API: {aid}")
             if kind == "navigate" and (not isinstance(action["page"], str) or action["page"] not in ui["pages"]):
                 raise ValueError(f"Unknown navigation page: {aid}")
-            if kind != "local" and action["write"]:
-                raise ValueError(f"Frontend state updates need explicit local actions after API results: {aid}")
-        effects = union(event["actions"])
-        check_coverage(eid + " frontend effects", {key: event[key] for key in ("read", "write")}, effects,
-            {key: event[key] for key in ("read", "write")})
-        called = union(backend["apis"][aid] for aid in api_ids(event))
-        check_coverage(eid + " DB effects", event["obligations"], called, event["obligations"])
     emissions = {}
     for tid, trigger in result["triggers"].items():
-        if not IDENTITY.fullmatch(tid):
+        if not isinstance(tid, str) or not IDENTITY.fullmatch(tid):
             raise ValueError(f"Invalid trigger ID: {tid}")
-        require_fields(trigger, {"source", "event", "guard", "read", "action", "write"}, tid)
+        require_fields(trigger, {"source", "event", "action"}, tid)
         if not isinstance(trigger["source"], str) or trigger["source"] not in ui["elements"]:
             raise ValueError(f"Unknown trigger UI source: {tid}")
         if not isinstance(trigger["event"], str) or trigger["event"] not in INTERACTIONS:
@@ -145,14 +127,10 @@ def validate_interactions(result, ui, tree, schema, obligations, backend, analyz
         source_type = ui["elements"][trigger["source"]].get("type", "container")
         if trigger["event"] == "submit" and source_type != "form":
             raise ValueError(f"A native submit trigger must use a form; buttons use click: {tid}")
+        if trigger["event"] in {"change", "input"} and source_type not in {"input", "checkbox", "select"}:
+            raise ValueError(f"Input/change triggers need an editable control: {tid}")
         if not isinstance(trigger["action"], str) or trigger["action"] not in result["events"]:
             raise ValueError(f"Unknown trigger event handler: {tid}")
-        text(trigger["guard"], tid + ".guard", optional=True)
-        reads = identifiers(trigger["read"], variables, tid + ".read")
-        writes = identifiers(trigger["write"], variables, tid + ".write")
-        event = result["events"][trigger["action"]]
-        if not set(event["read"]).issubset(reads) or writes != set(event["write"]):
-            raise ValueError(f"Trigger must cover its event reads and exactly summarize its writes: {tid}")
         emission = (trigger["source"], trigger["event"])
         if emission in emissions:
             raise ValueError(f"Reuse one trigger per source/interaction; combine branches in its event: {tid}/{emissions[emission]}")
@@ -175,30 +153,27 @@ def validate_interactions(result, ui, tree, schema, obligations, backend, analyz
         tids = result["requirements"][rid]
         events = [result["events"][eid] for eid in event_ids(result, tids)]
         available = relevant_pages(ui, rid)
+        if not available:
+            if tids or any(result["steps"][sid] for sid in tree.own_steps[rid]):
+                raise ValueError(f"A requirement without UI cannot own frontend triggers: {rid}")
+            continue
         sources = {uid for page in available.values() for uid in page["elements"]}
-        allowed_vars = {var for page in available.values() for var in page["bindings"]}
         called = set()
         for tid in tids:
             trigger = result["triggers"][tid]
-            if trigger["source"] not in sources or (set(trigger["read"]) | set(trigger["write"])) - allowed_vars:
+            if trigger["source"] not in sources:
                 raise ValueError(f"Retrieve and use the requirement's page subtrees and data: {rid}/{tid}")
             called.update(api_ids(result["events"][trigger["action"]]))
         if called - set(backend["requirements"][rid]):
             raise ValueError(f"Use only directly allocated backend APIs for {rid}; other page lifecycle behavior remains owned by its original requirement")
         if set(backend["requirements"][rid]) - called:
             raise ValueError(f"Every directly allocated API needs an event call, including APIs with empty DB effects: {rid}")
-        actual = union(event["obligations"] for event in events)
+        actual = union(event_obligations(event, backend) for event in events)
         check_coverage(rid, obligations["requirements"][rid], actual, obligations["requirements"][rid])
         for sid in tree.own_steps[rid]:
             step_tids = result["steps"][sid]
             if not set(step_tids).issubset(tids):
                 raise ValueError(f"Step triggers must be directly assigned to their requirement: {sid}")
-            # Step bindings trace behavior, not database-effect containment.
-            # A scenario can include local input and a later page's lifecycle
-            # API owned by another requirement. Its aggregate DB effects cannot
-            # be required from this leaf's directly allocated events alone.
-            if ui["steps"][sid] and not step_tids:
-                raise ValueError(f"Provide interaction traceability for the UI step: {sid}")
         # Check current-leaf editable bindings inside the bounded proposal loop,
         # so missing input wiring is returned to the model rather than discovered
         # only after every leaf has already completed decomposition.
@@ -207,29 +182,21 @@ def validate_interactions(result, ui, tree, schema, obligations, backend, analyz
             if "user_write" in node.get("mode", []) and node.get("data"):
                 changes = [result["triggers"][tid] for tid in tids if result["triggers"][tid]["source"] == uid
                     and result["triggers"][tid]["event"] in {"change", "input"}]
-                if not changes or not {item["var"] for item in node["data"]}.issubset({var for tr in changes for var in tr["write"]}):
+                if not changes or not set(node["data"]).issubset({var for tr in changes for var in result["events"][tr["action"]]["write"]}):
                     raise ValueError(f"Editable UI data needs a directly associated input/change trigger: {uid}")
     if complete:
         if set(analyzed) != set(tree.leaves):
             raise ValueError("All leaves must complete interaction design")
 
 
-def apply_decomposition(current, proposal, rid, retrieved, ui, tree, schema, obligations, backend, analyzed):
-    """Merge a requirement's trigger/event proposal into a copy, enforce retrieved reuse, and validate before accepting it."""
-    require_fields(proposal, {"triggers", "events", "requirement_triggers", "step_triggers", "explanation"}, "Interaction proposal")
-    text(proposal["explanation"], "explanation")
+def apply_decomposition(current, proposal, rid, ui, tree, schema, obligations, backend, analyzed):
+    """Replace complete trigger/event records by ID and validate every affected requirement."""
+    require_fields(proposal, {"triggers", "events", "requirement_triggers", "step_triggers"}, "Interaction proposal")
     updated = deepcopy(current)
     for kind in ("triggers", "events"):
         if not isinstance(proposal[kind], dict):
             raise ValueError(f"{kind} must be an object")
-        if (set(proposal[kind]) & set(current[kind])) - set(retrieved[kind]):
-            raise ValueError(f"Retrieve existing {kind} before changing them")
         updated[kind].update(deepcopy(proposal[kind]))
-    # Event DB effects are a derived value. Recompute them from the APIs actually
-    # called by each event so a model cannot accidentally copy requirement-level
-    # or step-level obligations into one event.
-    for event in updated["events"].values():
-        event["obligations"] = event_obligations(event, backend)
     if not isinstance(proposal["step_triggers"], dict) or set(proposal["step_triggers"]) != set(tree.own_steps[rid]):
         raise ValueError("Return exactly the current leaf's own step IDs")
     updated["requirements"][rid] = deepcopy(proposal["requirement_triggers"])

@@ -24,7 +24,7 @@ export interface UiApiResponse { status: number; body: unknown; headers: Record<
 export interface UiEventContext {
   readonly data: Readonly<Record<string, unknown>>;
   readonly input: { value?: string; checked?: boolean; key?: string };
-  readonly trigger: { id: string; source: string; event: string; guard: string | null };
+  readonly trigger: { id: string; source: string; event: string };
   update(patch: Record<string, unknown>): void;
   navigate(pageId: string): void;
   api(apiId: string, request?: UiApiRequest): Promise<UiApiResponse>;
@@ -63,7 +63,8 @@ export function App() {
   const [data, setData] = useState<Record<string, unknown>>(() => ({ ...defaults }));
   const live = useRef(data);
   const [navigation, setNavigation] = useState(0);
-  const entered = useRef(new Set<string>());
+  const entered = useRef("");
+  const epoch = useRef(0);
   const route = window.location.pathname;
   const selected = pages.find(page => page.route === route);
   const pageId = selected?.id ?? "";
@@ -78,6 +79,7 @@ export function App() {
   const navigate = (id: string) => {
     const page = pages.find(item => item.id === id);
     if (!page) throw new Error(`Unknown page: ${id}`);
+    epoch.current += 1;
     window.history.pushState({}, "", page.route);
     setNavigation(value => value + 1);
   };
@@ -85,16 +87,17 @@ export function App() {
     const handler = handlers[trigger.action];
     if (!handler) return;
     const effect = effects[trigger.action];
+    let started = epoch.current;
     const context: UiEventContext = {
       get data() { return live.current; }, input,
-      trigger: { id: trigger.id, source: trigger.source, event: trigger.event, guard: trigger.guard },
+      trigger: { id: trigger.id, source: trigger.source, event: trigger.event },
       update: patch => {
         if (Object.keys(patch).some(key => !effect.write.includes(key))) throw new Error(`Undeclared event write: ${trigger.action}`);
-        update(patch);
+        if (started === epoch.current) update(patch);
       },
       navigate: id => {
         if (!effect.pages.includes(id)) throw new Error(`Undeclared event navigation: ${trigger.action}`);
-        navigate(id);
+        if (started === epoch.current) { navigate(id); started = epoch.current; }
       },
       api: (id, request) => {
         if (!effect.apis.includes(id)) throw new Error(`Undeclared event API: ${trigger.action}`);
@@ -128,15 +131,15 @@ export function App() {
     })().catch(report);
   };
   useEffect(() => {
-    const pop = () => setNavigation(value => value + 1);
+    const pop = () => { epoch.current += 1; setNavigation(value => value + 1); };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, []);
   useEffect(() => {
     if (fixture || !selected) return;
     const key = `${navigation}:${pageId}`;
-    if (entered.current.has(key)) return;
-    entered.current.add(key);
+    if (entered.current === key) return;
+    entered.current = key;
     void (async () => {
       for (const trigger of triggers) if (trigger.source === selected.root && trigger.event === "mount") await invoke(trigger, {});
     })().catch(report);
@@ -183,10 +186,10 @@ def sync_interactions(output, ui, interactions, backend, active_events):
         components.append(f"{json.dumps(pid)}: Page{number}")
     effects = {eid: {"write": event["write"], "apis": sorted(api_ids(event)),
         "pages": [action["page"] for action in event["actions"] if action["kind"] == "navigate"]} for eid, event in interactions["events"].items() if eid in active}
-    triggers = [{"id": tid, **{key: trigger[key] for key in ("source", "event", "guard", "action")}}
+    triggers = [{"id": tid, **{key: trigger[key] for key in ("source", "event", "action")}}
         for tid, trigger in interactions["triggers"].items() if trigger["action"] in active]
     source = "// Compiler-owned interaction state and trigger registration.\n" + "\n".join(imports) + "\n"
-    source += "type Trigger = { id: string; source: string; event: string; guard: string | null; action: string };\n"
+    source += "type Trigger = { id: string; source: string; event: string; action: string };\n"
     source += "const defaults: Record<string, unknown> = " + json.dumps({var: binding["initial"] for var, binding in ui["bindings"].items()}) + ";\n"
     source += "const pages = " + json.dumps(pages) + ";\nconst components: Record<string, ComponentType<UiPageProps>> = {" + ", ".join(components) + "};\n"
     source += "const triggers: Trigger[] = " + json.dumps(triggers) + ";\n"

@@ -128,13 +128,36 @@ Each step can also run independently after its prerequisites have completed. Add
 | 07: Contract Inference | `python 07_infer_api_contracts.py --output outputs/demo` | `backend_contracts.json`: adds preconditions and postconditions to the fixed step 06 APIs; preserves signatures, I/O schemas, and R/W. |
 | 08: Backend TDD | `python 08_implement_backend_tdd.py --output outputs/demo` | Key API tests, API implementations, `backend_tdd.json`. |
 | 09: UI/Data Design | `python 09_design_ui.py --input input --output outputs/demo` | `ui_design.json`: pages, UI subtrees, frontend data, and display fixtures for all requirements. |
-| 10: UI Existence TDD | `python 10_implement_ui.py --input input --output outputs/demo` | Playwright component-presence tests, React pages, `ui_checks.json`; business events remain empty. |
-| 11: Interaction Design | `python 11_design_ui_interactions.py --input input --output outputs/demo` | `ui_interactions.json`: triggers/events, obligation coverage, typed data mappings, and event contracts. |
+| 10: UI Existence TDD | `python 10_implement_ui.py --input input --output outputs/demo` | Playwright component-presence tests, React pages, `ui_checks.json`; business events are disabled. |
+| 11: Interaction Design | `python 11_design_ui_interactions.py --input input --output outputs/demo` | `ui_interactions.json`: triggers/events, obligation coverage, ordered actions, derived DB coverage, and semantic P/Q. |
 | 12: Interaction E2E TDD | `python 12_implement_frontend_tdd.py --input input --output outputs/demo` | Browser scenarios, event implementations, `frontend_e2e.json`, and a complete application build. |
+
+Step 07 returns only `{"contract":{"precondition":[...],"postcondition":[...]}}`. Each precondition contains `id`, `description`, and `error_status`; each postcondition contains `id`, `description`, and `status`. Conditions describe business semantics without request/response field pointers. Rejection statuses must be declared, every response status needs a postcondition, and step 06 interfaces and database obligations remain fixed. Each shared API is inferred once using all its owning requirements. Previously inferred complete contracts remain available in step 07 to coordinate session/cookie conventions.
+
+Step 08 supplies the selected API, a single `all_requirement_uses` list with structured steps, and the full entity definitions in `db_schema`. It does not repeat the current requirement, schema ownership mappings, or the global contract registry. Source and frozen test contents remain in the shared `files` map. Literal test titles use readable scenario names and P/Q IDs; database effects, including forbidden writes, are checked through assertions rather than `R:`/`W:` title labels. `--max-tests` is one direct per-API limit (default 5), with no branch/precondition-derived budget. A case may cover several conditions or response branches. Canonical tests are generated before implementation, frozen, and required to fail by assertion against temporary 501 test bindings before the implementation can be accepted as GREEN.
+
+The simplified backend P/Q schema replaces the earlier pointer-bearing records. Regenerate step 07 and its consumers (08–12) for an existing run; old records are rejected rather than silently converted. P/Q title IDs provide traceability, not proof of business behavior.
 
 Use `python <script>.py --help` for stage-specific options, including retrieval size, test budgets, and agent turn limits. Step 00 exposes `--stack` as the extension point for other technology stacks.
 
-Interaction `read`/`write` names refer to frontend data. Event DB obligations are derived from called APIs; input-only or navigation-only events have empty DB sets. Step-to-trigger bindings provide behavioral traceability, without requiring a step's DB effects to be covered by that requirement's events: a scenario may include another page's lifecycle behavior. Direct API allocation and requirement-level API coverage remain checked; cross-page outcomes are verified by step 12 E2E tests.
+Interaction events declare only frontend `write` permissions. Event DB obligations are derived from called APIs; input-only or navigation-only events have empty DB sets. Step-to-trigger bindings provide behavioral traceability, without requiring a step's DB effects to be covered by that requirement's events: a scenario may include another page's lifecycle behavior. Direct API allocation and requirement-level API coverage remain checked; cross-page outcomes are verified by step 12 E2E tests.
+
+Steps 09–12 use one frontend representation and the shared file-edit protocol:
+
+- Step 09 returns `pages`, `elements`, `bindings`, `requirement_ui`, and `step_ui`. Each changed ID carries a complete replacement record; omitted IDs stay unchanged. There are no recursive prop/fixture patches or explanation fields. Page route/root and existing element type/parent stay fixed. Accepted data references, props and fixture states must be retained.
+- Every frontend variable is defined once in `bindings` as `{dtype, constraints, initial, source}`. Element `data` is a list of variable names; visibility can reference the same table. Variables are global to the UI host, without owner/ancestor inference. `ui_design.json` has only pages, elements, bindings, requirements and steps.
+- Step 10 loads only requirements, visual evidence and UI/data design. Page tasks receive visual evidence once, with runtime types and frozen tests in `files`. The report stores a fingerprint of the full design, so changes to styles or other untested metadata still require rerunning presentation checks. Steps 11/12 share the exact baseline validation. Steps 10/12 share the presentation boundary scan, so page repairs cannot silently introduce ordinary business handlers or hooks.
+- Step 11 receives complete existing interactions and directly allocated APIs; it has no event/API ranking or `--top-k` option. It first designs each leaf's trigger bindings and ordered actions, then infers one semantic P/Q per shared event. Images and concatenated step text are absent from behavior-model requests.
+
+A trigger is `{source, event, action}`. An event is `{description, write, actions}`. Each action has `{id, kind, description}`, plus `api` for API calls or `page` for navigation. Kinds are `local`, `api`, and `navigate`. Action descriptions specify request values, transformations and response branches; action IDs distinguish repeated calls. DB effects and runtime API/navigation permissions are derived from declared calls and destinations. Only the event declares frontend writes. Input/change wiring, source types, IDs, direct API allocation and requirement-level DB coverage remain checked.
+
+Requirements with no UI skip frontend interaction work; their APIs remain covered by backend TDD.
+
+Event contract inference returns `{"contract":{"precondition":["..."],"postcondition":["..."]}}`. P may be empty; Q must describe observable results. There are no typed request/update expressions, action contracts, guard fields or cross-layer Q mappings. Static validation checks structure and effects; real browser scenarios verify the described business behavior.
+
+Step 12 supplies each scenario event/trigger/contract once and includes reachable navigation pages and their lifecycle events, including native href destinations. `target_event_ids` selects implementations needed for the scenario. A dependency event can be implemented before its owning requirement is processed; its ownership remains unchanged, and its owner still gets its own scenario suite. Tests trace STEP IDs, without mandatory EVENT title tags. They use real servers and isolated SQLite fixtures, asserting visible results and persistence/forbidden writes. Existing frontend runtime failures enter implementation repair instead of forcing test regeneration; startup, browser, fixture, backend and network failures are not accepted as behavioral RED. Frozen tests, UI regression and the final build remain required. The runtime ignores late updates/navigation from a handler after a different navigation has superseded it.
+
+These frontend schemas replace the earlier descriptor/owner and typed-contract formats. For existing projects, regenerate steps 09–12 and their source/tests in a fresh output workspace; there is no dual-format reader or automatic migration. Steps 00–08 retain their current protocols.
 
 Generated files are organized as follows:
 
@@ -182,10 +205,10 @@ Rerun tests from the generated workspace after the corresponding implementation 
 | `npm run test:e2e` | Playwright runs real frontend/backend scenarios with a temporary SQLite database, then cleans up its servers and database. |
 
 
-Portability checks can be run without model calls:
+Compiler protocol and portability checks can be run without model calls:
 
 ```bash
-python -m unittest discover -s tests -p test_portability.py -v
+python -m unittest discover -s tests -v
 ```
 
 On Windows, use `.\.venv\Scripts\python.exe` for that command. See [Windows compatibility review](WINDOWS_COMPATIBILITY.md) for the per-step audit, fixes, and validation limits.

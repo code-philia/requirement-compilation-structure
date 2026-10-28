@@ -10,7 +10,6 @@ from unittest.mock import Mock, patch
 from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.stages.backend.contracts import CONTRACT_KEYS, validate_contract, validate_contracts
 from infrastructure.stages.backend.testing import condition_tokens, validate_test_source
-from infrastructure.stages.frontend.interactions.prompts import example_api
 from infrastructure.utils.files import save_json, save_text
 
 
@@ -112,10 +111,6 @@ class BackendContracts(unittest.TestCase):
         self.assertEqual(requests[1]["existing_contracts"], {"API-SAVE": result["apis"]["API-SAVE"]})
         validate_contracts(result, self.design)
 
-    def test_frontend_prompt_examples_use_the_same_backend_contract(self):
-        api = example_api("save", "POST", "/api/save", [], [], {"text": {"type": "string"}},
-            [(200, {"saved": {"type": "boolean"}}, [("Q-1", "Saved")])])
-        self.validate(api)
 
 
 if __name__ == "__main__":

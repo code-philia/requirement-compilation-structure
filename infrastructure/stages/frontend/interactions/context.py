@@ -1,10 +1,10 @@
 """Validate immutable design inputs before interaction implementation starts."""
 
-from infrastructure.utils.files import read_artifact, read_source
+from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.runtime import api_entrypoint
-from infrastructure.stages.frontend.context import load_frontend_context, load_ui_design
+from infrastructure.stages.frontend.context import load_frontend_context, load_ui_design, behavior_contexts
 from infrastructure.stages.frontend.interactions.contracts import validate_contract
-from infrastructure.stages.frontend.ui.testing import existence_suite, test_path
+from infrastructure.stages.frontend.ui.testing import validate_ui_baseline
 from infrastructure.stages.frontend.interactions.design import validate_interactions
 from infrastructure.shared.project.entrypoints import implementation_entrypoint
 
@@ -18,15 +18,10 @@ def load_e2e_context(arc_dir, input_dir):
     if set(interactions["contracts"]) != set(interactions["events"]):
         raise ValueError("Run step 11: every event needs exactly one contract")
     for eid, contract in interactions["contracts"].items():
-        validate_contract(eid, contract, interactions, ui, backend)
-    checks = read_artifact(arc_dir, "ui_checks.json")
-    if not isinstance(checks, dict) or checks.get("status") != ("GREEN" if ui["pages"] else "NO_UI") or not isinstance(checks.get("pages"), dict) or set(checks["pages"]) != set(ui["pages"]):
-        raise ValueError("Complete step 10 successfully before step 12")
+        validate_contract(eid, contract)
+    validate_ui_baseline(arc_dir, ui)
     output = arc_dir.parent.resolve()
     for pid in ui["pages"]:
-        relative = test_path(pid)
-        if not isinstance(checks["pages"][pid], dict) or checks["pages"][pid].get("status") != "GREEN" or not (output / relative).is_file() or read_source(output / relative) != existence_suite(ui, pid):
-            raise ValueError(f"UI design/existence tests changed for {pid}; rerun steps 10 and 11")
         if not implementation_entrypoint(output, "page", pid):
             raise ValueError(f"Missing page implementation: {pid}")
     backend_checks = read_artifact(arc_dir, "backend_tdd.json")
@@ -35,4 +30,4 @@ def load_e2e_context(arc_dir, input_dir):
     for aid in backend["apis"]:
         if api_entrypoint(output, aid) is None:
             raise ValueError(f"Missing backend implementation: {aid}; rerun step 08")
-    return tree, schema, backend, ui, interactions, images, contexts
+    return tree, schema, backend, ui, interactions, images, behavior_contexts(contexts)

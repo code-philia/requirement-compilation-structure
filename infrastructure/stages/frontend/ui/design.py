@@ -11,82 +11,48 @@ NODE_TYPES = {"page", "container", "form", "input", "checkbox", "select", "butto
 DATA_TYPES = {"string", "number", "integer", "boolean", "array", "object", "null"}
 ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
 
-INSTRUCTIONS = """Design UI Element (Data) Primitives for the current requirement.
-The current requirement is a leaf. Design only the page contents and frontend data
-explicitly owned by this leaf. A navigation link to another route does not authorize
-creating that destination page's forms, fields, or behavior. Keep the href and reuse
-already designed destination UI only when directly involved in the current scenario.
-Descriptions identify which sibling requirement owns registration/login submissions;
-respect those boundaries. The schema and obligations are data context, not evidence
-that every database field needs a control on this leaf's page.
-Return sparse updates using the complete ordinary-JSON examples below.
-Use normal JSON objects for pages, elements, bindings, props, fixtures, and data.
-New pages require route and root. name defaults to the page ID, images to [], and
-fixtures to {"default":{}}. Existing pages retain their root and route identities.
-Use stable page IDs matching explicit image.page hints where possible. Reuse retrieved
-page subtrees before creating another page. Several requirements can share a page;
-one requirement can involve several pages. Preserve previous IDs and unrelated nodes.
-An input element has type=input, parent=its container ID, mode=[user_write],
-a data descriptor, and justified static props such as label/input_type/placeholder.
-Types: page,container,form,input,checkbox,select,button,text,heading,link,list,item,image,alert,table.
-UI nodes need only fields relevant to the current requirement.
-Omit mode, data, or prop when not applicable; consumers treat them as [], [], and {}.
-A page root may omit parent and type (inferred as null and page). Other structural nodes
-may omit type (inferred as container), but need an existing parent. Provide type for
-actual controls. Empty input data is allowed until a binding is designed.
-Use prop for static text, label, placeholder, input_type, options (string array), style,
-heading level (1..6), href, image alt, and optional visibility. mode is a subset of
-[user_read,user_write]; structural elements may use []. data may contain several entries.
-Each var has a binding with owner, a type-correct initial value, and nonempty source text.
-The owner is a UI ancestor of ALL bound elements. Shared values may have owner=null.
-Frontend data is not a copy of DB fields: include confirmPassword, errors, selection,
-loading and other local state when required. Record API request/response origins in source;
-never add an editable field solely because the DB has a secret/hash/key obligation.
-Use dtype string,number,integer,boolean,array,object,null, and string constraint descriptions.
-Keep initial values type-correct. Defaults are real initial UI state, not fake API results.
-Visibility is either a boolean or {"var":"registration.error","equals":"Example error"}.
-For ordinary nonempty error visibility, prefer a boolean local variable such as errorVisible.
-Use only this simple equality predicate; complex conditions belong to later events.
-fixtures.default must be {}. The compiler-owned default baseline is free; add at most
-the supplied max_fixtures named display states per page (so max_fixtures=3 permits
-default plus signedOut, signedIn, and loading);
-fixtures override named frontend variables only, to render conditional UI without events.
-Include fixtures reaching each visibility branch and meaningful list/data display states.
-Fixtures are explicit browser-test display data, not production business data.
-Every data var needs an element data descriptor and a binding; consistent repeated
-bindings reuse the same var/type/constraints. Include structural root nodes as needed.
-requirement_ui lists ONLY the current requirement's directly involved UI IDs.
-step_ui associates every supplied own step ID with its directly involved UI IDs, including []
-for a purely backend step. Do not duplicate child UI mappings into a parent.
-No UI requirement may be silently omitted; use explanation for a non-UI requirement.
-No triggers/events, executable code, API calls, handlers or interaction implementation
-are generated here. Later phases implement those. When creating a new page for an
-image with an explicit page hint, include that page root in requirement_ui; the
-compiler also binds that root automatically. Images provide layout/labels/style,
-not hidden business rules.
+INSTRUCTIONS = """Design UI/data for the current leaf requirement; implementation happens later.
+Return exactly {pages:{}, elements:{}, bindings:{}, requirement_ui:[], step_ui:{}}.
+Return new or changed records only, with each record COMPLETE. Records replace by ID;
+there is no recursive merge, deletion or special patch syntax. Pure reuse needs only
+requirement_ui and step_ui references. Preserve previously accepted IDs, routes, roots,
+UI types, parents, data references and unrelated props/fixtures when updating a record.
+Only retrieved existing pages/elements/bindings may be updated. New IDs must be unique.
+
+Page records have exactly name, route, root, images, fixtures. Routes are concrete paths.
+Element records have exactly type, parent, mode, data, prop. A page root has type=page
+and parent=null; other nodes reference a parent ID. Supported types are page,container,
+form,input,checkbox,select,button,text,heading,link,list,item,image,alert,table.
+mode is a list containing user_read and/or user_write, or []. data is a list of VARIABLE
+NAMES, not objects. All variable definitions live in bindings, keyed by variable name.
+Each binding has exactly dtype, constraints (string list), initial, source (nonempty
+origin description). dtype is string,integer,number,boolean,array,object,null. Initial
+values must match dtype. No owner fields or duplicated type/constraint descriptors.
+Variables may be shared across pages; use explicit stable names. Include frontend-only
+state such as errors, selections and loading. Do not expose password hashes or session
+credentials; DB fields do not automatically require controls. Document API/input/local
+origins in source. Actual production defaults must not be fake backend response data.
+
+prop describes static text,label,placeholder,input_type,options,style,level,href,alt.
+Optional prop.visible is a boolean or {var:VARIABLE_NAME,equals:VALUE}; complex decisions
+belong to events. Label real inputs and buttons. Checkbox data must reference a boolean.
+Every page has fixtures.default={}; add at most max_fixtures other display states,
+overriding page variables. Include fixtures making conditional UI visible. Fixtures
+are only display-test data. Preserve existing fixtures when replacing a page record.
+
+Design only this requirement's owned content. A navigation destination does not authorize
+creating another requirement's forms or behavior. Reuse retrieved pages. requirement_ui
+lists directly involved UI IDs. step_ui includes every supplied own step ID exactly once,
+using [] for non-UI behavior. Non-UI requirements can return empty records and associations.
+Use image.page hints for page IDs and attach provided images to the directly associated
+page. Images supply visible layout/labels/style, not hidden business rules. No events,
+handlers, executable expressions, implementation code or tests belong in this output.
 """
 
 
-def complete_pages(design: dict) -> None:
-    """Fill optional page metadata without discarding model-provided extra fields."""
-    for pid, page in design["pages"].items():
-        if not isinstance(page, dict):
-            raise ValueError(f"Page {pid} must be an object, received {type(page).__name__}")
-        page.setdefault("name", pid)
-        page.setdefault("images", [])
-        page.setdefault("fixtures", {})
-        if isinstance(page["fixtures"], dict):
-            page["fixtures"].setdefault("default", {})
-        if "root" not in page and pid in design["elements"]:
-            page["root"] = pid
-        if "root" not in page or "route" not in page:
-            missing = sorted({"root", "route"} - set(page))
-            raise ValueError(f"Page {pid} needs routing/tree references {missing}; received {json.dumps(page, ensure_ascii=False)}")
-
-
 def empty_design() -> dict:
-    """Create the initial page, element, binding, and ownership registries with empty interaction slots."""
-    return {"pages": {}, "elements": {}, "bindings": {}, "requirements": {}, "steps": {}, "triggers": {}, "events": {}}
+    """Keep UI/data and requirement associations in five independent registries."""
+    return {"pages": {}, "elements": {}, "bindings": {}, "requirements": {}, "steps": {}}
 
 
 def page_elements(design: dict, pid: str) -> dict:
@@ -103,7 +69,7 @@ def page_elements(design: dict, pid: str) -> dict:
 def page_context(design: dict, pid: str) -> dict:
     """Return one canonical page together with its UI subtree and the data bindings used by that subtree."""
     elements = page_elements(design, pid)
-    variables = {data["var"] for node in elements.values() for data in node.get("data", [])}
+    variables = {var for node in elements.values() for var in node["data"]}
     variables.update(node.get("prop", {})["visible"]["var"] for node in elements.values() if isinstance(node.get("prop", {}).get("visible"), dict))
     return {"id": pid, **deepcopy(design["pages"][pid]), "elements": elements,
         "bindings": {var: deepcopy(design["bindings"][var]) for var in sorted(variables)}}
@@ -137,43 +103,39 @@ def visible(design: dict, uid: str, values: dict) -> bool:
     return True
 
 
-def validate_design(design: dict, tree, images: dict, max_fixtures: int = 3, complete: bool = False) -> None:
+def validate_design(design: dict, tree, images: dict, max_fixtures: int | None = 3, complete: bool = False) -> None:
     """Validate page trees, element/data bindings, display fixtures, image references, and requirement/step ownership."""
-    if set(design) != set(empty_design()) or any(not isinstance(value, dict) for value in design.values()):
-        raise ValueError("UI design needs pages, elements, bindings, requirements, steps, triggers, events objects")
-    if design["triggers"] or design["events"]:
-        raise ValueError("Step 09 leaves all triggers and events empty")
-    complete_pages(design)
+    if not isinstance(design, dict) or set(design) != set(empty_design()) or any(not isinstance(value, dict) for value in design.values()):
+        raise ValueError("UI design needs pages, elements, bindings, requirements and steps objects")
     elements, bindings = design["elements"], design["bindings"]
-    routes, roots, descriptors, ancestors = set(), set(), {}, {}
-    # Validate all shapes before traversing references into other nodes.
+    routes, roots, ancestors = set(), set(), {}
+    for var, binding in bindings.items():
+        if not isinstance(var, str) or not var.strip() or not isinstance(binding, dict) or set(binding) != {"dtype", "constraints", "initial", "source"}:
+            raise ValueError(f"Define each variable once with dtype/constraints/initial/source: {var}")
+        if not isinstance(binding["dtype"], str) or binding["dtype"] not in DATA_TYPES or not matches_type(binding["initial"], binding["dtype"]):
+            raise ValueError(f"Invalid variable dtype or initial value: {var}")
+        if not isinstance(binding["source"], str) or not binding["source"].strip() or not isinstance(binding["constraints"], list) or any(not isinstance(item, str) or not item.strip() for item in binding["constraints"]):
+            raise ValueError(f"Invalid variable constraints/source: {var}")
     for uid, node in elements.items():
-        if not isinstance(uid, str) or not ID.fullmatch(uid) or not isinstance(node, dict):
-            raise ValueError(f"Invalid UI identity or node object: {uid}")
-        if ("type" in node and (not isinstance(node["type"], str) or node["type"] not in NODE_TYPES)) or (node.get("parent") is not None and not isinstance(node["parent"], str)):
+        if not isinstance(uid, str) or not ID.fullmatch(uid) or not isinstance(node, dict) or set(node) != {"type", "parent", "mode", "data", "prop"}:
+            raise ValueError(f"Provide a complete UI element type/parent/mode/data/prop: {uid}")
+        if not isinstance(node["type"], str) or node["type"] not in NODE_TYPES or (node["parent"] is not None and not isinstance(node["parent"], str)):
             raise ValueError(f"Invalid UI type/parent: {uid}")
     for uid, node in elements.items():
-        if not isinstance(node.get("mode", []), list) or any(not isinstance(mode, str) or mode not in {"user_read", "user_write"} for mode in node.get("mode", [])):
-            raise ValueError(f"Invalid UI type/mode: {uid}")
-        if not isinstance(node.get("prop", {}), dict) or not isinstance(node.get("data", []), list):
-            raise ValueError(f"Invalid UI properties/data: {uid}")
+        if not isinstance(node["mode"], list) or any(not isinstance(mode, str) or mode not in {"user_read", "user_write"} for mode in node["mode"]) or len(set(node["mode"])) != len(node["mode"]):
+            raise ValueError(f"Invalid UI mode: {uid}")
+        if not isinstance(node["prop"], dict) or not isinstance(node["data"], list) or any(not isinstance(var, str) or var not in bindings for var in node["data"]) or len(set(node["data"])) != len(node["data"]):
+            raise ValueError(f"UI data must reference defined variable names: {uid}")
         chain, current = [], uid
         while current is not None:
-            if not isinstance(current, str) or current not in elements or current in chain:
+            if current not in elements or current in chain:
                 raise ValueError(f"Invalid parent or cycle at {uid}: {current}")
             chain.append(current)
-            current = elements[current].get("parent")
+            current = elements[current]["parent"]
         ancestors[uid] = chain
-        for data in node.get("data", []):
-            if not isinstance(data, dict) or set(data) != {"var", "dtype", "constraints"} or not isinstance(data["var"], str) or not data["var"].strip() or not isinstance(data["dtype"], str) or data["dtype"] not in DATA_TYPES or not isinstance(data["constraints"], list) or any(not isinstance(item, str) for item in data["constraints"]):
-                raise ValueError(f"Invalid frontend data descriptor: {uid}")
-            var = data["var"]
-            if var in descriptors and descriptors[var] != data:
-                raise ValueError(f"Inconsistent shared data descriptor: {var}")
-            descriptors[var] = data
-        if node.get("type") == "checkbox" and node.get("data") and node["data"][0]["dtype"] != "boolean":
+        if node["type"] == "checkbox" and any(bindings[var]["dtype"] != "boolean" for var in node["data"]):
             raise ValueError(f"Checkbox data must be boolean: {uid}")
-        props = node.get("prop", {})
+        props = node["prop"]
         for name in ("text", "label", "placeholder", "input_type", "href", "alt"):
             if name in props and not isinstance(props[name], str):
                 raise ValueError(f"UI property {name} must be text: {uid}")
@@ -181,26 +143,15 @@ def validate_design(design: dict, tree, images: dict, max_fixtures: int = 3, com
             raise ValueError(f"UI options must be strings: {uid}")
         if "level" in props and (type(props["level"]) is not int or not 1 <= props["level"] <= 6):
             raise ValueError(f"Heading level must be 1..6: {uid}")
-    if set(bindings) != set(descriptors):
-        raise ValueError("Every frontend variable needs a descriptor and exactly one binding")
-    for var, binding in bindings.items():
-        if not isinstance(binding, dict) or set(binding) != {"owner", "initial", "source"} or not isinstance(binding["source"], str) or not binding["source"].strip():
-            raise ValueError(f"Invalid data binding: {var}")
-        if not matches_type(binding["initial"], descriptors[var]["dtype"]):
-            raise ValueError(f"Initial value does not match dtype: {var}")
-        for uid, node in elements.items():
-            if any(data["var"] == var for data in node.get("data", [])) and binding["owner"] is not None and binding["owner"] not in ancestors[uid]:
-                raise ValueError(f"Data owner must be a shared ancestor, or null for cross-page state: {var}")
-    for uid, node in elements.items():
-        rule = node.get("prop", {}).get("visible", True)
+        rule = props.get("visible", True)
         if isinstance(rule, dict):
-            if set(rule) != {"var", "equals"} or not isinstance(rule["var"], str) or rule["var"] not in bindings or not matches_type(rule["equals"], descriptors[rule["var"]]["dtype"]):
+            if set(rule) != {"var", "equals"} or not isinstance(rule["var"], str) or rule["var"] not in bindings or not matches_type(rule["equals"], bindings[rule["var"]]["dtype"]):
                 raise ValueError(f"Invalid visibility predicate: {uid}")
         elif not isinstance(rule, bool):
             raise ValueError(f"Visibility must be boolean or a variable equality: {uid}")
     page_filenames = set()
     for pid, page in design["pages"].items():
-        if not isinstance(pid, str) or not ID.fullmatch(pid) or not isinstance(page, dict):
+        if not isinstance(pid, str) or not ID.fullmatch(pid) or not isinstance(page, dict) or set(page) != {"name", "route", "root", "images", "fixtures"}:
             raise ValueError(f"Invalid page identity or page object: {pid}")
         relative_path(f"frontend/tests/ui/{pid}.spec.ts")
         if pid.casefold() in page_filenames:
@@ -224,11 +175,11 @@ def validate_design(design: dict, tree, images: dict, max_fixtures: int = 3, com
             raise ValueError(f"Unknown image reference: {pid}")
         fixtures = page["fixtures"]
         named_count = len(fixtures) - 1 if isinstance(fixtures, dict) and "default" in fixtures else -1
-        if not isinstance(fixtures, dict) or fixtures.get("default") != {} or not 0 <= named_count <= max_fixtures:
+        if not isinstance(fixtures, dict) or fixtures.get("default") != {} or (named_count < 0 or (max_fixtures is not None and named_count > max_fixtures)):
             raise ValueError(f"Provide default={{}} and at most {max_fixtures} named UI fixtures: {pid}")
         subtree = page_elements(design, pid)
         for name, fixture in fixtures.items():
-            if not ID.fullmatch(name) or not isinstance(fixture, dict) or any(var not in descriptors or not matches_type(value, descriptors[var]["dtype"]) for var, value in fixture.items()):
+            if not isinstance(name, str) or not ID.fullmatch(name) or not isinstance(fixture, dict) or any(var not in bindings or not matches_type(value, bindings[var]["dtype"]) for var, value in fixture.items()):
                 raise ValueError(f"Invalid display fixture: {pid}/{name}")
         defaults = {var: binding["initial"] for var, binding in bindings.items()}
         for uid in subtree:
@@ -252,49 +203,39 @@ def validate_design(design: dict, tree, images: dict, max_fixtures: int = 3, com
     json.dumps(design, allow_nan=False)
 
 
-def merge_properties(previous: dict, patch: dict) -> dict:
-    """Merge sparse props/fixture objects without dropping unrelated accepted values."""
-    result = deepcopy(previous)
-    for name, value in patch.items():
-        if isinstance(value, dict) and isinstance(result.get(name), dict):
-            result[name] = merge_properties(result[name], value)
-        else:
-            result[name] = deepcopy(value)
-    return result
-
-
 def apply_proposal(design, proposal, rid, tree, images, retrieved, max_fixtures):
-    """Merge one requirement's proposal into a copy and validate reuse boundaries and the resulting UI/data graph."""
-    expected = {"pages", "elements", "bindings", "requirement_ui", "step_ui", "explanation"}
-    if not isinstance(proposal, dict) or set(proposal) != expected or not isinstance(proposal["explanation"], str) or not proposal["explanation"].strip():
-        raise ValueError("Return pages, elements, bindings, requirement_ui, step_ui, explanation")
+    """Replace complete records by ID; retain all other records and accepted associations."""
+    expected = {"pages", "elements", "bindings", "requirement_ui", "step_ui"}
+    if not isinstance(proposal, dict) or set(proposal) != expected:
+        raise ValueError(f"Return exactly {sorted(expected)}")
     updated = deepcopy(design)
+    allowed = {"pages": set(retrieved),
+        "elements": {uid for page in retrieved.values() for uid in page["elements"]},
+        "bindings": {var for page in retrieved.values() for var in page["bindings"]}}
     for kind in ("pages", "elements", "bindings"):
         if not isinstance(proposal[kind], dict):
-            raise ValueError(f"{kind} must be an object")
-        for identity, record in proposal[kind].items():
-            if not isinstance(record, dict):
-                raise ValueError(f"UI {kind} patch must be an object: {identity}")
-            previous = updated[kind].get(identity, {})
-            merged = {**previous, **deepcopy(record)}
-            # Preserve unrelated props and display states when only one changes.
-            nested = ("fixtures",) if kind == "pages" else ("prop",) if kind == "elements" else ()
-            for name in nested:
-                if name in record and isinstance(record[name], dict) and isinstance(previous.get(name), dict):
-                    merged[name] = merge_properties(previous[name], record[name])
-            updated[kind][identity] = merged
-    complete_pages(updated)
-    retrieved_ids = {uid for page in retrieved.values() for uid in page["elements"]}
-    retrieved_vars = {var for page in retrieved.values() for var in page["bindings"]}
-    for kind, allowed in (("pages", set(retrieved)), ("elements", retrieved_ids), ("bindings", retrieved_vars)):
-        if (set(proposal[kind]) & set(design[kind])) - allowed:
+            raise ValueError(f"{kind} must be an object of complete records")
+        if (set(proposal[kind]) & set(design[kind])) - allowed[kind]:
             raise ValueError(f"Retrieve existing {kind} before modifying them")
-    for pid in set(design["pages"]) & set(proposal["pages"]):
-        if any(updated["pages"][pid][key] != design["pages"][pid][key] for key in ("root", "route")):
-            raise ValueError("Preserve existing page root and route identities")
+        updated[kind].update(deepcopy(proposal[kind]))
     if not isinstance(proposal["step_ui"], dict) or set(proposal["step_ui"]) != set(tree.own_steps[rid]):
-        raise ValueError("step_ui must include exactly this requirement's own steps")
+        raise ValueError("step_ui must include exactly this requirement's own step IDs")
     updated["requirements"][rid] = deepcopy(proposal["requirement_ui"])
     updated["steps"].update(deepcopy(proposal["step_ui"]))
     validate_design(updated, tree, images, max_fixtures)
+    for pid in set(design["pages"]) & set(proposal["pages"]):
+        before, after = design["pages"][pid], updated["pages"][pid]
+        if not isinstance(after, dict) or any(after.get(key) != before[key] for key in ("root", "route")):
+            raise ValueError("Preserve existing page root and route identities")
+        if not set(before["images"]).issubset(after.get("images", [])) or not set(before["fixtures"]).issubset(after.get("fixtures", {})):
+            raise ValueError("Preserve accepted page images and fixture names")
+    for uid in set(design["elements"]) & set(proposal["elements"]):
+        before, after = design["elements"][uid], updated["elements"][uid]
+        if not isinstance(after, dict) or any(after.get(key) != before[key] for key in ("type", "parent")):
+            raise ValueError("Preserve existing UI types and parents")
+        if not isinstance(after.get("prop"), dict) or not isinstance(after.get("data"), list) or not set(before["prop"]).issubset(after["prop"]) or not set(before["data"]).issubset(after["data"]):
+            raise ValueError("Preserve unrelated accepted UI props and data references")
+    for var in set(design["bindings"]) & set(proposal["bindings"]):
+        if not isinstance(updated["bindings"][var], dict) or updated["bindings"][var].get("dtype") != design["bindings"][var]["dtype"]:
+            raise ValueError(f"Preserve accepted variable types: {var}")
     return updated

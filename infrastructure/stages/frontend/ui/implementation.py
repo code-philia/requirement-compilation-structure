@@ -12,7 +12,7 @@ from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.project.entrypoints import implementation_path, implementation_entrypoint
 from infrastructure.stages.frontend.ui.design import owners, page_context
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pages
-from infrastructure.stages.frontend.ui.testing import FrontendChecks, assert_frozen, existence_suite, frozen_files, require_green, require_red, test_path
+from infrastructure.stages.frontend.ui.testing import FrontendChecks, check_presentation, design_fingerprint, assert_frozen, existence_suite, frozen_files, require_green, presentation_run_status, test_path
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
 
@@ -50,34 +50,6 @@ boundary check and Playwright for current and previously accepted pages. Repair 
 GREEN; do not weaken tests or write an implementation that only works in tests.
 """
 
-# This is a teaching phase check, not a general JavaScript security analyzer.
-PRESENTATION_CHECK = r'''
-import ts from "typescript";
-import fs from "node:fs";
-const errors = [];
-for (const path of process.argv.slice(1)) {
-  const source = ts.createSourceFile(path, fs.readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true,
-    /\.[jt]sx$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-  const visit = node => {
-    if (ts.isJsxAttribute(node) && /^on[A-Z]/.test(node.name.getText(source)))
-      errors.push(`${path}: event handlers belong to the next frontend stage`);
-    if (ts.isCallExpression(node)) {
-      const called = node.expression.getText(source);
-      if (/(?:^|\.)(?:fetch|useEffect|useLayoutEffect|useState|useReducer|sendBeacon|setTimeout|setInterval)$/.test(called))
-        errors.push(`${path}: ${called} is not part of UI/data presentation`);
-    }
-    if (ts.isIdentifier(node) && /^(?:XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage)$/.test(node.text))
-      errors.push(`${path}: browser effects belong to the next frontend stage`);
-    if (ts.isPropertyAccessExpression(node) && node.getText(source) === "document.cookie")
-      errors.push(`${path}: cookies belong to the next frontend stage`);
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-}
-if (errors.length) { console.error([...new Set(errors)].join("\n")); process.exitCode = 1; }
-'''
-
-
 def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 18,
         images: dict | None = None, requirement_contexts: dict | None = None) -> dict:
     """Implement the complete saved UI/data design through component-existence TDD.
@@ -97,6 +69,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     frozen = frozen_files(output, config_paths)
     accepted = []
     report["status"] = "IMPLEMENTING"
+    report["design_hash"] = design_fingerprint(design)
     save_json(arc_dir / "ui_checks.json", report)
     for number, pid in enumerate(design["pages"], 1):
         uses = owners(design, pid)
@@ -117,10 +90,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             compiled = checks.typecheck(files)
             if compiled["returncode"]:
                 return {"typecheck": compiled, "presentation": None, "tests": None}
-            sources = [implementation_path("page", key) for key in [*accepted, pid]
-                if implementation_entrypoint(output, "page", key)]
-            presentation = checks.execute(["--input-type=module", "-e", PRESENTATION_CHECK, *sources])
-            presentation.pop("stdout", None)
+            presentation = check_presentation(output, checks, [*accepted, pid])
             if presentation["returncode"]:
                 return {"typecheck": compiled, "presentation": presentation, "tests": None}
             tested = checks.tests(files)
@@ -144,21 +114,16 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             if not implementation_entrypoint(output, "page", pid):
                 raise ValueError(f"UI infrastructure/test compilation failed before implementation: {current['typecheck']['output']}")
         elif current["tests"] is not None:
-            if current["tests"]["returncode"]:
-                require_red(current["tests"])
-                report["pages"][pid]["status"] = "RED_CONFIRMED"
-                console.show(label + " | RED: key UI components are missing", current["tests"]["output"])
-            else:
-                require_green(current["tests"])
+            report["pages"][pid]["status"] = presentation_run_status(current["tests"])
+            console.show(label + " | " + report["pages"][pid]["status"], current["tests"]["output"])
         save_json(arc_dir / "ui_checks.json", report)
         if current["tests"] and current["tests"]["returncode"] == 0 and implementation_entrypoint(output, "page", pid):
-            agent = {"turns": 0, "checks": implementation_gate()}
+            agent = {"turns": 0, "checks": current}
         else:
             context = {"page": page_context(design, pid),
-                "requirements": [(requirement_contexts or {}).get(rid, {"id": rid}) for rid in uses],
+                "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"} for rid in uses],
                 "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
-                "implementation_path": implementation_path("page", pid),
-                "triggers": {}, "events": {}}
+                "implementation_path": implementation_path("page", pid)}
             workspace = FileWorkspace(output, {implementation_path("page", pid)},
                 references=source_paths(output, "frontend/src") + files +
                     ["frontend/package.json", "frontend/tsconfig.json"])

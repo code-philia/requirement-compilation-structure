@@ -1,1 +1,1 @@
-"""Shared BM25 ranking and domain adapters for schema, API, page, and event retrieval."""
+"""Shared BM25 ranking and domain adapters for schema, API and page retrieval."""
