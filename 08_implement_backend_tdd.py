@@ -47,6 +47,9 @@ Test titles include every covered P-/Q- ID and R:Entity.field / W:Entity.field l
 One success test can cover many field labels. Every declared P/Q/R/W label must occur
 in an actual test title. Do not merely place coverage IDs in comments. Assert status,
 returned fields/headers and actual DB state, not the implementation source code.
+When a response header is consumed by another API, assert the complete transport
+identity and perform a producer-to-consumer round trip; checking only that a header
+exists is insufficient. Keep shared cookie/token names in the canonical contract.
 Use casts for response.body when needed (its transport type is unknown). Do not assume
 generated UUIDs, timestamps, random hashes, exact error wording, or fields not in the
 contract. Tests may not be skipped, focused, mocked, or weaken the contract. No external

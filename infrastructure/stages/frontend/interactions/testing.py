@@ -25,6 +25,20 @@ def validate_test_source(source, step_ids, event_ids, maximum):
         raise ValueError("E2E cases may not skip, mock APIs, call APIs directly, inject UI fixtures, or modify infrastructure")
     if not re.search(r"await\s+expect(?:\.|\()", source) or not re.search(r"page\.(?:goto|getBy|locator)", source):
         raise ValueError("Drive the real page and await observable Playwright assertions")
+    # React updates are asynchronous. Keep all DOM observations in Playwright's
+    # retrying assertions instead of reading a transient snapshot synchronously.
+    if re.search(r"\.textContent\s*\(\)|\.innerHTML\s*\(\)|waitForTimeout\s*\(", source):
+        raise ValueError("Use retrying Playwright assertions; do not read textContent/innerHTML or use waitForTimeout")
+    # An alert can be permanently mounted with a blank placeholder. Visibility
+    # alone therefore proves only that the container exists, not that the action
+    # produced the required message.
+    alert_locators = re.findall(
+        r"(?:const\s+\w+\s*=\s*)?([\w.$]+getByRole\(\s*['\"]alert['\"]\s*\))",
+        source,
+    )
+    for locator in alert_locators:
+        if not re.search(r"(?:toHaveText|toContainText)\s*\(", source):
+            raise ValueError("Alert assertions must await toHaveText or toContainText")
     names = "\n".join(title for _, title in titles)
     tokens = {f"STEP:{sid}" for sid in step_ids} | {f"EVENT:{eid}" for eid in event_ids}
     missing = [token for token in sorted(tokens) if not re.search(r"(?<![A-Za-z0-9_.:-])" + re.escape(token) + r"(?![A-Za-z0-9_.:-])", names)]

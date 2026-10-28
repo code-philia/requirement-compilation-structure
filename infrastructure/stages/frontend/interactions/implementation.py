@@ -18,6 +18,26 @@ from infrastructure.stages.frontend.interactions.design import api_ids, event_id
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 
+
+def page_dependency_context(ui, interactions, pages, owned_events):
+    """Collect read-only event context already attached to the pages in a scenario."""
+    elements = {uid for page in pages.values() for uid in page["elements"]}
+    page_events = {
+        trigger["action"]
+        for trigger in interactions["triggers"].values()
+        if trigger["source"] in elements
+    }
+    dependency_events = sorted(page_events - set(owned_events))
+    return {
+        "events": {eid: interactions["events"][eid] for eid in dependency_events},
+        "contracts": {eid: interactions["contracts"][eid] for eid in dependency_events},
+        "triggers": {
+            tid: trigger for tid, trigger in interactions["triggers"].items()
+            if trigger["action"] in dependency_events
+        },
+        "event_ids": dependency_events,
+    }
+
 TEST_INSTRUCTIONS = '''Write a few real Playwright E2E tests BEFORE implementation of the current requirement.
 Edit only test_path. Import {test,expect,fixturePasswordHash} from ./support/context.js.
 Use literal test("title",async ({page,database})=>{...}) calls, at most max_tests total.
@@ -32,9 +52,19 @@ UI fixture injection, arbitrary filesystem/process code, test skips/only/fail, o
 The fixture also rejects application runtime errors and undeclared API response statuses.
 Assert visible UI outcomes AND required persistence/forbidden writes. Include success,
 meaningful rejection, cross-page navigation, and reload persistence when required.
+For dynamic text, use awaited Playwright assertions such as toHaveText, toContainText,
+toHaveValue, or toHaveURL. Do not read textContent() and assert its length immediately
+after toBeVisible(); elements may exist before React has rendered their updated text.
+For alerts, assert the declared message with toHaveText/toContainText rather than only
+asserting that an always-mounted alert element is visible.
 Do not assume UUIDs, hashes, timestamps or exact wording not specified by contracts.
 Use expect assertions on UI results before inspecting network observations. Missing
 interactions must fail by assertion, not by an unbounded waitForResponse or a test timeout.
+Use Playwright's retrying assertions for every asynchronous UI result: toHaveText,
+toContainText, toHaveValue, toBeChecked, toHaveURL, and locator state assertions.
+Never use textContent(), innerHTML(), waitForTimeout(), or a synchronous length check
+after toBeVisible(). An alert may be permanently mounted with an empty placeholder;
+assert its declared message with toHaveText/toContainText.
 Observe network through page.on('response') or expect.poll when needed, not direct API calls.
 One case can trace many steps/events. Every required STEP:ID and EVENT:ID supplied in
 trace_tokens must appear in actual literal test titles, separated by spaces. Do not
@@ -53,6 +83,8 @@ invalid locators, fixture/runtime errors, and timeouts need test repair, not ski
 
 IMPLEMENT_INSTRUCTIONS = '''Implement the current requirement's designed UI interactions against frozen E2E tests.
 Use only the supplied UI/data, trigger/event actions, contracts and canonical backend APIs.
+Page dependencies are supplied for understanding complete workflows; preserve them and
+implement only the selected event_module_ids for the current requirement.
 The compiler captures DOM click/change/input/submit/keyboard events and page mount, owns
 central frontend data, and directly imports the named event functions you register.
 Export one function per selected event with signature
@@ -131,8 +163,10 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
         selected = {eid: interactions["events"][eid] for eid in sorted(eids)}
         contracts = {eid: interactions["contracts"][eid] for eid in sorted(eids)}
         pages = relevant_pages(ui, rid)
+        dependencies = page_dependency_context(ui, interactions, pages, eids)
         console.show(label + " | Requirement / UI / event contracts", json.dumps({"requirement": contexts[rid],
-            "pages": list(pages), "new_events": new_events, "events": selected, "contracts": contracts}, ensure_ascii=False, indent=2))
+            "pages": list(pages), "new_events": new_events, "events": selected, "contracts": contracts,
+            "page_dependencies": dependencies}, ensure_ascii=False, indent=2))
         report["requirements"][rid] = {"status": "GENERATING_TESTS", "events": sorted(eids), "test_path": relative}
         save_json(arc_dir / "frontend_e2e.json", report)
         regression_files = [test_path(key) for key in [*accepted, rid]]
@@ -162,6 +196,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             sources.update(supplied_sources(output, backend["apis"][aid], schema))
         test_context = {"requirement": contexts[rid], "page_subtrees": pages,
             "events": selected, "contracts": contracts, "backend_apis": {aid: backend["apis"][aid] for aid in sorted(called)},
+            "page_dependencies": dependencies,
             "schema": schema, "test_path": relative, "max_tests": max_tests,
             "trace_tokens": [*(f"STEP:{sid}" for sid in steps), *(f"EVENT:{eid}" for eid in new_events)], "source_files": sources}
         agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
@@ -217,15 +252,20 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             require_green(current["ui"])
             agent = {"turns": 0, "checks": current}
         else:
+            dependency_files = sorted({
+                path for eid in dependencies["event_ids"]
+                for path in index.files_for(module=event_module(eid))
+            })
             context = {"requirement": contexts[rid], "page_subtrees": pages, "events": selected,
                 "contracts": contracts, "triggers": {tid: interactions["triggers"][tid] for tid in tids},
+                "page_dependencies": dependencies,
                 "event_module_ids": {eid: event_module(eid) for eid in sorted(eids)},
                 "backend_apis": {aid: backend["apis"][aid] for aid in sorted(called)},
                 "frozen_tests": {path: (output / path).read_text() for path in regression_files},
                 "project_structure": project_structure(output, "frontend"), "initial_feedback": current}
             agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context,
                 FileTools(output, None, implementation_checks, roots=("frontend/src",), read_roots=("frontend",),
-                    context_files=("frontend/src/ui-runtime.ts", API_CLIENT, EVENT_REGISTRY, "frontend/src/App.tsx", "frontend/package.json"),
+                    context_files=("frontend/src/ui-runtime.ts", API_CLIENT, EVENT_REGISTRY, "frontend/src/App.tsx", "frontend/package.json", *dependency_files),
                     protected=PROTECTED, index=index, requirements=[rid], module=f"frontend:requirement:{rid}",
                     entrypoint_modules=[event_module(eid) for eid in eids]),
                 implementation_gate, max_turns, console, label + " / Interaction Implementation")
