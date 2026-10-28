@@ -15,9 +15,12 @@ from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
 
 
-def design_ui_interactions(input_dir: Path, arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
+def design_ui_interactions(input_dir: Path, arc_dir: Path, pause: bool = False, top_k: int = 6,
+        max_attempts: int = 3) -> dict:
     if top_k < 1:
         raise ValueError("--top-k must be positive")
+    if max_attempts < 0:
+        raise ValueError("--max-attempts must be nonnegative; use 0 for unlimited attempts")
     tree, schema, obligations, backend, images, contexts = load_frontend_context(arc_dir, input_dir)
     ui = load_ui_design(arc_dir, tree, images)
     checks = read_artifact(arc_dir, "ui_checks.json")
@@ -41,7 +44,7 @@ def design_ui_interactions(input_dir: Path, arc_dir: Path, pause: bool = False, 
         console.show("Step 11 | No UI interactions", "Empty interaction design saved; no model calls were made.")
         return result
     result = synthesize_interactions(arc_dir, ui, tree, schema, obligations, backend,
-        contexts, TextModel(), console, top_k)
+        contexts, TextModel(), console, top_k, max_attempts)
     console.show("Step 11 | Interaction design complete", f"Triggers: {len(result['triggers'])}\nEvents/contracts: {len(result['events'])}\nSaved: {arc_dir / 'ui_interactions.json'}\nApplication code and UI/data design were not changed. Step 12 implements interactions through E2E TDD.")
     return result
 
@@ -49,12 +52,14 @@ def design_ui_interactions(input_dir: Path, arc_dir: Path, pause: bool = False, 
 def main() -> None:
     parser = create_parser("Step 11: UI Interaction Design and Contract Inference")
     parser.add_argument("--top-k", type=int, default=6, help="Number of coarse event/API RAG matches")
+    parser.add_argument("--max-attempts", type=int, default=3,
+        help="Maximum proposals per decomposition or event contract; 0 retries until valid (default: 3)")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:
             input_dir, output_dir = resolve_directories(args)
             stack.enter_context(console_log(output_dir))
-            design_ui_interactions(input_dir, output_dir / ".arc", args.pause, args.top_k)
+            design_ui_interactions(input_dir, output_dir / ".arc", args.pause, args.top_k, args.max_attempts)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")
 

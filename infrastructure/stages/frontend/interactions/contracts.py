@@ -34,6 +34,14 @@ def required_fields(schema, prefix=""):
         for pointer in required_fields(schema["properties"][key], prefix + "/" + key.replace("~", "~0").replace("/", "~1"))]
 
 
+def required_request_pointers(api):
+    """List required request leaves using the same pointer rules for validation and model context."""
+    return [pointer for section, shape in api["request"].items()
+        for key in shape.get("required", [])
+        for pointer in required_fields(shape["properties"][key],
+            "/" + section + "/" + key.replace("~", "~0").replace("/", "~1"))]
+
+
 def compatible(source, target):
     """Check data-type assignability, allowing integer values where a number is expected."""
     return source == target or (source == "integer" and target == "number")
@@ -156,10 +164,7 @@ def validate_contract(eid, contract, interactions, ui, backend):
                         raise ValueError("Cookie request headers must use automatic browser transport with credentials")
                 else:
                     validate_mapping(expression, target, action, variables, calls, triggers)
-            required = [pointer for section, shape in api["request"].items()
-                for key in shape.get("required", [])
-                for pointer in required_fields(shape["properties"][key], "/" + section + "/" + key.replace("~", "~0").replace("/", "~1"))]
-            for pointer in required:
+            for pointer in required_request_pointers(api):
                 if pointer and not any(pointer == mapped or pointer.startswith(mapped + "/") for mapped in pointers):
                     raise ValueError(f"Required API request field has no source: {aid} {pointer}")
             calls[aid] = api
@@ -202,12 +207,25 @@ def validate_contract(eid, contract, interactions, ui, backend):
                 eligible = {item["id"] for item in api["postcondition"] if item["status"] == outcome["status"]}
                 identifiers(condition["api_conditions"], eligible, cid + ".api_conditions")
                 if not eligible or not condition["api_conditions"]:
-                    raise ValueError("Trace Q to the upstream API postconditions of the declared response status")
+                    raise ValueError(
+                        f"Trace Q to the upstream API postconditions of the declared response status: "
+                        f"{cid}, call={outcome['call']}, status={outcome['status']}, "
+                        f"allowed api_conditions={sorted(eligible)}, received={condition['api_conditions']}"
+                    )
                 branches.add((outcome["call"], outcome["status"]))
                 upstream_conditions.update((outcome["call"], qid) for qid in condition["api_conditions"])
     if covered_actions != set(actions) or covered_writes != set(event["write"]):
-        raise ValueError("Postconditions must cover every event action and frontend write")
+        raise ValueError(
+            f"Postconditions must cover every event action and frontend write; "
+            f"missing actions={sorted(set(actions) - covered_actions)}, "
+            f"missing writes={sorted(set(event['write']) - covered_writes)}"
+        )
     for aid, api in calls.items():
         expected_branches = {(aid, branch["status"]) for branch in [api["response"]["success"], *api["response"]["errors"]]}
         if not expected_branches.issubset(branches) or any((aid, condition["id"]) not in upstream_conditions for condition in api["postcondition"]):
-            raise ValueError(f"Q must cover all response branches and upstream postconditions: {aid}")
+            missing_conditions = [condition["id"] for condition in api["postcondition"] if (aid, condition["id"]) not in upstream_conditions]
+            raise ValueError(
+                f"Q must cover all response branches and upstream postconditions: {aid}; "
+                f"missing statuses={sorted(status for call, status in expected_branches - branches)}, "
+                f"missing backend Q IDs={missing_conditions}"
+            )

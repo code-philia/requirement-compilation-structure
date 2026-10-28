@@ -93,8 +93,6 @@ Each step can also run independently after its prerequisites have completed. Add
 | 11: Interaction Design | `python 11_design_ui_interactions.py --input input --output outputs/demo` | `ui_interactions.json`: triggers/events, obligation coverage, typed data mappings, and event contracts. |
 | 12: Interaction E2E TDD | `python 12_implement_frontend_tdd.py --input input --output outputs/demo` | Browser scenarios, event implementations, `frontend_e2e.json`, file-index updates, and a complete application build. |
 
-Steps 06 and 09/11 analyze leaf requirements; parents do not inherit child API/UI/interaction bindings. Step 10 reads the saved step 09 design. Step 11 requires successful step 10 results; step 12 requires successful backend/UI implementation and the saved interaction design.
-
 Use `python <script>.py --help` for stage-specific options, including retrieval size, test budgets, and agent turn limits. Step 00 exposes `--stack` as the extension point for other technology stacks.
 
 Generated files are organized as follows:

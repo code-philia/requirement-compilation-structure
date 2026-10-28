@@ -17,22 +17,17 @@ already designed destination UI only when directly involved in the current scena
 Descriptions identify which sibling requirement owns registration/login submissions;
 respect those boundaries. The schema and obligations are data context, not evidence
 that every database field needs a control on this leaf's page.
-Return exactly {"pages":{},"elements":{},"bindings":{},"requirement_ui":[],"step_ui":{},"explanation":"..."}.
-Return ONE outer JSON object. Put every page inside its pages dictionary and every
-UI node inside elements. Never concatenate JSON objects or append explanations outside
-the JSON object. The dictionaries contain new/modified records; omit unchanged records.
-Page: {"route":"/register","root":"UI-register"}. Optional name defaults to the page
-ID, images defaults to [], and fixtures defaults to {"default":{}}. Extra page fields
-are allowed. Supply referenced image IDs when the page uses image evidence. Existing
-pages may be updated partially; preserve their route and root identities.
+Return sparse updates using the complete ordinary-JSON examples below.
+Use normal JSON objects for pages, elements, bindings, props, fixtures, and data.
+New pages require route and root. name defaults to the page ID, images to [], and
+fixtures to {"default":{}}. Existing pages retain their root and route identities.
 Use stable page IDs matching explicit image.page hints where possible. Reuse retrieved
 page subtrees before creating another page. Several requirements can share a page;
 one requirement can involve several pages. Preserve previous IDs and unrelated nodes.
-UI element: {"type":"input","parent":"UI-form","mode":["user_write"],
-"data":[{"var":"registration.username","dtype":"string","constraints":[]}],
-"prop":{"label":"Username","input_type":"text","placeholder":"Username"}}.
+An input element has type=input, parent=its container ID, mode=[user_write],
+a data descriptor, and justified static props such as label/input_type/placeholder.
 Types: page,container,form,input,checkbox,select,button,text,heading,link,list,item,image,alert,table.
-UI nodes need not contain every example field, and extra descriptive fields are allowed.
+UI nodes need only fields relevant to the current requirement.
 Omit mode, data, or prop when not applicable; consumers treat them as [], [], and {}.
 A page root may omit parent and type (inferred as null and page). Other structural nodes
 may omit type (inferred as container), but need an existing parent. Provide type for
@@ -40,7 +35,7 @@ actual controls. Empty input data is allowed until a binding is designed.
 Use prop for static text, label, placeholder, input_type, options (string array), style,
 heading level (1..6), href, image alt, and optional visibility. mode is a subset of
 [user_read,user_write]; structural elements may use []. data may contain several entries.
-Each var has a binding: {"owner":"UI-register","initial":"","source":"Local input; candidate API request.body.username"}.
+Each var has a binding with owner, a type-correct initial value, and nonempty source text.
 The owner is a UI ancestor of ALL bound elements. Shared values may have owner=null.
 Frontend data is not a copy of DB fields: include confirmPassword, errors, selection,
 loading and other local state when required. Record API request/response origins in source;
@@ -57,13 +52,12 @@ Fixtures are explicit browser-test display data, not production business data.
 Every data var needs an element data descriptor and a binding; consistent repeated
 bindings reuse the same var/type/constraints. Include structural root nodes as needed.
 requirement_ui lists ONLY the current requirement's directly involved UI IDs.
-step_ui maps every supplied own step ID to its directly involved UI IDs, including []
+step_ui associates every supplied own step ID with its directly involved UI IDs, including []
 for a purely backend step. Do not duplicate child UI mappings into a parent.
 No UI requirement may be silently omitted; use explanation for a non-UI requirement.
 No triggers/events, executable code, API calls, handlers or interaction implementation
 are generated here. Later phases implement those. Images provide layout/labels/style,
-not hidden business rules. If correction is supplied, return a complete corrected proposal
-relative to the unchanged accepted design; include earlier proposed new records again.
+not hidden business rules.
 """
 
 
@@ -246,6 +240,17 @@ def validate_design(design: dict, tree, images: dict, max_fixtures: int = 3, com
     json.dumps(design, allow_nan=False)
 
 
+def merge_properties(previous: dict, patch: dict) -> dict:
+    """Merge sparse props/fixture objects without dropping unrelated accepted values."""
+    result = deepcopy(previous)
+    for name, value in patch.items():
+        if isinstance(value, dict) and isinstance(result.get(name), dict):
+            result[name] = merge_properties(result[name], value)
+        else:
+            result[name] = deepcopy(value)
+    return result
+
+
 def apply_proposal(design, proposal, rid, tree, images, retrieved, max_fixtures):
     """Merge one requirement's proposal into a copy and validate reuse boundaries and the resulting UI/data graph."""
     expected = {"pages", "elements", "bindings", "requirement_ui", "step_ui", "explanation"}
@@ -256,10 +261,16 @@ def apply_proposal(design, proposal, rid, tree, images, retrieved, max_fixtures)
         if not isinstance(proposal[kind], dict):
             raise ValueError(f"{kind} must be an object")
         for identity, record in proposal[kind].items():
-            if kind == "pages" and isinstance(record, dict):
-                updated[kind][identity] = {**updated[kind].get(identity, {}), **deepcopy(record)}
-            else:
-                updated[kind][identity] = deepcopy(record)
+            if not isinstance(record, dict):
+                raise ValueError(f"UI {kind} patch must be an object: {identity}")
+            previous = updated[kind].get(identity, {})
+            merged = {**previous, **deepcopy(record)}
+            # Preserve unrelated props and display states when only one changes.
+            nested = ("fixtures",) if kind == "pages" else ("prop",) if kind == "elements" else ()
+            for name in nested:
+                if name in record and isinstance(record[name], dict) and isinstance(previous.get(name), dict):
+                    merged[name] = merge_properties(previous[name], record[name])
+            updated[kind][identity] = merged
     complete_pages(updated)
     retrieved_ids = {uid for page in retrieved.values() for uid in page["elements"]}
     retrieved_vars = {var for page in retrieved.values() for var in page["bindings"]}

@@ -7,6 +7,7 @@ components. Prompts and structural validation live in ui/design.py."""
 import json
 
 from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, validate_design
+from infrastructure.stages.frontend.ui.proposals import INSTRUCTIONS as PATCH_INSTRUCTIONS, validate_proposal
 from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
 
@@ -33,7 +34,8 @@ def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, context
         console.show(label + " | 3. Retrieved page subtrees (RAG)", json.dumps(retrieved, ensure_ascii=False, indent=2))
         request = {
             "requirement": requirement, "retrieved_pages": retrieved["pages"],
-            "all_pages": design["pages"], "schema": schema,
+            "all_pages": {pid: {key: page[key] for key in ("name", "route", "root", "images")}
+                for pid, page in design["pages"].items()}, "schema": schema,
             "requirement_obligations": obligations["requirements"][rid],
             "step_obligations": {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]},
             "direct_apis": {aid: contracts["apis"][aid] for aid in contracts["requirements"][rid]},
@@ -42,8 +44,9 @@ def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, context
         for attempt in range(1, 4):
             response = None
             try:
-                response = model.generate_json(INSTRUCTIONS, request)
-                updated = apply_proposal(design, response, rid, tree, images, retrieved["pages"], max_fixtures)
+                response = model.generate_json(INSTRUCTIONS + "\n\n" + PATCH_INSTRUCTIONS, request)
+                proposal = validate_proposal(response, design, tree.own_steps[rid])
+                updated = apply_proposal(design, proposal, rid, tree, images, retrieved["pages"], max_fixtures)
                 for image in requirement["images"]:
                     if not any(image in page["images"] and set(page_elements(updated, pid)).intersection(updated["requirements"][rid])
                             for pid, page in updated["pages"].items()):
@@ -54,7 +57,7 @@ def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, context
                 message = str(error)
                 if isinstance(error, json.JSONDecodeError):
                     correction["invalid_response"] = error.doc
-                    correction["instruction"] = "Return one complete JSON object, not concatenated objects. Keep all pages/elements inside that object."
+                    correction["instruction"] = "Follow the complete JSON examples exactly: one outer object containing pages, elements, bindings, requirement_ui, step_ui, explanation. Use ordinary objects, not patch/entries arrays. Keep the outer closing brace after explanation. Return only the incremental changes, not the accepted design."
                     message += "\nInvalid JSON response (excerpt):\n" + error.doc[:3000]
                 elif response is not None:
                     message += "\nRejected proposal (excerpt):\n" + json.dumps(response, ensure_ascii=False, indent=2)[:3000]
@@ -62,7 +65,7 @@ def synthesize_ui(arc_dir, tree, schema, obligations, contracts, images, context
                 if attempt == 3:
                     raise ValueError(f"UI/data design failed for {rid} after 3 proposals: {error}") from error
                 request["correction"] = correction
-        console.show(label + " | 4. Validated UI/data changes", json.dumps(response, ensure_ascii=False, indent=2))
+        console.show(label + " | 4. Validated incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
         design = updated
     validate_design(design, tree, images, max_fixtures, complete=True)
     save_json(arc_dir / "ui_design.json", design)
