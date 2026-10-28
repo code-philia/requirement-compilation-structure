@@ -7,12 +7,12 @@ from pathlib import Path
 from infrastructure.shared.agent.files import FileWorkspace, source_paths
 from infrastructure.shared.project.entrypoints import implementation_path, implementation_entrypoint
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.stages.backend.context import load_context, requirement_context
+from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.contracts import validate_contracts
 from infrastructure.stages.backend.primitives import validate_design
 from infrastructure.stages.backend.runtime import TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
-from infrastructure.stages.backend.testing import BackendChecks, assert_frozen, require_green, require_red, snapshot_tests, test_budget, validate_test_source
+from infrastructure.stages.backend.testing import BackendChecks, assert_frozen, require_green, require_red, snapshot_tests, validate_test_source
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.stages.database.obligations.records import field_symbols
@@ -23,8 +23,9 @@ from infrastructure.utils.files import save_json, save_text
 
 
 TEST_INSTRUCTIONS = """Generate contract tests BEFORE implementing the API.
-Generate ONE canonical suite for the API, shared by all its requirement uses.
-Keep at most the supplied test_budget cases. Prefer one meaningful success case,
+Generate ONE canonical suite for the API, shared by all_requirement_uses.
+db_schema maps entity names to their full definitions; use it and the supplied SQL.
+Keep at most the supplied max_tests cases. Prefer one meaningful success case,
 one representative invalid-input case, and the key business rejection cases. Combine
 related contract assertions in a case. Do not generate one test per missing/empty field
 or expand table-driven input variations. Rewrite an oversized current file rather
@@ -43,13 +44,13 @@ Bind SQLite booleans as integers 0/1, not JavaScript boolean values.
 Derive assertions from canonical precondition/request and postcondition/response, DB
 effects, and supplied scenarios. Cover every P and Q; include required invalid inputs,
 failure-without-writes, meaningful successes and persistence. Never test 501 as success.
-Test titles include every covered P-/Q- ID and R:Entity.field / W:Entity.field labels.
-One success test can cover many field labels. Every declared P/Q/R/W label must occur
-in an actual test title. Do not merely place coverage IDs in comments. Assert status,
-returned fields/headers and actual DB state, not the implementation source code.
-When a response header is consumed by another API, assert the complete transport
-identity and perform a producer-to-consumer round trip; checking only that a header
-exists is insufficient. Keep shared cookie/token names in the canonical contract.
+Use readable scenario names and the covered P-/Q- IDs in literal test titles.
+Every declared P/Q ID must occur in an actual test title, not only in comments.
+Database R/W effects are verified by assertions, not field labels in titles. Assert
+status, returned fields/headers and actual DB state, not implementation source code.
+Assert the exact session/cookie transport identity specified by the current contract.
+Do not invent other APIs or their contracts; cross-API user workflows are verified in
+step 12. All supplied requirement uses share this one suite.
 Use casts for response.body when needed (its transport type is unknown). Do not assume
 generated UUIDs, timestamps, random hashes, exact error wording, or fields not in the
 contract. Tests may not be skipped, focused, mocked, or weaken the contract. No external
@@ -61,7 +62,8 @@ A passing gate accepts the proposal.
 """
 
 IMPLEMENT_INSTRUCTIONS = """Implement the selected Backend API Primitive against its
-canonical contract and the frozen tests. Preserve its signature: an async exported named
+canonical contract, all_requirement_uses and the frozen tests.
+db_schema maps entity names to their full definitions. Preserve its signature: an async exported named
 function (request: ApiRequest, connection: Database.Database): Promise<ApiResponse>.
 Implement request validation, precondition failures, postconditions, database reads and
 writes, using parameterized better-sqlite3 SQL and transactions for related writes.
@@ -75,7 +77,7 @@ relative .js ESM path. Routing and test bindings are maintained by Python.
 Use node:crypto for UUIDs and credential handling; no new dependencies. For credential
 APIs verify existing scrypt$saltHex$hashHex fixtures with scryptSync(...,64). Store salted
 hashes, never plaintext. Keep exact username comparison and shared cookie conventions
-from contracts. Errors must not leave partial account/session writes. Do not change
+from the current contract. Errors must not leave partial account/session writes. Do not change
 contracts, R/W declarations, assertions, SQL tables, routing infrastructure or test gates.
 Automatic checks run TypeScript and the current and already accepted APIs' frozen suites.
 Return complete files in edits and repair feedback until GREEN. Do not import
@@ -113,7 +115,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     model = TextModel() if contracts["apis"] else None
     owners = {aid: [rid for rid in tree.postorder if aid in contracts["requirements"][rid]] for aid in contracts["apis"]}
     targets = {aid: test_path(ids[0], aid) for aid, ids in owners.items()}
-    budgets = {aid: test_budget(api, max_tests) for aid, api in contracts["apis"].items()}
     # Retire only earlier compiler-owned duplicate suites. Unlisted user tests
     # are preserved; failed migrations retain their retirement list for retry.
     previous = json.loads((arc_dir / "backend_tdd.json").read_text(encoding="utf-8-sig")) if (arc_dir / "backend_tdd.json").is_file() else {}
@@ -157,7 +158,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 generation_files = [targets[key] for key in [*accepted, *generated, aid]]
 
                 def test_gate(relative=relative, api=api):
-                    validate_test_source((output / relative).read_text(encoding="utf-8-sig"), api, budgets[aid])
+                    validate_test_source((output / relative).read_text(encoding="utf-8-sig"), api, max_tests)
                     assert_frozen(output, frozen)
                     compiled = checks.typecheck(generation_files)
                     if compiled["returncode"]:
@@ -165,10 +166,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     return compiled
 
                 context = {
-                    "requirement": requirement_context(tree, rid), "api_id": aid, "api": api,
-                    "all_requirement_uses": [requirement_context(tree, owner) for owner, bindings in contracts["requirements"].items() if aid in bindings],
-                    "db_schema": schema, "test_path": relative,
-                    "test_budget": budgets[aid],
+                    "api_id": aid, "api": api,
+                    "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
+                    "db_schema": schema["entities"], "test_path": relative,
+                    "max_tests": max_tests,
                     "api_import": "../support/apis.js", "support_import": "../support/context.js",
                 }
                 agent = run_file_agent(model, TEST_INSTRUCTIONS, context,
@@ -188,8 +189,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     test_bindings_source(output, contracts["apis"], stubbed=pending))
                 for aid in pending:
                     result = checks.tests(files_by_api[aid])
-                    if result.get("tests", 0) > budgets[aid]:
-                        raise ValueError(f"Keep at most {budgets[aid]} executed tests for {aid}")
+                    if result.get("tests", 0) > max_tests:
+                        raise ValueError(f"Keep at most {max_tests} executed tests for {aid}")
                     assert_frozen(output, frozen)
                     require_red(result)
                     report["red"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}
@@ -232,11 +233,9 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     agent = {"turns": 0, "checks": implementation_gate()}
                 else:
                     context = {
-                        "requirement": requirement_context(tree, rid),
-                        "api_id": aid, "api": api, "db_schema": schema,
-                        "requirement_uses": [requirement_context(tree, rid) for rid, bindings in contracts["requirements"].items() if aid in bindings],
+                        "api_id": aid, "api": api, "db_schema": schema["entities"],
+                        "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
                         "implementation_path": implementation_path("api", aid),
-                        "existing_contracts": contracts["apis"],
                     }
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context,
                         FileWorkspace(output, {implementation_path("api", aid)},

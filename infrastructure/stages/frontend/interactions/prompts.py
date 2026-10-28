@@ -124,7 +124,7 @@ def example_api(name, method, path, reads, writes, body, branches):
     for status, fields, meanings in branches:
         responses.append({"status": status, "body": example_shape(fields), "headers": example_shape({})})
         conditions.extend({"id": qid, "description": description,
-            "response_fields": ["/body/" + next(iter(fields))], "status": status}
+            "status": status}
             for qid, description in meanings)
     return {"description": name, "read": reads, "write": writes,
         "signature": {"name": name, "method": method, "path": path},

@@ -23,6 +23,12 @@ def requirement_context(tree, rid: str) -> dict:
     return {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]], "concatenated_steps": tree.concatenated_steps(rid)}
 
 
+def api_requirement_uses(tree, allocations: dict, aid: str) -> list[dict]:
+    """Supply every API owner once, with structured steps as the sole scenario representation."""
+    return [{**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]]}
+        for rid, ids in allocations.items() if aid in ids]
+
+
 def supplied_sources(output: Path, api: dict, schema: dict) -> dict:
     """The caller selects context paths; the agent never explores the codebase."""
     entities = {symbol.split(".")[0] for mode in ("read", "write") for symbol in api[mode]}

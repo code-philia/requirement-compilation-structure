@@ -12,18 +12,8 @@ from infrastructure.utils.files import save_bytes
 
 
 def condition_tokens(api: dict) -> set[str]:
-    """Collect P/Q condition IDs and R/W field tokens that test titles must trace."""
-    return {item["id"] for kind in ("precondition", "postcondition") for item in api[kind]} | {f"R:{field}" for field in api["read"]} | {f"W:{field}" for field in api["write"]}
-
-
-def test_budget(api: dict, maximum: int = 5) -> int:
-    """Choose a small test-case budget while ensuring all declared response branches can be covered."""
-    if maximum < 1:
-        raise ValueError("--max-tests must be positive")
-    branches = 1 + len(api["response"]["errors"])
-    if branches > maximum:
-        raise ValueError(f"This contract declares {branches} response branches; increase --max-tests to cover them")
-    return min(maximum, max(2, branches, 1 + len(api["precondition"])))
+    """Collect P/Q IDs for lightweight condition-to-test traceability."""
+    return {item["id"] for kind in ("precondition", "postcondition") for item in api[kind]}
 
 
 def validate_test_source(source: str, api: dict, maximum: int | None = None) -> None:
@@ -38,7 +28,7 @@ def validate_test_source(source: str, api: dict, maximum: int | None = None) -> 
     names = "\n".join(title for _, title in titles)
     missing = [token for token in sorted(condition_tokens(api)) if not re.search(r"(?<![A-Za-z0-9_.:-])" + re.escape(token) + r"(?![A-Za-z0-9_.:-])", names)]
     if missing:
-        raise ValueError(f"Test titles must trace every P/Q and R/W obligation; missing: {missing}")
+        raise ValueError(f"Test titles must trace every P/Q condition; missing: {missing}")
     if not re.search(r"\bassert\.(?:equal|deepEqual|ok|match|notEqual|throws|rejects|strictEqual|deepStrictEqual)\s*\(", source):
         raise ValueError("Contract tests must assert observable results")
 

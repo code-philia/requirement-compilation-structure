@@ -32,21 +32,6 @@ def validate_shape(schema: dict) -> None:
         validate_shape(schema.get("items"))
 
 
-def resolve_field(schema: dict, pointer: str) -> None:
-    """Verify that a condition's JSON Pointer resolves to an existing field in its I/O schema."""
-    if not isinstance(pointer, str) or not pointer.startswith("/"):
-        raise ValueError(f"Use a JSON Pointer to bind a condition to an I/O field: {pointer}")
-    current = schema
-    for raw in pointer[1:].split("/"):
-        token = raw.replace("~1", "/").replace("~0", "~")
-        if current.get("type") == "object" and token in current.get("properties", {}):
-            current = current["properties"][token]
-        elif current.get("type") == "array" and token.isdigit():
-            current = current["items"]
-        else:
-            raise ValueError(f"Condition references an unknown I/O field: {pointer}")
-
-
 def validate_interface(contract: dict) -> None:
     """Validate the fixed API interface independently of its P/Q conditions."""
     if not isinstance(contract, dict) or set(contract) != INTERFACE_KEYS:
@@ -92,22 +77,21 @@ def validate_interface(contract: dict) -> None:
 
 
 def validate_contract(contract: dict) -> None:
-    """Validate fixed I/O and bind P/Q to declared request/response fields."""
+    """Validate semantic P/Q records and their declared response statuses."""
     if not isinstance(contract, dict) or set(contract) != CONTRACT_KEYS:
         raise ValueError(f"Contract must contain exactly {sorted(CONTRACT_KEYS)}")
     validate_interface({key: contract[key] for key in INTERFACE_KEYS})
-    request = contract["request"]
     branches = [contract["response"]["success"], *contract["response"]["errors"]]
     statuses = {branch["status"] for branch in branches}
-    # Bind P to request fields and Q to fields of a declared response branch.
+    # P names a declared rejection status; Q covers every declared response status.
     ids = set()
-    for kind, fields_key in (("precondition", "request_fields"), ("postcondition", "response_fields")):
+    for kind in ("precondition", "postcondition"):
         conditions = contract[kind]
         if not isinstance(conditions, list) or (kind == "postcondition" and not conditions):
             raise ValueError(f"{kind} must be a list; postconditions must not be empty")
         for condition in conditions:
             status_key = "error_status" if kind == "precondition" else "status"
-            if not isinstance(condition, dict) or set(condition) != {"id", "description", fields_key, status_key}:
+            if not isinstance(condition, dict) or set(condition) != {"id", "description", status_key}:
                 raise ValueError(f"Invalid {kind} record")
             cid = condition["id"]
             if not isinstance(cid, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", cid) or cid in ids:
@@ -115,18 +99,9 @@ def validate_contract(contract: dict) -> None:
             ids.add(cid)
             if not isinstance(condition["description"], str) or not condition["description"].strip():
                 raise ValueError("Condition descriptions must not be empty")
-            if not isinstance(condition[fields_key], list) or not condition[fields_key]:
-                raise ValueError("Each condition must bind at least one I/O field")
             status = condition[status_key]
             if type(status) is not int or status not in statuses or (kind == "precondition" and status < 400):
                 raise ValueError("Condition status must match a declared response branch")
-            if kind == "precondition":
-                root = {"type": "object", "properties": request}
-            else:
-                branch = next(item for item in branches if item["status"] == status)
-                root = {"type": "object", "properties": {"body": branch["body"], "headers": branch["headers"], "status": {"type": "integer"}}}
-            for pointer in condition[fields_key]:
-                resolve_field(root, pointer)
     if {item["status"] for item in contract["postcondition"]} != statuses:
         raise ValueError("Each response status needs a corresponding postcondition")
 
