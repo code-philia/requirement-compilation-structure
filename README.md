@@ -21,7 +21,6 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 ```bash
-cd compiler
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -31,7 +30,6 @@ cp -n .env.example .env
 Fallback without uv. Windows PowerShell setup (Python 3.11+ and Node/npm must be on PATH):
 
 ```powershell
-cd compiler
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
