@@ -41,8 +41,11 @@ def main() -> None:
         show_panel("Requirement compiler | Pipeline", f"Input: {input_dir}\nOutput: {output_dir}\nStages to run: {len(STEPS)}")
         for index, step in enumerate(STEPS, 1):
             show_panel(f"[{index}/{len(STEPS)}] {stage_label(step)}", f"Running {step}")
+            command = [sys.executable, str(COMPILER_DIR / step), "--input", str(input_dir), "--output", str(output_dir)]
+            if step == "01_explore_requirement.py":
+                command.append("--no-browse")
             process = start_process(
-                [sys.executable, str(COMPILER_DIR / step), "--input", str(input_dir), "--output", str(output_dir)],
+                command,
                 cwd=COMPILER_DIR,
             )
             try:
