@@ -1,0 +1,16 @@
+[project]
+name = "requirement-compilation-structure"
+version = "0.1.0"
+description = "Compile a requirement tree into a database, backend APIs, and an interactive frontend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML",
+    "openai",
+    "python-dotenv",
+    "jsonschema>=4,<5",
+    "httpx",
+]
+
+[tool.uv]
+package = false
