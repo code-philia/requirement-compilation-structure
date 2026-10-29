@@ -193,7 +193,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             status = test_run_status(behavior)
             return {"typecheck": compiled, "behavior": behavior, "status": status}
 
-        test_context = {**context, "schema": schema["entities"], "test_path": relative,
+        test_context = {**context, "schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
             "max_tests": max_tests}
         agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
             FileWorkspace.for_target(output, "e2e_test", rid, existing=relative,

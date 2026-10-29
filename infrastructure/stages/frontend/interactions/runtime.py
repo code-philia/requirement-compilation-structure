@@ -1,4 +1,4 @@
-"""Step 12 lowering: bind DOM triggers to fixed-path event functions.
+"""Step 12 lowering: bind DOM triggers to model-selected event functions.
 
 Compiler-owned TypeScript strings provide UI state, guarded API calls, navigation,
 and event registration. The model implements each event's business logic; the

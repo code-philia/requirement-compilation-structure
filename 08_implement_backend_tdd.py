@@ -169,7 +169,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 context = {
                     "api_id": aid, "api": api,
                     "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
-                    "db_schema": schema["entities"], "test_path": relative,
+                    "db_schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
                     "max_tests": max_tests,
                     "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
                 }

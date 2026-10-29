@@ -1,6 +1,6 @@
 """Step 10 lowering: generate UI types, page wiring, and presence-test setup.
 
-Compiler-owned TypeScript/configuration strings define a stable host for fixed-path React components. This stage exposes UI/data only; business interactions
+Compiler-owned TypeScript/configuration strings define a stable host for model-selected React components. This stage exposes UI/data only; business interactions
 are designed in step 11 and installed by the interaction runtime in step 12."""
 
 import json
