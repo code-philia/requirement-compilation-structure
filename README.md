@@ -68,3 +68,12 @@ uv run 11_design_ui_interactions.py --pause --output output/demo
 # Step 12: E2E TDD
 uv run 12_implement_frontend_tdd.py --pause --output output/demo
 ```
+
+## Start the built website
+```bash
+cd output/demo
+npm install
+npm run db:init
+npm run build
+npm start
+```
