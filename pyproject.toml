@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv",
     "jsonschema>=4,<5",
     "httpx",
+    "playwright>=1.64.1",
 ]
 
 [tool.uv]
