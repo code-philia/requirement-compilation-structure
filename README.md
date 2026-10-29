@@ -5,27 +5,26 @@ Compile a requirement tree into a database, backend APIs, and an interactive fro
 ## Requirements
 
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (recommended) or a local venv + pip
 - Node.js 22.12+ and npm
 - An OpenAI-compatible API. Step 01 needs a vision-capable model only when the requirements reference images.
 
-From the repository root, create an environment and install the Python dependencies:
+Install [uv](https://docs.astral.sh/uv/) (recommended), then from the repository root:
 
 ```bash
-python -m venv .venv
+uv sync
 source .venv/bin/activate
-python -m pip install -r requirements.txt
 cp -n .env.example .env
 ```
 
 On Windows PowerShell:
 
 ```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+uv sync
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Activation is optional. Set the model credentials in `.env`:
+Set the model credentials in `.env`:
 
 ```dotenv
 MODEL=your-model
@@ -42,15 +41,15 @@ Steps 08, 10, and 12 install the generated application's npm dependencies when n
 Prepare `input/requirements.yaml` and any referenced images, then run:
 
 ```bash
-python run_all.py --input input --output outputs/demo
+uv run python run_all.py --input input --output outputs/demo
 ```
 
-`run_all.py` runs steps **00–03 and 05–12**. It skips step 04, which only prints the schema and obligation relationships. Run that view separately with `python 04_check_db_obligations.py --output outputs/demo`. Step 01's interactive browser is disabled in the pipeline so execution continues without waiting for input.
+`run_all.py` runs steps **00–03 and 05–12**. It skips step 04, which only prints the schema and obligation relationships. Run that view separately with `uv run python 04_check_db_obligations.py --output outputs/demo`. Step 01's interactive browser is disabled in the pipeline so execution continues without waiting for input.
 
 Run an individual step after its prerequisites are ready. For example:
 
 ```bash
-python 01_explore_requirement.py --input input --output outputs/demo
+uv run python 01_explore_requirement.py --input input --output outputs/demo
 ```
 
 By default, step 01 analyzes the requirements and images, saves its artifacts, then opens the terminal browser. Use `--browse` to skip analysis and browse only, or `--no-browse` to analyze without opening the browser. Add `--pause` to a numbered step to wait for Enter between display panels. Relative paths resolve from the current working directory.
@@ -122,7 +121,7 @@ npm run test:e2e
 Run the Python protocol and portability tests from the repository root:
 
 ```bash
-python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
-On Windows, replace `python` with `\.venv\Scripts\python.exe` and use `npm.cmd` if the PowerShell `npm.ps1` shim is blocked.
+On Windows without uv, replace `python` with `\.venv\Scripts\python.exe`. Use `npm.cmd` if the PowerShell `npm.ps1` shim is blocked.
