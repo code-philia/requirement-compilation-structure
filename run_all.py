@@ -8,7 +8,7 @@ import sys
 from infrastructure.utils.cli import COMPILER_DIR, resolve_directories
 from infrastructure.utils.processes import start_process, stop_process
 from infrastructure.utils.presentation.logging import configure_console
-from infrastructure.utils.presentation.console import highlight
+from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.stages import stage_label
 
 
@@ -38,9 +38,9 @@ def main() -> None:
         input_dir, output_dir = resolve_directories(args)
         if not input_dir.is_dir():
             raise ValueError(f"Input directory does not exist: {input_dir}")
-        print(f"Input: {input_dir}\nOutput: {output_dir}", flush=True)
+        show_panel("Requirement compiler | Pipeline", f"Input: {input_dir}\nOutput: {output_dir}\nStages to run: {len(STEPS)}")
         for index, step in enumerate(STEPS, 1):
-            print("\n" + highlight(f"[{index}/{len(STEPS)}] {stage_label(step)} | {step}"), flush=True)
+            show_panel(f"[{index}/{len(STEPS)}] {stage_label(step)}", f"Running {step}")
             process = start_process(
                 [sys.executable, str(COMPILER_DIR / step), "--input", str(input_dir), "--output", str(output_dir)],
                 cwd=COMPILER_DIR,
@@ -58,7 +58,7 @@ def main() -> None:
         parser.exit(1, f"Execution failed: {error}\n")
     except KeyboardInterrupt:
         parser.exit(130, "Pipeline interrupted.\n")
-    print(f"\nAll steps completed. Output: {output_dir}", flush=True)
+    show_panel("[DONE] All steps completed", f"Output: {output_dir}", tone="success")
 
 
 if __name__ == "__main__":

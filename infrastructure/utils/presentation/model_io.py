@@ -9,7 +9,7 @@ from contextvars import ContextVar
 
 import httpx
 
-from infrastructure.utils.presentation.console import current_activity, highlight, preview
+from infrastructure.utils.presentation.console import current_activity, preview, show_panel
 from infrastructure.utils.presentation.logging import session_info
 
 
@@ -90,9 +90,9 @@ def _output_preview(content: str) -> str:
             lines.append(f"... {len(edits) - 8} more file edits")
         for edit in edits[:3]:
             if isinstance(edit, dict) and isinstance(edit.get("content"), str):
-                lines.extend([f"\n--- {edit.get('path')} ---", preview(edit["content"], max_lines=6, max_chars=650)])
+                lines.extend([f"\n--- {edit.get('path')} ---", preview(edit["content"], max_lines=12, max_chars=1400)])
         return "\n".join(lines)
-    return preview(json.dumps(value, ensure_ascii=False, indent=2))
+    return preview(json.dumps(value, ensure_ascii=False, indent=2), max_lines=40, max_chars=6000)
 
 
 def invoke(client, arguments: dict):
@@ -104,13 +104,12 @@ def invoke(client, arguments: dict):
     token = _call.set({"id": call_id, "activity": activity})
     started = monotonic()
     stop = Event()
-    print("\n" + highlight(f"[MODEL INPUT] {label} | call {call_id[:8]}"), flush=True)
-    print(preview(_input_summary(arguments), max_lines=8, max_chars=1000), flush=True)
-    print("[WAITING] Waiting for model response...", flush=True)
+    show_panel(f"[MODEL INPUT] {label} | call {call_id[:8]}", _input_summary(arguments), tone="input", max_lines=12, max_chars=1600)
+    show_panel(f"[WAITING] {label}", "Waiting for model response...", tone="waiting")
 
     def heartbeat():
         while not stop.wait(10):
-            print(f"[WAITING] {label} | {monotonic() - started:.0f}s elapsed (including transport retries)", flush=True)
+            show_panel(f"[WAITING] {label}", f"{monotonic() - started:.0f}s elapsed (including transport retries)", tone="waiting")
 
     thread = Thread(target=heartbeat, daemon=True)
     try:
@@ -123,13 +122,13 @@ def invoke(client, arguments: dict):
         stop.set()
         thread.join()
         content = "\n".join(choice.message.content or "" for choice in response.choices)
-        print(highlight(f"[MODEL OUTPUT] {label} | {monotonic() - started:.1f}s"), flush=True)
-        print(_output_preview(content or json.dumps(raw, ensure_ascii=False)), flush=True)
+        show_panel(f"[MODEL OUTPUT] {label} | {monotonic() - started:.1f}s",
+            _output_preview(content or json.dumps(raw, ensure_ascii=False)), tone="output", max_lines=60, max_chars=8500)
         return response
     except BaseException as error:
         _record("error", elapsed_seconds=monotonic() - started,
             error_type=type(error).__name__, message=str(error))
-        print(f"[MODEL FAILED] {label} | {type(error).__name__}: {preview(str(error), max_lines=4, max_chars=500)}", flush=True)
+        show_panel(f"[MODEL FAILED] {label}", f"{type(error).__name__}: {error}", tone="error", max_lines=12, max_chars=1800)
         raise
     finally:
         stop.set()

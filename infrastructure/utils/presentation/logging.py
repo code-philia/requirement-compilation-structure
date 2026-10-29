@@ -4,6 +4,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
+import re
 from threading import RLock
 import traceback
 from contextvars import ContextVar
@@ -39,7 +40,7 @@ class TeeStream:
         """Mirror text to the terminal and log, immediately flushing the log and returning the character count."""
         with self.lock:
             self.terminal.write(text)
-            self.log.write(text)
+            self.log.write(re.sub(r"\x1b\[[0-9;]*m", "", text))
             self.log.flush()
         return len(text)
 
@@ -64,6 +65,7 @@ def configure_console() -> None:
 @contextmanager
 def console_log(output_dir: Path):
     """Append a timestamped step session to compiler.log while mirroring stdout/stderr and recording uncaught failures."""
+    from infrastructure.utils.presentation.console import show_panel
     output_dir.mkdir(parents=True, exist_ok=True)
     configure_console()
     with (output_dir / "compiler.log").open("a", encoding="utf-8", newline="\n") as log:
@@ -75,17 +77,16 @@ def console_log(output_dir: Path):
             script = Path(sys.argv[0]).name
             token = _session.set({"output": output_dir, "stage": stage_label(script), "lock": lock, "log": log})
             started = monotonic()
-            print(f"\n=== {timestamp} | {stage_label(script)} | {script} ===", flush=True)
-            print(f"Logs: {output_dir / 'compiler.log'}\nFull model I/O: {output_dir / 'model_calls.jsonl'}", flush=True)
+            show_panel(f"[START] {stage_label(script)}", f"{timestamp}\nScript: {script}\nLogs: {output_dir / 'compiler.log'}\nFull model I/O: {output_dir / 'model_calls.jsonl'}")
             try:
                 yield
             except BaseException as error:
                 if not isinstance(error, SystemExit):
                     traceback.print_exc(file=log)
-                print(f"[FAILED] {stage_label(script)} after {monotonic() - started:.1f}s", flush=True)
+                show_panel(f"[FAILED] {stage_label(script)}", f"Stopped after {monotonic() - started:.1f}s", tone="error")
                 raise
             else:
-                print(f"[DONE] {stage_label(script)} in {monotonic() - started:.1f}s", flush=True)
+                show_panel(f"[DONE] {stage_label(script)}", f"Completed in {monotonic() - started:.1f}s", tone="success")
             finally:
                 stdout.flush()
                 stderr.flush()

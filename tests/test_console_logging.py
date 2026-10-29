@@ -12,7 +12,7 @@ import httpx
 from openai import OpenAI
 
 from infrastructure.shared.models.text import TextModel
-from infrastructure.utils.presentation.console import DemoConsole, preview
+from infrastructure.utils.presentation.console import DemoConsole, preview, show_panel, display_width
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.model_io import _http_request, _http_response, invoke
 
@@ -117,9 +117,35 @@ class ConsoleLogging(unittest.TestCase):
         self.assertEqual(json.loads(records[1]["body"]), arguments)
 
     def test_preview_limits_single_line_and_many_short_lines(self):
-        self.assertLess(len(preview("x" * 1000000)), 3000)
-        self.assertLess(len(preview("x\n" * 1000000)), 3000)
+        self.assertLess(len(preview("x" * 1000000)), 6000)
+        self.assertLess(len(preview("x\n" * 1000000)), 6000)
         self.assertEqual(preview("complete"), "complete")
+
+    def test_panel_aligns_wide_text_and_long_titles_on_narrow_terminals(self):
+        import os
+        terminal = StringIO()
+        with redirect_stdout(terminal), patch("shutil.get_terminal_size", return_value=os.terminal_size((45, 24))):
+            show_panel("Stage 11 | REQ-REGISTER | Interaction design", "中文内容 and e\u0301\n" + "长" * 80)
+        rows = [row for row in terminal.getvalue().splitlines() if row]
+        self.assertTrue(rows[0].startswith("┌"))
+        self.assertTrue(rows[-1].startswith("└"))
+        self.assertEqual({display_width(row) for row in rows}, {45})
+        self.assertIn("Interaction design", "".join(rows).replace(" ││ ", ""))
+
+    def test_colors_stay_out_of_logs_and_respect_no_color(self):
+        terminal = StringIO()
+        terminal.isatty = lambda: True
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.dict("os.environ", {}, clear=True), redirect_stdout(terminal), console_log(root):
+                show_panel("[MODEL OUTPUT]", "Response content", tone="output")
+            self.assertIn("\x1b[", terminal.getvalue())
+            self.assertNotIn("\x1b[", (root / "compiler.log").read_text())
+        terminal.seek(0)
+        terminal.truncate()
+        with patch.dict("os.environ", {"NO_COLOR": "1"}), redirect_stdout(terminal):
+            show_panel("[MODEL OUTPUT]", "Response content", tone="output")
+        self.assertNotIn("\x1b[", terminal.getvalue())
 
     def test_waiting_heartbeat_includes_activity_and_elapsed_time(self):
         model = self.model(lambda request: httpx.Response(200, json=self.response('{"ok":true}')))
