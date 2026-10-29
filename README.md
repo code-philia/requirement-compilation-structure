@@ -13,7 +13,6 @@ Install [uv](https://docs.astral.sh/uv/) (recommended), then from the repository
 
 ```bash
 uv sync
-source .venv/bin/activate
 cp -n .env.example .env
 ```
 
