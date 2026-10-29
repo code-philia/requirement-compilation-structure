@@ -5,11 +5,15 @@ from infrastructure.shared.agent.protocol import FILE_EDIT_RULES
 
 
 def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, gate,
-        max_turns: int, console, label: str, feedback=None) -> dict:
-    """Refresh task paths and files each round; accept edits only after the gate passes."""
+        max_turns: int, console, label: str, feedback=None, feedback_filter=None) -> dict:
+    """Refresh files and paths; optionally select failure-related files before repair.
+
+    The stage-owned feedback filter may add writable sources/read-only references
+    and condense check reports. It cannot change the acceptance gate or its result.
+    """
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
-    feedback = [] if feedback is None else [feedback]
+    feedback = [] if feedback is None else [feedback_filter(feedback) if feedback_filter else feedback]
     for turn in range(1, max_turns + 1):
         console.show(f"{label} | Edit round {turn}/{max_turns}",
             "Generate file edits, then run the stage's compilation and test acceptance checks.")
@@ -25,5 +29,6 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
         except (ValueError, OSError) as error:
             message = str(error)
             console.show(f"{label} | Repair feedback", message)
-            feedback = [{"error": message}]
+            rejected = getattr(error, "feedback", {"error": message})
+            feedback = [feedback_filter(rejected) if feedback_filter else rejected]
     raise ValueError(f"Agent exhausted {max_turns} rounds for {label}")

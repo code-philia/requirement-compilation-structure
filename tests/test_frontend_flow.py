@@ -98,6 +98,21 @@ class FrontendFlow(unittest.TestCase):
             validate_design(ui, self.tree, {})
 
     def test_multiple_new_events_keep_model_paths_and_run_complete_acceptance(self):
+        """Create every navigation dependency before accepting behavioral GREEN."""
+        self.check_event_creation()
+
+    def test_green_tests_do_not_skip_missing_or_deleted_event_files(self):
+        """Even inadequate GREEN tests cannot bypass required implementation files."""
+        from infrastructure.shared.project.entrypoints import remember_path
+        remember_path(self.output, "event", "EV-COUNT", "frontend/src/deleted.ts")
+        self.check_event_creation(early_green=True)
+
+    def test_requirement_repair_can_edit_every_created_handler(self):
+        """The behavior-repair phase can fix an earlier handler after all files exist."""
+        self.check_event_creation(needs_repair=True)
+
+    def check_event_creation(self, early_green=False, needs_repair=False):
+        """Run the real orchestration with fake browser reports and model edits."""
         from unittest.mock import patch
         from infrastructure.shared.agent.files import FileWorkspace
         from infrastructure.shared.project.entrypoints import selected_path
@@ -110,12 +125,26 @@ class FrontendFlow(unittest.TestCase):
             workspace.apply({"edits": [{"path": f"frontend/src/screens/{pid}.tsx",
                 "content": "export function Page() {return null;}"}]})
         calls = []
+        repaired = False
         def generate(instructions, payload):
+            nonlocal repaired
             task = payload["task"]
+            if "new_file" not in task:
+                self.assertEqual(set(task["events"]), set(self.interactions["events"]))
+                for eid in self.interactions["events"]:
+                    path = selected_path(self.output, "event", eid)
+                    self.assertTrue(payload["files"][path]["writable"], eid)
+                self.assertNotIn("frontend/tests/ui/editor.spec.ts", payload["files"])
+                repaired = True
+                return {"edits": [{"path": selected_path(self.output, "event", "EV-INPUT"),
+                    "content": "export function handle() { /* repaired */ }"}]}
             creation = task["new_file"]
             if creation["kind"] == "e2e_test":
-                self.assertTrue(payload["files"]["frontend/src/screens/editor.tsx"]["writable"])
+                self.assertNotIn("frontend/src/screens/editor.tsx", payload["files"])
                 self.assertFalse(payload["files"]["frontend/src/ui-runtime.ts"]["writable"])
+            else:
+                self.assertEqual(set(task["events"]), {creation["target"]})
+                self.assertEqual(set(payload["files"]), {"frontend/src/ui-runtime.ts"})
             calls.append(deepcopy(task))
             suffix = ".spec.ts" if creation["kind"] == "e2e_test" else ".ts"
             path = f"{creation['directory']}/chosen/{creation['target']}{suffix}"
@@ -127,7 +156,8 @@ class FrontendFlow(unittest.TestCase):
             "skipped": 0, "flaky": 0, "errors": [], "failures": []}
         ui_checks.tests.return_value = green
         def test_events(files):
-            if all(selected_path(self.output, "event", eid) for eid in self.interactions["events"]):
+            if early_green or (all(selected_path(self.output, "event", eid) for eid in self.interactions["events"])
+                    and (not needs_repair or repaired)):
                 return green
             return {**green, "returncode": 1, "passed": 0, "failed": 1,
                 "failures": ["expect(received).toBe(expected)"]}
@@ -145,10 +175,97 @@ class FrontendFlow(unittest.TestCase):
         self.assertEqual(report["status"], "GREEN")
         creations = [task["new_file"]["target"] for task in calls if task["new_file"]["kind"] == "event"]
         self.assertEqual(creations, ["EV-COUNT", "EV-INPUT", "EV-SAVE"])
-        self.assertEqual(report["requirements"]["REQ-A"]["implementation_turns"], 3)
+        self.assertEqual(report["requirements"]["REQ-A"]["implementation_turns"], 4 if needs_repair else 3)
         self.assertEqual(report["requirements"]["REQ-B"]["implementation_turns"], 0)
         self.assertIn("chosen/REQ-A.spec.ts", report["requirements"]["REQ-A"]["test_path"])
         self.assertGreater(checks.tests.call_count, 3)
+
+    def test_single_event_context_keeps_contract_and_form_data_without_other_events(self):
+        """Keep complete local contracts and form fields without unrelated layout/API context."""
+        from infrastructure.stages.frontend.interactions.scope import model_context
+        context = scenario_context(self.ui, self.interactions, "REQ-A")
+        context.update({"backend_apis": self.backend["apis"], "requirement": {"id": "REQ-A"}})
+        context["page_subtrees"]["editor"]["elements"]["UI-TEXT"]["prop"]["style"] = "layout " * 1000
+        selected = model_context(context, {"EV-SAVE"})
+        self.assertEqual(set(selected["events"]), {"EV-SAVE"})
+        self.assertEqual(selected["contracts"]["EV-SAVE"], self.interactions["contracts"]["EV-SAVE"])
+        self.assertEqual(set(selected["backend_apis"]), {"API-SAVE"})
+        self.assertIn("form.text", selected["page_subtrees"]["editor"]["bindings"])
+        self.assertNotIn("style", selected["page_subtrees"]["editor"]["elements"]["UI-TEXT"]["prop"])
+        self.assertNotIn("fixtures", selected["page_subtrees"]["editor"])
+
+    def test_repair_scope_keeps_all_handlers_and_transitive_imports_writable(self):
+        """Do not omit required handlers/helpers, including a missing indexed file."""
+        from infrastructure.shared.project.entrypoints import remember_path
+        from infrastructure.stages.frontend.interactions.scope import InteractionFiles
+        paths = {"EV-INPUT": "frontend/src/events/input.ts", "EV-SAVE": "frontend/src/events/save.ts",
+            "EV-COUNT": "frontend/src/events/deleted.ts"}
+        for eid, relative in paths.items():
+            remember_path(self.output, "event", eid, relative)
+        save_text(self.output / paths["EV-INPUT"], 'import { value } from "../shared/value.js";')
+        save_text(self.output / paths["EV-SAVE"], "export function handle() {}")
+        save_text(self.output / "frontend/src/shared/value.ts", 'export { value } from "./nested";')
+        save_text(self.output / "frontend/src/shared/nested/index.ts", 'import "../value.js"; export const value = 1;')
+        save_text(self.output / "frontend/src/unrelated.ts", "unrelated")
+        selected = InteractionFiles(self.output, self.ui)
+        workspace = selected.workspace(events=set(paths))
+        files = workspace.state()
+        for relative in [*paths.values(), "frontend/src/shared/value.ts", "frontend/src/shared/nested/index.ts"]:
+            self.assertTrue(files[relative]["writable"], relative)
+        self.assertIsNone(files[paths["EV-COUNT"]]["content"])
+        self.assertNotIn("frontend/src/unrelated.ts", files)
+        self.assertFalse(files["frontend/src/ui-runtime.ts"]["writable"])
+
+    def test_feedback_expands_page_dependencies_and_preserves_frozen_tests(self):
+        """A locator/compiler error exposes repairable sources, never accepted tests."""
+        from infrastructure.shared.project.entrypoints import remember_path
+        from infrastructure.stages.frontend.interactions.scope import InteractionFiles
+        page, helper = "frontend/src/screens/summary.tsx", "frontend/src/shared/count.ts"
+        remember_path(self.output, "page", "summary", page)
+        save_text(self.output / page, 'import { count } from "../shared/count.js";')
+        save_text(self.output / helper, "export const count = 0;")
+        frozen = "frontend/tests/e2e/accepted.spec.ts"
+        save_text(self.output / frozen, "accepted assertions")
+        selected = InteractionFiles(self.output, self.ui)
+        generation = selected.workspace(target=("e2e_test", "REQ-A"))
+        generation.state()
+        generation.apply({"edits": [{"path": "frontend/tests/e2e/new.spec.ts", "content": "new assertions"}]})
+        selected.feedback(generation, {"error": "generation error"})
+        workspace = selected.workspace()
+        result = selected.feedback(workspace, {"ui": {"returncode": 1,
+            "failures": [f"UI-COUNT is not visible: {frozen}; frontend/tests/e2e/new.spec.ts"], "output": "duplicate reporter body"},
+            "typecheck": {"returncode": 0, "output": "successful compiler output"}})
+        files = workspace.state()
+        self.assertTrue(files[page]["writable"])
+        self.assertTrue(files[helper]["writable"])
+        self.assertFalse(files[frozen]["writable"])
+        self.assertFalse(files["frontend/tests/e2e/new.spec.ts"]["writable"])
+        self.assertNotIn("output", result["ui"])
+        self.assertEqual(result["typecheck"], {"returncode": 0})
+
+    def test_agent_retry_receives_sources_identified_by_failed_checks(self):
+        """A file omitted initially becomes writable before the next model repair request."""
+        from infrastructure.shared.agent.loop import run_file_agent
+        from infrastructure.stages.frontend.interactions.scope import InteractionFiles
+        page = "frontend/src/screens/broken.tsx"
+        helper = "frontend/src/shared/value.ts"
+        save_text(self.output / page, 'import { value } from "../shared/value.js";')
+        save_text(self.output / helper, "export const value = false;")
+        selection = InteractionFiles(self.output)
+        workspace = selection.workspace()
+        calls = []
+        def generate(instructions, payload):
+            calls.append(payload)
+            if len(calls) == 1:
+                self.assertNotIn(page, payload["files"])
+                return {"edits": []}
+            self.assertTrue(payload["files"][page]["writable"])
+            self.assertTrue(payload["files"][helper]["writable"])
+            return {"edits": [{"path": helper, "content": "export const value = true;"}]}
+        gate = Mock(side_effect=[ValueError(f"{page}(1,1): Type error"), {"green": True}])
+        result = run_file_agent(Mock(generate_json=generate), "Repair", {}, workspace,
+            gate, 2, Mock(), "Repair", feedback_filter=lambda value: selection.feedback(workspace, value))
+        self.assertEqual(result["checks"], {"green": True})
 
     def test_runtime_types_survive_returning_to_presentation_stage(self):
         from infrastructure.shared.project.initialize import initialize_project
