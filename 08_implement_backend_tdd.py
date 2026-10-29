@@ -156,8 +156,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 label = f"{rid} / {aid} (uses: {', '.join(api_owners)})"
                 console.show(f"{label} | Test Generation: P / Q / R / W", json.dumps(api, ensure_ascii=False, indent=2))
 
-                generation_files = [targets[key] for key in [*accepted, *generated, aid]]
-
                 def test_gate(aid=aid):
                     chosen = selected_path(output, "backend_test", aid) or relative
                     targets[aid] = chosen
