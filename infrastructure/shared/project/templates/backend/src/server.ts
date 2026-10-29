@@ -14,7 +14,7 @@ const server = createApp(connection).listen(port, (error?: Error) => {
     return;
   }
   const address = server.address();
-  console.log(`Application listening on port ${typeof address === "object" && address ? address.port : port}`);
+  console.log(`Application listening at http://localhost:${typeof address === "object" && address ? address.port : port}`);
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => server.close(() => { connection.close(); process.exit(0); }));
