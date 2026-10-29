@@ -13,6 +13,7 @@ from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import apply_patch
 from infrastructure.utils.files import save_json
+from infrastructure.shared.models.structure import object_fields, string_list
 
 
 # --- Extension point 02A: schema discovery policy ------------------------------
@@ -119,13 +120,13 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
             patch = None
             try:
                 patch = model.generate_json(INSTRUCTIONS, request)
-                if not isinstance(patch, dict) or not isinstance(patch.get("related_fields"), list):
-                    raise ValueError("Model response must include related_fields")
-                updated = apply_patch(schema, {key: patch[key] for key in ("entities", "explanation")}, retrieved["entities"])
+                object_fields(patch, {"entities": dict, "related_fields": list}, "schema proposal")
+                string_list(patch["related_fields"], "related_fields")
+                updated = apply_patch(schema, patch, retrieved["entities"])
                 symbols = {f"{name}.{field}" for name, entity in updated["entities"].items() for field in entity["fields"]}
-                if len(patch["related_fields"]) != len(set(patch["related_fields"])) or any(field not in symbols for field in patch["related_fields"]):
-                    raise ValueError("related_fields must contain unique fields from the accepted schema")
-                updated["requirements"][requirement["id"]] = sorted(patch["related_fields"])
+                if any(field not in symbols for field in patch["related_fields"]):
+                    raise ValueError("related_fields must contain fields from the accepted schema")
+                updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
                 from infrastructure.stages.database.schema import validate_schema
                 validate_schema(updated)
                 break
@@ -139,7 +140,7 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
         # proposals out of it so one mistake does not contaminate later nodes.
         save_json(arc_dir / "db_schema.json", updated)
         console.show(f"{label} | 4. Schema changes (validated and saved)", (
-            patch["explanation"] + "\n\n" + format_changes(schema, updated)
+            patch.get("explanation", "") + "\n\n" + format_changes(schema, updated)
         ))
         schema = updated
     print(f"Schema saved: {arc_dir / 'db_schema.json'}", flush=True)

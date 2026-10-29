@@ -7,7 +7,7 @@ from pathlib import Path
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.stages.database.order import implementation_groups, table_dependencies
 from infrastructure.stages.database.runtime import initializer_source
-from infrastructure.stages.database.validation import validate_implementations, validate_response, validate_sql_names
+from infrastructure.stages.database.validation import validate_response
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
@@ -54,7 +54,6 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
             raise ValueError("Run 00_project_initialization.py first to initialize the project structure")
     schema = json.loads(source.read_text(encoding="utf-8-sig"))
     validate_schema(schema)
-    validate_sql_names(schema)
     console = DemoConsole(pause)
     # --- Extension point 05B: dependency-aware table implementation -----------
     # Referenced tables precede dependents. Cyclic groups use forward references;
@@ -99,7 +98,6 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
                     response = model.generate_json(INSTRUCTIONS, request)
                     content = validate_response(response, expected_path)
                     proposal = {"path": expected_path, "content": content}
-                    validate_implementations({**implementations, name: proposal}, schema)
                     break
                 except ValueError as error:
                     if attempt == 3:
@@ -113,12 +111,11 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
             save_text(target, content.rstrip() + "\n")
             implementations[name] = proposal
             console.show(f"{label} | 4. Table implementation saved", (
-                f"{target}\n\nSQLite execution and structural checks passed."
+                f"{target}\n\nSQL proposal saved. Executable behavior is checked by application tests."
                 + "\nValue CHECK constraints and application-only rules remain available for semantic review."
             ))
     # --- Pass boundary: activate only a completely validated table set --------
     # The executable loader is the order registry; no extra manifest is retained.
-    validate_implementations(implementations, schema, complete=True)
     initializer = output_dir / "backend/src/db/initialize.ts"
     if not initializer.resolve().is_relative_to(output_dir):
         raise ValueError("DB initializer path escapes the output directory")

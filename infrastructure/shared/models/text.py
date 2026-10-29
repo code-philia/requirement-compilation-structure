@@ -6,6 +6,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
+from infrastructure.utils.presentation.model_io import http_client, invoke
 
 
 class TextModel:
@@ -28,14 +29,13 @@ class TextModel:
             api_key=api_key,
             base_url=os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
             timeout=120, max_retries=2,
+            http_client=http_client(),
         )
 
     def _request(self, **arguments):
         """Apply one output budget to JSON calls, with legacy endpoint compatibility."""
         try:
-            response = self.client.chat.completions.create(
-                **arguments, **{self._token_parameter: self.max_output_tokens},
-            )
+            response = invoke(self.client, {**arguments, self._token_parameter: self.max_output_tokens})
         except OpenAIError as error:
             # Some compatible endpoints only support the older max_tokens name.
             # Retry only an explicit parameter rejection, not arbitrary failures.
@@ -44,9 +44,7 @@ class TextModel:
             if self._token_parameter != "max_completion_tokens" or getattr(error, "status_code", None) not in {400, 422} or "max_completion_tokens" not in message or not unsupported:
                 raise
             self._token_parameter = "max_tokens"
-            response = self.client.chat.completions.create(
-                **arguments, max_tokens=self.max_output_tokens,
-            )
+            response = invoke(self.client, {**arguments, "max_tokens": self.max_output_tokens})
         # Detect transport truncation before attempting to parse partial JSON.
         if response.choices and response.choices[0].finish_reason == "length":
             raise ValueError(

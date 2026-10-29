@@ -1,11 +1,39 @@
-"""Deterministic implementation paths, fixed exports and portable imports."""
+"""Model-selected source paths, stable exports and portable imports."""
 
 from hashlib import sha256
 import posixpath
 from pathlib import Path, PurePosixPath
 import re
+import json
 
 from infrastructure.utils.paths import check_path_case
+from infrastructure.utils.files import save_json
+
+
+FILE_ROOTS = {"api": "backend/src", "page": "frontend/src", "event": "frontend/src",
+    "backend_test": "backend/tests", "e2e_test": "frontend/tests/e2e"}
+
+
+def selected_path(output: Path, kind: str, identity: str) -> str | None:
+    """Read a model-selected path; recognize existing convention files on resume."""
+    index = output / ".arc/implementation_paths.json"
+    paths = json.loads(index.read_text(encoding="utf-8-sig")) if index.is_file() else {}
+    chosen = paths.get(kind, {}).get(identity)
+    if chosen is not None:
+        return chosen
+    if kind in {"api", "page", "event"}:
+        legacy = implementation_path(kind, identity)
+        if (output / legacy).is_file():
+            return legacy
+    return None
+
+
+def remember_path(output: Path, kind: str, identity: str, relative: str) -> None:
+    """Remember the first edit's path without adding model response fields."""
+    index = output / ".arc/implementation_paths.json"
+    paths = json.loads(index.read_text(encoding="utf-8-sig")) if index.is_file() else {}
+    paths.setdefault(kind, {})[identity] = relative
+    save_json(index, paths)
 
 
 def implementation_path(kind: str, identity: str) -> str:
@@ -20,8 +48,10 @@ def implementation_path(kind: str, identity: str) -> str:
 
 
 def implementation_entrypoint(output: Path, kind: str, identity: str) -> dict | None:
-    """Resolve only the convention path; TypeScript checks the fixed named export."""
-    relative = implementation_path(kind, identity)
+    """Resolve the selected path; TypeScript checks the stable named export."""
+    relative = selected_path(output, kind, identity)
+    if relative is None:
+        return None
     check_path_case(output, relative)
     current = output
     for part in PurePosixPath(relative).parts:

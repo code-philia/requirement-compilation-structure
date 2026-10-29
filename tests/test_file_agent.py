@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 from infrastructure.shared.agent.files import FileWorkspace
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.shared.project.entrypoints import implementation_path
+from infrastructure.shared.project.entrypoints import implementation_path, selected_path
 from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.stages.backend.runtime import prepare_runtime, sync_implementations
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pages
@@ -33,9 +33,9 @@ class FileAgentTests(unittest.TestCase):
                     {"path": invalid, "content": "invalid"}]})
             self.assertEqual(read_source(self.root / writable), "original")
             self.assertEqual(read_source(self.root / reference), "frozen")
-        with self.assertRaisesRegex(ValueError, "Duplicate"):
-            workspace.apply({"edits": [{"path": writable, "content": "one"},
-                {"path": writable, "content": "two"}]})
+        workspace.apply({"edits": [{"path": writable, "content": "one"},
+            {"path": writable, "content": "two", "explanation": "allowed metadata"}]})
+        self.assertEqual(read_source(self.root / writable), "two")
         save_text(self.root / writable, "external change")
         with self.assertRaisesRegex(ValueError, "changed since"):
             workspace.apply({"edits": [{"path": writable, "content": "stale"}]})
@@ -94,6 +94,73 @@ class FileAgentTests(unittest.TestCase):
         self.assertFalse((self.root / ".arc/file_index.json").exists())
         names = [implementation_path("api", identity).casefold() for identity in ("API-A", "api-a", "API/A", "API:A", "CON", "中文")]
         self.assertEqual(len(set(names)), len(names))
+
+    def test_model_selects_new_path_and_repairs_it_without_response_metadata(self):
+        workspace = FileWorkspace.for_target(self.root, "api", "API-CREATE")
+        model = Mock()
+        relative = "backend/src/account/register-user.ts"
+        model.generate_json.side_effect = [
+            {"edits": [{"path": relative, "content": "first version"}]},
+            {"edits": [{"path": relative, "content": "repaired version"}]},
+        ]
+        gate = Mock(side_effect=[ValueError("Behavior failed"), {"green": True}])
+        result = run_file_agent(model, "Implement the API", {"api_id": "API-CREATE"}, workspace,
+            gate, 2, Mock(), "Create API")
+        requests = [call.args[1] for call in model.generate_json.call_args_list]
+        self.assertEqual(requests[0]["files"], {})
+        self.assertEqual(requests[0]["task"]["new_file"]["target"], "API-CREATE")
+        self.assertNotIn("new_file", requests[1]["task"])
+        self.assertTrue(requests[1]["files"][relative]["writable"])
+        self.assertEqual(selected_path(self.root, "api", "API-CREATE"), relative)
+        self.assertEqual(result["turns"], 2)
+        resumed = FileWorkspace.for_target(self.root, "api", "API-CREATE")
+        self.assertEqual(resumed.creation_task(), {})
+        self.assertEqual(resumed.state()[relative]["content"], "repaired version")
+
+    def test_creation_rejects_overwrite_and_rolls_back_failed_registration(self):
+        frozen = "backend/src/compiler.ts"
+        save_text(self.root / frozen, "compiler-owned")
+        workspace = FileWorkspace.for_target(self.root, "api", "API-CREATE", references=[frozen])
+        workspace.state()
+        for invalid in (frozen, "frontend/src/other.ts", "../escape.ts"):
+            with self.subTest(path=invalid), self.assertRaises(ValueError):
+                workspace.apply({"edits": [{"path": invalid, "content": "new"}]})
+        from unittest.mock import patch
+        with patch("infrastructure.shared.agent.files.remember_path", side_effect=OSError("Disk failure")):
+            with self.assertRaisesRegex(OSError, "Disk failure"):
+                workspace.apply({"edits": [{"path": "backend/src/new.ts", "content": "new"}]})
+        self.assertFalse((self.root / "backend/src/new.ts").exists())
+        self.assertEqual(read_source(self.root / frozen), "compiler-owned")
+        self.assertIsNone(selected_path(self.root, "api", "API-CREATE"))
+
+    def test_custom_paths_are_registered_for_backend_pages_and_events(self):
+        initialize_project(self.root)
+        api = {"API-CUSTOM": {"signature": {"name": "custom", "method": "GET", "path": "/api/custom"}}}
+        prepare_runtime(self.root, api)
+        paths = {"api": ("API-CUSTOM", "backend/src/features/account/read.ts", "export async function handle() {}"),
+            "page": ("PAGE-CUSTOM", "frontend/src/screens/account.tsx", "export function Page() {}"),
+            "event": ("EVENT-CUSTOM", "frontend/src/behavior/account/load.ts", "export function handle() {}")}
+        for kind, (identity, path, content) in paths.items():
+            workspace = FileWorkspace.for_target(self.root, kind, identity)
+            workspace.state()
+            workspace.apply({"edits": [{"path": path, "content": content}]})
+        sync_implementations(self.root, api)
+        self.assertIn("../features/account/read.js", read_source(self.root / "backend/src/api/register.ts"))
+        ui = {"pages": {"PAGE-CUSTOM": {"route": "/", "root": "UI-ROOT"}}, "bindings": {}}
+        prepare_frontend(self.root)
+        sync_pages(self.root, ui)
+        self.assertIn("./screens/account", read_source(self.root / "frontend/src/App.tsx"))
+        interactions = {"events": {"EVENT-CUSTOM": {"write": [], "actions": []}}, "triggers": {}}
+        sync_interactions(self.root, ui, interactions, {"apis": api}, ["EVENT-CUSTOM"])
+        self.assertIn("./behavior/account/load", read_source(self.root / "frontend/src/ui-events.ts"))
+
+    def test_new_test_file_paths_are_chosen_by_model(self):
+        from infrastructure.stages.frontend.interactions.testing import test_path
+        relative = "frontend/tests/e2e/accounts/register-flow.spec.ts"
+        workspace = FileWorkspace.for_target(self.root, "e2e_test", "REQ-REGISTER")
+        workspace.state()
+        workspace.apply({"edits": [{"path": relative, "content": "test source"}]})
+        self.assertEqual(test_path("REQ-REGISTER", self.root), relative)
 
 
 if __name__ == "__main__":

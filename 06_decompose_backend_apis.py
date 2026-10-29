@@ -126,7 +126,7 @@ def decompose_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6) -
         console.show(f"{label} | API interfaces", json.dumps({aid: {key: api[key]
             for key in ("signature", "request", "response")} for aid, api in selected.items()}, ensure_ascii=False, indent=2))
         console.show(f"{label} | 4. API Decomposition / Obligation Propagation", (
-            response["explanation"] + "\n\n" + format_apis(selected)
+            response.get("explanation", "") + "\n\n" + format_apis(selected)
             + "\nRequired direct obligations:\n" + format_obligations({rid: required})
             + "\nAssigned API obligation union:\n" + format_obligations({rid: union(selected.values())})
             + "\nAPI obligation coverage passed."

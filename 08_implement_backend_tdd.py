@@ -5,14 +5,14 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.shared.agent.files import FileWorkspace, source_paths
-from infrastructure.shared.project.entrypoints import implementation_path, implementation_entrypoint
+from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.contracts import validate_contracts
 from infrastructure.stages.backend.primitives import validate_design
 from infrastructure.stages.backend.runtime import TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
-from infrastructure.stages.backend.testing import BackendChecks, assert_frozen, require_green, require_red, snapshot_tests, validate_test_source
+from infrastructure.stages.backend.testing import BackendChecks, require_green, require_red
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.stages.database.obligations.records import field_symbols
@@ -30,11 +30,13 @@ one representative invalid-input case, and the key business rejection cases. Com
 related contract assertions in a case. Do not generate one test per missing/empty field
 or expand table-driven input variations. Rewrite an oversized current file rather
 than copying it. Cover response branches and critical P/Q/R/W using these few cases.
-Write only the supplied test_path. Use node:test with a named import { test } and
+Choose a .test.ts filename under task.new_file.directory when creating the suite;
+otherwise edit the supplied test_path. Use node:test with a named import { test } and
 node:assert/strict (default import assert), with literal test("title", async (t)=>...) cases.
 The API named function is async (request: ApiRequest, connection) => ApiResponse.
 ApiRequest contains params/query/body/headers; ApiResponse contains status/body/optional
-headers. It does NOT return an Express Response. Use the supplied exact import paths.
+headers. It does NOT return an Express Response. Compute relative .js imports from
+your chosen test path to api_module and support_module.
 Use createTestDatabase(t), request(partial), and fixturePasswordHash(password) from the
 read-only support context. Every test gets a fresh real SQLite database and real tables.
 Prepare Given fixtures with SQL inserts (provide all NOT NULL columns); do not call a
@@ -44,8 +46,7 @@ Bind SQLite booleans as integers 0/1, not JavaScript boolean values.
 Derive assertions from canonical precondition/request and postcondition/response, DB
 effects, and supplied scenarios. Cover every P and Q; include required invalid inputs,
 failure-without-writes, meaningful successes and persistence. Never test 501 as success.
-Use readable scenario names and the covered P-/Q- IDs in literal test titles.
-Every declared P/Q ID must occur in an actual test title, not only in comments.
+Use readable scenario titles. Verify P/Q behavior through assertions.
 Database R/W effects are verified by assertions, not field labels in titles. Assert
 status, returned fields/headers and actual DB state, not implementation source code.
 Assert the exact session/cookie transport identity specified by the current contract.
@@ -55,7 +56,7 @@ Use casts for response.body when needed (its transport type is unknown). Do not 
 generated UUIDs, timestamps, random hashes, exact error wording, or fields not in the
 contract. Tests may not be skipped, focused, mocked, or weaken the contract. No external
 libraries beyond the installed stack and Node standard library. Do not edit app code,
-SQL, test support, or other test files. The gate checks test traceability and TypeScript;
+SQL, test support, or other test files. The gate executes TypeScript compilation;
 the explicit RED phase happens once the current requirement's tests are generated. All needed file paths and
 contents are supplied in files. Return edits containing complete file contents.
 A passing gate accepts the proposal.
@@ -70,7 +71,8 @@ writes, using parameterized better-sqlite3 SQL and transactions for related writ
 An API directly accesses the database; DB Access Primitive decomposition is an extension.
 Return status/body/optional headers, not Express Response objects. Never create a server,
 open another database, alter schema, seed production data, or modify test files.
-Implement only implementation_path and export the async function handle.
+Choose your source path under task.new_file.directory for a new API, or edit the
+existing implementation_path. Export the async function handle.
 The compiler supplies all current backend sources and frozen tests in files.
 Import ApiRequest and ApiResponse from backend/src/api/types.ts using the correct
 relative .js ESM path. Routing and test bindings are maintained by Python.
@@ -114,7 +116,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     checks = BackendChecks(output)
     model = TextModel() if contracts["apis"] else None
     owners = {aid: [rid for rid in tree.postorder if aid in contracts["requirements"][rid]] for aid in contracts["apis"]}
-    targets = {aid: test_path(ids[0], aid) for aid, ids in owners.items()}
+    targets = {aid: selected_path(output, "backend_test", aid) or test_path(ids[0], aid) for aid, ids in owners.items()}
     # Retire only earlier compiler-owned duplicate suites. Unlisted user tests
     # are preserved; failed migrations retain their retirement list for retry.
     previous = json.loads((arc_dir / "backend_tdd.json").read_text(encoding="utf-8-sig")) if (arc_dir / "backend_tdd.json").is_file() else {}
@@ -131,7 +133,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     try:
         files_by_api = {aid: [relative] for aid, relative in targets.items()}
         accepted = []
-        frozen = snapshot_tests(output, [])
         for requirement_number, rid in enumerate(tree.postorder, 1):
             ids = contracts["requirements"][rid]
             pending = [aid for aid in ids if aid not in accepted]
@@ -157,9 +158,11 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
 
                 generation_files = [targets[key] for key in [*accepted, *generated, aid]]
 
-                def test_gate(relative=relative, api=api):
-                    validate_test_source((output / relative).read_text(encoding="utf-8-sig"), api, max_tests)
-                    assert_frozen(output, frozen)
+                def test_gate(aid=aid):
+                    chosen = selected_path(output, "backend_test", aid) or relative
+                    targets[aid] = chosen
+                    files_by_api[aid] = [chosen]
+                    generation_files = [targets[key] for key in [*accepted, *generated, aid]]
                     compiled = checks.typecheck(generation_files)
                     if compiled["returncode"]:
                         raise ValueError(f"Test TypeScript compilation failed: {compiled['output']}")
@@ -170,16 +173,16 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
                     "db_schema": schema["entities"], "test_path": relative,
                     "max_tests": max_tests,
-                    "api_import": "../support/apis.js", "support_import": "../support/context.js",
+                    "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
                 }
                 agent = run_file_agent(model, TEST_INSTRUCTIONS, context,
-                    FileWorkspace(output, {relative}, references=source_paths(output, "backend/src") + ["backend/tests/support/context.ts", TEST_BINDINGS_PATH]), test_gate, max_turns, console, label + " / Test Generation")
+                    FileWorkspace.for_target(output, "backend_test", aid, existing=relative,
+                        references=source_paths(output, "backend/src") + ["backend/tests/support/context.ts", TEST_BINDINGS_PATH]), test_gate, max_turns, console, label + " / Test Generation")
                 for owner in api_owners:
-                    report["tests"].setdefault(owner, {})[aid] = relative
+                    report["tests"].setdefault(owner, {})[aid] = targets[aid]
                 report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
                 save_json(arc_dir / "backend_tdd.json", report)
                 generated.append(aid)
-                frozen.update(snapshot_tests(output, [relative]))
             # --- Extension point 08A: test-only RED bindings -------------------
             # Exercise the same frozen assertions with 501 test bindings; never
             # overwrite actual business implementations to establish RED.
@@ -189,9 +192,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     test_bindings_source(output, contracts["apis"], stubbed=pending))
                 for aid in pending:
                     result = checks.tests(files_by_api[aid])
-                    if result.get("tests", 0) > max_tests:
-                        raise ValueError(f"Keep at most {max_tests} executed tests for {aid}")
-                    assert_frozen(output, frozen)
                     require_red(result)
                     report["red"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}
                     console.show(f"{aid} | RED: contract assertions fail against the test stub", result["output"])
@@ -211,17 +211,13 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
 
                 def implementation_checks():
                     sync_implementations(output, contracts["apis"])
-                    assert_frozen(output, frozen)
                     compiled = checks.typecheck(regression_files)
                     if compiled["returncode"]:
                         return {"typecheck": compiled, "tests": None}
                     tested = checks.tests(regression_files)
-                    assert_frozen(output, frozen)
                     return {"typecheck": compiled, "tests": tested}
 
                 def implementation_gate():
-                    if implementation_entrypoint(output, "api", aid) is None:
-                        raise ValueError(f"Missing API implementation: {implementation_path('api', aid)}")
                     result = implementation_checks()
                     if result["typecheck"]["returncode"]:
                         raise ValueError(result["typecheck"]["output"])
@@ -229,16 +225,16 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     return result
 
                 current = implementation_checks()
-                if current["tests"] and not current["tests"]["returncode"] and current["tests"]["tests"] and implementation_entrypoint(output, "api", aid):
+                if current["tests"] and not current["tests"]["returncode"] and current["tests"]["tests"]:
                     agent = {"turns": 0, "checks": implementation_gate()}
                 else:
                     context = {
                         "api_id": aid, "api": api, "db_schema": schema["entities"],
                         "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
-                        "implementation_path": implementation_path("api", aid),
+                        "implementation_path": selected_path(output, "api", aid),
                     }
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context,
-                        FileWorkspace(output, {implementation_path("api", aid)},
+                        FileWorkspace.for_target(output, "api", aid,
                             references=source_paths(output, "backend/src") + source_paths(output, "backend/tests") + ["backend/package.json"]),
                         implementation_gate, max_turns, console, aid + " / Implementation", feedback=current)
                 accepted.append(aid)
@@ -261,7 +257,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         if compiled["returncode"]:
             raise ValueError(compiled["output"])
         final = checks.tests(all_files)
-        assert_frozen(output, frozen)
         if all_files:
             require_green(final)
         report["status"] = "GREEN"

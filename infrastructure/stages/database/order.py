@@ -4,7 +4,7 @@
 def table_dependencies(schema: dict) -> dict:
     """Map each entity to the tables referenced by its foreign-key fields."""
     return {
-        name: sorted({field["references"].split(".")[0] for field in entity["fields"].values() if field["references"]})
+        name: sorted({field["references"].split(".")[0] for field in entity["fields"].values() if field["references"] and field["references"].split(".")[0] in schema["entities"]})
         for name, entity in schema["entities"].items()
     }
 

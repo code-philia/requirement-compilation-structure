@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
+from infrastructure.utils.presentation.model_io import http_client, invoke
 
 
 class VisualModel:
@@ -20,7 +21,7 @@ class VisualModel:
         base_url = os.getenv("VISUAL_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
         if not self.name or not api_key:
             raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env; the model must accept images")
-        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=120, max_retries=2)
+        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=120, max_retries=2, http_client=http_client())
 
     def analyze(self, image: Path) -> dict:
         """Send one supported reference image and validate the returned layout, elements, and style evidence."""
@@ -42,27 +43,27 @@ class VisualModel:
             "Explicitly identify anything illegible; do not invent details."
         )
         try:
-            response = self.client.chat.completions.create(
-                model=self.name,
-                messages=[{"role": "user", "content": [
+            response = invoke(self.client, {
+                "model": self.name,
+                "messages": [{"role": "user", "content": [
                     {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {
                         "url": f"data:{mime};base64,{encoded}", "detail": "high",
                     }},
                 ]}],
-                response_format={"type": "json_object"},
-            )
+                "response_format": {"type": "json_object"},
+            })
         except OpenAIError as error:
             raise RuntimeError(f"Visual model request failed ({image.name}): {error}") from error
         if not response.choices or not response.choices[0].message.content:
             raise ValueError(f"Visual model returned empty content: {image.name}")
         result = json.loads(response.choices[0].message.content)
         if (
-            not isinstance(result, dict) or set(result) != {"layout", "elements", "style"}
-            or not isinstance(result["layout"], str) or not result["layout"].strip()
-            or not isinstance(result["style"], str) or not result["style"].strip()
+            not isinstance(result, dict) or not {"layout", "elements", "style"}.issubset(result)
+            or not isinstance(result["layout"], str)
+            or not isinstance(result["style"], str)
             or not isinstance(result["elements"], list)
-            or not all(isinstance(item, str) and item.strip() for item in result["elements"])
+            or not all(isinstance(item, str) for item in result["elements"])
         ):
             raise ValueError(f"Visual analysis fields do not match the expected format: {image.name}")
         return result

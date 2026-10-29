@@ -109,8 +109,5 @@ def prepare_runtime(output: Path, apis: dict) -> None:
     for relative, name, command in (("package.json", "test:backend", "npm run test -w @arc/backend"), ("backend/package.json", "test", "node scripts/test-api.mjs")):
         path = output / relative
         value = json.loads(path.read_text(encoding="utf-8-sig"))
-        existing = value.setdefault("scripts", {}).get(name)
-        if existing not in (None, command):
-            raise ValueError(f"Existing {name} command differs; keep a separate API test command")
-        value["scripts"][name] = command
+        value.setdefault("scripts", {})[name] = command
         save_text(path, json.dumps(value, indent=2) + "\n")

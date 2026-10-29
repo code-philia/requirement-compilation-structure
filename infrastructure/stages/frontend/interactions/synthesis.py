@@ -48,7 +48,7 @@ def synthesize_interactions(arc_dir, ui, tree, schema, obligations, backend, con
         request = {"requirement": contexts[rid], "page_subtrees": pages,
             "page_inventory": inventory,
             "existing_interactions": {kind: result[kind] for kind in ("events", "triggers")},
-            "backend_apis": {aid: backend["apis"][aid] for aid in backend["requirements"][rid]},
+            "backend_apis": backend["apis"],
             "frontend_data": ui["bindings"],
             "obligations": obligations["requirements"][rid],
             "step_ui": {sid: ui["steps"][sid] for sid in tree.own_steps[rid]}}

@@ -6,6 +6,27 @@ from pathlib import Path
 import sys
 from threading import RLock
 import traceback
+from contextvars import ContextVar
+from time import monotonic
+
+from infrastructure.utils.presentation.stages import stage_label
+
+
+_session = ContextVar("compiler_log_session", default=None)
+
+
+def session_info():
+    """Return the current output directory, stage, and log lock, when configured."""
+    return _session.get()
+
+
+def full_detail(title: str, body: str) -> None:
+    """Keep full panel content in the log without flooding the terminal."""
+    session = _session.get()
+    if session:
+        with session["lock"]:
+            session["log"].write(f"\n--- {title} (full content) ---\n{body}\n")
+            session["log"].flush()
 
 
 class TeeStream:
@@ -51,13 +72,21 @@ def console_log(output_dir: Path):
         stderr = TeeStream(sys.stderr, log, lock)
         with redirect_stdout(stdout), redirect_stderr(stderr):
             timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            print(f"\n=== {timestamp} | {Path(sys.argv[0]).name} ===", flush=True)
+            script = Path(sys.argv[0]).name
+            token = _session.set({"output": output_dir, "stage": stage_label(script), "lock": lock, "log": log})
+            started = monotonic()
+            print(f"\n=== {timestamp} | {stage_label(script)} | {script} ===", flush=True)
+            print(f"Logs: {output_dir / 'compiler.log'}\nFull model I/O: {output_dir / 'model_calls.jsonl'}", flush=True)
             try:
                 yield
             except BaseException as error:
                 if not isinstance(error, SystemExit):
                     traceback.print_exc(file=log)
+                print(f"[FAILED] {stage_label(script)} after {monotonic() - started:.1f}s", flush=True)
                 raise
+            else:
+                print(f"[DONE] {stage_label(script)} in {monotonic() - started:.1f}s", flush=True)
             finally:
                 stdout.flush()
                 stderr.flush()
+                _session.reset(token)

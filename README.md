@@ -76,6 +76,8 @@ compiler/
 
 Start reading with a numbered script, then follow its explicit imports. `stages` defines compilation meaning and validation; `shared` provides reusable execution services; `utils` contains small helpers independent of stage logic. Some orchestration and prompts remain in the numbered scripts.
 
+Open [CODE_MAP.html](CODE_MAP.html) directly in a browser for the per-step core file call paths, module responsibilities, key symbols and suggested modification points.
+
 In frontend packages, `design.py` defines and validates representations, `synthesis.py` handles model proposals and correction feedback, `implementation.py` coordinates TDD, `runtime.py` generates application wiring, and `testing.py` provides fixed check commands. Interaction `e2e_runtime.py` generates the real-server browser-test harness.
 
 Design stages retrieve existing definitions, request a structured model proposal, validate it, and publish accepted artifacts. Page retrieval returns the corresponding UI/data subtree for reuse. Obligation propagation in step 04 uses deterministic rules.
@@ -88,7 +90,7 @@ The model returns one JSON object:
 {"edits": [{"path": "the/supplied/writable/path.ts", "content": "complete final file contents"}]}
 ```
 
-Creation and replacement use the same format. Only explicitly supplied writable paths are accepted; each may occur once per batch. Arbitrary helper files, file deletion/moves, patch operations, shell tools and model-selected entrypoints are not supported. The compiler validates the whole batch before writing and restores original bytes on a write failure. Valid edits remain on disk after a failed acceptance check; the next request supplies refreshed files and the latest error. Every edit response, including an empty list, automatically runs fixed acceptance checks. An existing passing implementation is reused without an implementation-model call.
+Creation and replacement use the same format. Only explicitly supplied writable paths are accepted; a later edit for the same path wins. Arbitrary helper files, file deletion/moves, patch operations, shell tools and model-selected entrypoints are not supported. The compiler validates the whole batch before writing and restores original bytes on a write failure. Valid edits remain on disk after a failed acceptance check; the next request supplies refreshed files and the latest error. Every edit response, including an empty list, automatically runs fixed acceptance checks. An existing passing implementation is reused without an implementation-model call.
 
 Implementation paths are derived from semantic IDs by `shared/project/entrypoints.py`. Filenames use a readable normalized prefix plus a stable ID hash to distinguish case-only IDs and avoid Windows reserved filenames. The exact path is supplied in the task; models do not calculate it.
 
@@ -124,7 +126,7 @@ Each step can also run independently after its prerequisites have completed. Add
 | 03: Dataflow Obligation Inference | `python 03_infer_db_obligations.py --output outputs/demo` | `db_obligations.json`: requirement/step read and write sets inferred from each requirement's related schema fields, with coverage checked during inference. |
 | 04: Schema/Obligation ER View | `python 04_check_db_obligations.py --output outputs/demo` | Read-only console view of the complete schema graph and requirement/obligation relations; no checked artifact is written. |
 | 05: DB Implementation | `python 05_implement_db.py --output outputs/demo` | One SQL file per table in `backend/src/db/tables/` and an ordered database initializer. |
-| 06: Backend API Decomposition | `python 06_decompose_backend_apis.py --output outputs/demo` | `backend_apis.json`: reusable APIs, R/W obligations, HTTP signatures, and request/response schemas; validates coverage and interface uniqueness. |
+| 06: Backend API Decomposition | `python 06_decompose_backend_apis.py --output outputs/demo` | `backend_apis.json`: reusable APIs, R/W obligations, HTTP signatures, and request/response schemas; checks DB-field obligation coverage. |
 | 07: Contract Inference | `python 07_infer_api_contracts.py --output outputs/demo` | `backend_contracts.json`: adds preconditions and postconditions to the fixed step 06 APIs; preserves signatures, I/O schemas, and R/W. |
 | 08: Backend TDD | `python 08_implement_backend_tdd.py --output outputs/demo` | Key API tests, API implementations, `backend_tdd.json`. |
 | 09: UI/Data Design | `python 09_design_ui.py --input input --output outputs/demo` | `ui_design.json`: pages, UI subtrees, frontend data, and display fixtures for all requirements. |
@@ -132,32 +134,24 @@ Each step can also run independently after its prerequisites have completed. Add
 | 11: Interaction Design | `python 11_design_ui_interactions.py --input input --output outputs/demo` | `ui_interactions.json`: triggers/events, obligation coverage, ordered actions, derived DB coverage, and semantic P/Q. |
 | 12: Interaction E2E TDD | `python 12_implement_frontend_tdd.py --input input --output outputs/demo` | Browser scenarios, event implementations, `frontend_e2e.json`, and a complete application build. |
 
-Step 07 returns only `{"contract":{"precondition":[...],"postcondition":[...]}}`. Each precondition contains `id`, `description`, and `error_status`; each postcondition contains `id`, `description`, and `status`. Conditions describe business semantics without request/response field pointers. Rejection statuses must be declared, every response status needs a postcondition, and step 06 interfaces and database obligations remain fixed. Each shared API is inferred once using all its owning requirements. Previously inferred complete contracts remain available in step 07 to coordinate session/cookie conventions.
+The compiler uses two design acceptance rules: necessary JSON structure and DB-field obligations. Actual compilation, tests and builds remain acceptance gates for implementation stages.
 
-Step 08 supplies the selected API, a single `all_requirement_uses` list with structured steps, and the full entity definitions in `db_schema`. It does not repeat the current requirement, schema ownership mappings, or the global contract registry. Source and frozen test contents remain in the shared `files` map. Literal test titles use readable scenario names and P/Q IDs; database effects, including forbidden writes, are checked through assertions rather than `R:`/`W:` title labels. `--max-tests` is one direct per-API limit (default 5), with no branch/precondition-derived budget. A case may cover several conditions or response branches. Canonical tests are generated before implementation, frozen, and required to fail by assertion against temporary 501 test bindings before the implementation can be accepted as GREEN.
+| Boundary | Retained check |
+| --- | --- |
+| Requirement → backend APIs | The allocated APIs' read and write field unions equal the requirement's DB obligations, checked separately. |
+| API decomposition → API contracts | API and requirement DB effects remain linked; P/Q may add semantic descriptions without extra coverage rules. |
+| Frontend events → backend APIs | API references resolve and called API effects derive from their declared DB read/write fields. |
+| Requirement → frontend calls | The direct frontend events' called API field unions equal the requirement's DB obligations. No exact API-ID allocation rule is imposed when equivalent field effects are used. |
 
-The simplified backend P/Q schema replaces the earlier pointer-bearing records. Regenerate step 07 and its consumers (08–12) for an existing run; old records are rejected rather than silently converted. P/Q title IDs provide traceability, not proof of business behavior.
+JSON checks require the containers and basic value types used by Python; additional metadata is allowed. There are no design gates for route uniqueness, primary/foreign-key policies, supported UI types, mode/data relationships, variable initial-value types, page ownership, retrieval scope, unchanged IDs/props, fixture budgets, P/Q status coverage, or semantic completeness. SQL is saved from the model response without SQLite metadata comparison. Ordinary input bindings and application state are left to the design and implementation models; a button associated with submitting state does not create an enforced input/change obligation.
 
-Use `python <script>.py --help` for stage-specific options, including retrieval size, test budgets, and agent turn limits. Step 00 exposes `--stack` as the extension point for other technology stacks.
+Steps 08/10/12 still run real TypeScript compilation, Node/Playwright tests and the relevant build. There are no compiler source scans, mandatory P/Q/STEP/EVENT title tags, test-count gates, test-file hash monitors or prerequisite report fingerprint checks. Test budgets remain prompt guidance. Tests and compiler-owned files retain their existing read-only file permissions. Fixed runtime paths and generated registrations remain unchanged. Runtime handlers are not restricted by additional frontend-state/API/navigation effect allowlists; actual execution and test assertions determine behavior.
 
-Interaction events declare only frontend `write` permissions. Event DB obligations are derived from called APIs; input-only or navigation-only events have empty DB sets. Step-to-trigger bindings provide behavioral traceability, without requiring a step's DB effects to be covered by that requirement's events: a scenario may include another page's lifecycle behavior. Direct API allocation and requirement-level API coverage remain checked; cross-page outcomes are verified by step 12 E2E tests.
+Step 07 returns `{"contract":{"precondition":[...],"postcondition":[...]}}`. P records have `id/description/error_status`; Q records have `id/description/status`. Step 08 receives one `all_requirement_uses` list and full `schema.entities` definitions. Step 09 returns complete records for pages/elements/bindings and requirement/step UI associations. Variables are defined in bindings and referenced by name from elements. Step 11 designs trigger/event records, then string-list event P/Q; it has no image input or interaction RAG. Step 12 supplies unified scenario context, including reachable page lifecycle behavior, and uses real isolated-database E2E tests.
 
-Steps 09–12 use one frontend representation and the shared file-edit protocol:
+Requirements without UI skip frontend interaction coverage; their backend API obligations remain checked. Step bindings are traceability metadata and do not impose DB containment. Missing files, invalid JSON, unavailable dependencies, file-access errors and real execution failures are still reported as operational errors; they are not additional design policies.
 
-- Step 09 returns `pages`, `elements`, `bindings`, `requirement_ui`, and `step_ui`. Each changed ID carries a complete replacement record; omitted IDs stay unchanged. There are no recursive prop/fixture patches or explanation fields. Page route/root and existing element type/parent stay fixed. Accepted data references, props and fixture states must be retained.
-- Every frontend variable is defined once in `bindings` as `{dtype, constraints, initial, source}`. Element `data` is a list of variable names; visibility can reference the same table. Variables are global to the UI host, without owner/ancestor inference. `ui_design.json` has only pages, elements, bindings, requirements and steps.
-- Step 10 loads only requirements, visual evidence and UI/data design. Page tasks receive visual evidence once, with runtime types and frozen tests in `files`. The report stores a fingerprint of the full design, so changes to styles or other untested metadata still require rerunning presentation checks. Steps 11/12 share the exact baseline validation. Steps 10/12 share the presentation boundary scan, so page repairs cannot silently introduce ordinary business handlers or hooks.
-- Step 11 receives complete existing interactions and directly allocated APIs; it has no event/API ranking or `--top-k` option. It first designs each leaf's trigger bindings and ordered actions, then infers one semantic P/Q per shared event. Images and concatenated step text are absent from behavior-model requests.
-
-A trigger is `{source, event, action}`. An event is `{description, write, actions}`. Each action has `{id, kind, description}`, plus `api` for API calls or `page` for navigation. Kinds are `local`, `api`, and `navigate`. Action descriptions specify request values, transformations and response branches; action IDs distinguish repeated calls. DB effects and runtime API/navigation permissions are derived from declared calls and destinations. Only the event declares frontend writes. Input/change wiring, source types, IDs, direct API allocation and requirement-level DB coverage remain checked.
-
-Requirements with no UI skip frontend interaction work; their APIs remain covered by backend TDD.
-
-Event contract inference returns `{"contract":{"precondition":["..."],"postcondition":["..."]}}`. P may be empty; Q must describe observable results. There are no typed request/update expressions, action contracts, guard fields or cross-layer Q mappings. Static validation checks structure and effects; real browser scenarios verify the described business behavior.
-
-Step 12 supplies each scenario event/trigger/contract once and includes reachable navigation pages and their lifecycle events, including native href destinations. `target_event_ids` selects implementations needed for the scenario. A dependency event can be implemented before its owning requirement is processed; its ownership remains unchanged, and its owner still gets its own scenario suite. Tests trace STEP IDs, without mandatory EVENT title tags. They use real servers and isolated SQLite fixtures, asserting visible results and persistence/forbidden writes. Existing frontend runtime failures enter implementation repair instead of forcing test regeneration; startup, browser, fixture, backend and network failures are not accepted as behavioral RED. Frozen tests, UI regression and the final build remain required. The runtime ignores late updates/navigation from a handler after a different navigation has superseded it.
-
-These frontend schemas replace the earlier descriptor/owner and typed-contract formats. For existing projects, regenerate steps 09–12 and their source/tests in a fresh output workspace; there is no dual-format reader or automatic migration. Steps 00–08 retain their current protocols.
+Use `python <script>.py --help` for retrieval, turn limits and prompt-guidance budgets. Existing outputs with the current JSON format can resume from a failed design stage; no UI-specific repair or automatic artifact rewrite is required for this validation-policy change.
 
 Generated files are organized as follows:
 
@@ -167,8 +161,13 @@ outputs/demo/
 ├── backend/                 # API source, per-table SQL, and contract tests
 ├── frontend/                # React source and Playwright UI/E2E tests
 ├── package.json             # Generated workspace commands
-└── compiler.log             # Timestamped console output and errors from each step
+├── compiler.log             # Stage progress, full display panels, subprocess output and errors
+└── model_calls.jsonl         # Complete model SDK requests/responses and actual HTTP bodies
 ```
+
+The console shows the current stage number/name, requirement or implementation activity, bounded content previews, and elapsed time. Model inputs are summarized by message size, payload sections and file counts. Model returns show readable JSON or file paths and source excerpts. Long previews explicitly indicate truncation. While a model call is pending, a waiting message appears immediately and repeats every 10 seconds. Interactive terminals highlight activity headings; set `NO_COLOR` to disable color.
+
+Both logs append across resumed runs. `compiler.log` keeps full display-panel content even when the console truncates it. `model_calls.jsonl` records untruncated SDK arguments (including system instructions, payloads, file contents, feedback and image data), complete SDK response envelopes, and the actual HTTP request/response bodies. HTTP attempts include SDK retries and the legacy token-parameter fallback. Records have timestamps, stage/activity and a call ID; raw response content is saved before JSON parsing or repair, including invalid or truncated JSON. Authentication headers are not logged. These changes take effect on subsequent calls; earlier logs cannot recover omitted model I/O.
 
 ## Build and deploy the generated application
 

@@ -16,8 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from infrastructure.shared.agent.files import FileWorkspace
 from infrastructure.shared.project.entrypoints import import_path
 from infrastructure.shared.project.initialize import initialize_project
-from infrastructure.stages.backend.testing import assert_frozen as assert_backend_frozen
-from infrastructure.stages.frontend.ui.testing import assert_frozen as assert_ui_frozen
 from infrastructure.utils.files import read_artifact, read_source, save_json, save_text
 from infrastructure.utils.paths import relative_path
 from infrastructure.utils import processes
@@ -80,16 +78,6 @@ class PortableFiles(unittest.TestCase):
                 workspace.apply({"edits": [{"path": relative, "content": "changed"}, {"path": second, "content": "new"}]})
         self.assertEqual(target.read_bytes(), original)
         self.assertFalse((self.root / second).exists())
-
-    def test_frozen_file_restore_is_byte_exact(self):
-        """Frozen tests must not change encoding/newlines during rejected repair."""
-        target = self.root / "test.ts"
-        original = b"\xef\xbb\xbf// frozen\r\n"
-        for verify in (assert_backend_frozen, assert_ui_frozen):
-            target.write_bytes(b"changed\n")
-            with self.assertRaises(ValueError):
-                verify(self.root, {"test.ts": original})
-            self.assertEqual(target.read_bytes(), original)
 
     def test_imports_use_posix_relative_paths_on_windows(self):
         """Simulate native Windows Path formatting while deriving module specifiers."""

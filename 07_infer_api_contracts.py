@@ -15,6 +15,7 @@ from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.formatting import format_apis
 from infrastructure.utils.files import save_json
+from infrastructure.shared.models.structure import object_fields
 
 
 INSTRUCTIONS = """Perform Contract Inference for the selected Backend API Primitive:
@@ -66,11 +67,9 @@ def infer_api_contracts(arc_dir: Path, pause: bool = False) -> dict:
             response = None
             try:
                 response = model.generate_json(INSTRUCTIONS, request)
-                if not isinstance(response, dict) or set(response) != {"contract"}:
-                    raise ValueError("Return exactly one contract object")
-                if not isinstance(response["contract"], dict) or set(response["contract"]) != {"precondition", "postcondition"}:
-                    raise ValueError("Return only precondition and postcondition inside contract; the interface is fixed")
-                api = {**selected, **response["contract"]}
+                object_fields(response, {"contract": dict}, "contract response")
+                contract = object_fields(response["contract"], {"precondition": list, "postcondition": list}, "contract")
+                api = {**selected, "precondition": contract["precondition"], "postcondition": contract["postcondition"]}
                 validate_registry({**result["apis"], aid: api})
                 break
             except ValueError as error:

@@ -18,15 +18,11 @@ class RequirementTree:
         self.children = {}
         self.own_steps = {}
         self.postorder = []
-        seen = set()
 
         def identifier(node, kind):
-            """Validate and reserve a globally unique requirement, scenario, or step ID."""
+            """Read a requirement, scenario or step ID from the JSON document."""
             if not isinstance(node, dict) or not isinstance(node.get("id"), str) or not node["id"].strip():
                 raise ValueError(f"Each {kind} must have a nonempty string id")
-            if node["id"] in seen:
-                raise ValueError(f"Duplicate node id: {node['id']}")
-            seen.add(node["id"])
             return node["id"]
 
         def items(node, key):

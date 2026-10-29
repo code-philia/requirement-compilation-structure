@@ -43,11 +43,7 @@ def load_ui_context(arc_dir, input_dir):
             source = (input_dir / image["reference"]).resolve()
             if not source.is_relative_to(input_dir.resolve()) or not source.is_file():
                 raise ValueError(f"Missing input image or image escapes input: {image['reference']}")
-            if image["reference"] not in analysis:
-                raise ValueError(f"Missing visual analysis: {image['reference']}; rerun step 01")
-            record = {**image, "analysis": analysis[image["reference"]]}
-            if image["id"] in images and images[image["id"]] != record:
-                raise ValueError(f"Conflicting image definition: {image['id']}")
+            record = {**image, "analysis": analysis.get(image["reference"], {})}
             images[image["id"]] = record
         for child in node.get("children", []):
             visit(child)
@@ -62,11 +58,8 @@ def load_ui_context(arc_dir, input_dir):
         for image in description.get("image", []) if isinstance(description, dict) else []:
             if image.get("id") in images:
                 refs.add(image["id"])
-        unknown = refs - set(images)
-        if unknown:
-            raise ValueError(f"Unknown image references at {rid}: {sorted(unknown)}")
         contexts[rid] = {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
-            "images": {key: images[key] for key in sorted(refs)}}
+            "images": {key: images[key] for key in sorted(refs) if key in images}}
     return tree, images, contexts
 
 

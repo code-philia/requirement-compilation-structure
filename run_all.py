@@ -8,6 +8,8 @@ import sys
 from infrastructure.utils.cli import COMPILER_DIR, resolve_directories
 from infrastructure.utils.processes import start_process, stop_process
 from infrastructure.utils.presentation.logging import configure_console
+from infrastructure.utils.presentation.console import highlight
+from infrastructure.utils.presentation.stages import stage_label
 
 
 STEPS = (
@@ -37,8 +39,8 @@ def main() -> None:
         if not input_dir.is_dir():
             raise ValueError(f"Input directory does not exist: {input_dir}")
         print(f"Input: {input_dir}\nOutput: {output_dir}", flush=True)
-        for step in STEPS:
-            print(f"\nRunning {step}", flush=True)
+        for index, step in enumerate(STEPS, 1):
+            print("\n" + highlight(f"[{index}/{len(STEPS)}] {stage_label(step)} | {step}"), flush=True)
             process = start_process(
                 [sys.executable, str(COMPILER_DIR / step), "--input", str(input_dir), "--output", str(output_dir)],
                 cwd=COMPILER_DIR,

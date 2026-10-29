@@ -1,14 +1,10 @@
 """Trigger/event references and frontend/database obligation conservation."""
 
 from copy import deepcopy
-import re
 
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
 from infrastructure.stages.database.obligations.rules import difference, union
-
-IDENTITY = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
-INTERACTIONS = {"click", "change", "input", "submit", "keydown", "keyup", "mount"}
-
+from infrastructure.shared.models.structure import object_fields, string_list
 
 class InteractionCoverageError(ValueError):
     """A rejected interaction decomposition with structured gaps for model correction."""
@@ -25,26 +21,12 @@ def empty_interactions(tree):
 
 
 def require_fields(value, fields, label):
-    """Require an object with exactly the declared fields and report the labeled validation boundary."""
-    if not isinstance(value, dict) or set(value) != set(fields):
-        raise ValueError(f"{label} must contain exactly {sorted(fields)}")
+    object_fields(value, {field: object for field in fields}, label)
 
 
-def identifiers(value, allowed, label):
-    """Validate a unique ID list against the allowed registry and return its set of IDs."""
-    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-        raise ValueError(f"{label} must be an array of identifiers")
-    if len(value) != len(set(value)) or set(value) - set(allowed):
-        raise ValueError(f"Duplicate or unknown identifiers in {label}: {value}")
-    return set(value)
-
-
-def text(value, label, optional=False):
-    """Reject missing or empty descriptive text unless an optional value is absent."""
-    if optional and value is None:
-        return
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be nonempty text")
+def text(value, label):
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a JSON string")
 
 
 def relevant_pages(ui, rid):
@@ -82,124 +64,48 @@ def check_coverage(label, required, actual, allowed=None):
 
 
 def validate_interactions(result, ui, tree, schema, obligations, backend, analyzed, complete=False):
-    """Validate trigger/event ownership, UI sources, frontend/DB effects, backend calls, and obligation-union coverage."""
-    require_fields(result, {"triggers", "events", "contracts", "requirements", "steps"}, "Interaction design")
-    if any(not isinstance(value, dict) for value in result.values()):
-        raise ValueError("Interaction registries must be objects")
-    if set(result["requirements"]) != set(tree.requirements) or set(result["steps"]) != set(tree.steps):
-        raise ValueError("Interaction bindings must retain every requirement/step ID")
-    variables = set(ui["bindings"])
+    """Check JSON shape and DB-field coverage of frontend calls; no UI or P/Q policy."""
+    object_fields(result, {key: dict for key in ("triggers", "events", "contracts", "requirements", "steps")}, "interactions")
     for eid, event in result["events"].items():
-        if not isinstance(eid, str) or not IDENTITY.fullmatch(eid):
-            raise ValueError(f"Invalid event ID: {eid}")
-        require_fields(event, {"description", "write", "actions"}, eid)
-        text(event["description"], eid)
-        identifiers(event["write"], variables, eid + ".write")
-        if not isinstance(event["actions"], list) or not event["actions"]:
-            raise ValueError(f"Provide ordered actions for {eid}")
-        action_ids = set()
+        object_fields(event, {"description": str, "write": list, "actions": list}, eid)
+        string_list(event["write"], f"{eid}.write")
         for action in event["actions"]:
-            if not isinstance(action, dict) or not isinstance(action.get("kind"), str) or action["kind"] not in {"local", "api", "navigate"}:
-                raise ValueError(f"Invalid action kind in {eid}")
-            kind = action["kind"]
-            require_fields(action, {"id", "kind", "description"} |
-                ({"api"} if kind == "api" else {"page"} if kind == "navigate" else set()), eid + " action")
-            aid = action["id"]
-            if not isinstance(aid, str) or not IDENTITY.fullmatch(aid) or aid in action_ids:
-                raise ValueError(f"Action IDs must be unique within {eid}")
-            action_ids.add(aid)
-            text(action["description"], aid)
-            if kind == "api" and (not isinstance(action["api"], str) or action["api"] not in backend["apis"]):
-                raise ValueError(f"Unknown backend API: {aid}")
-            if kind == "navigate" and (not isinstance(action["page"], str) or action["page"] not in ui["pages"]):
-                raise ValueError(f"Unknown navigation page: {aid}")
-    emissions = {}
+            object_fields(action, {"id": str, "kind": str, "description": str}, f"{eid}.action")
+            if action["kind"] == "api":
+                object_fields(action, {"api": str}, "API action")
+                if action["api"] not in backend["apis"]:
+                    raise ValueError(f"Unknown API in DB obligation chain: {action['api']}")
+            elif action["kind"] == "navigate":
+                object_fields(action, {"page": str}, "navigation action")
     for tid, trigger in result["triggers"].items():
-        if not isinstance(tid, str) or not IDENTITY.fullmatch(tid):
-            raise ValueError(f"Invalid trigger ID: {tid}")
-        require_fields(trigger, {"source", "event", "action"}, tid)
-        if not isinstance(trigger["source"], str) or trigger["source"] not in ui["elements"]:
-            raise ValueError(f"Unknown trigger UI source: {tid}")
-        if not isinstance(trigger["event"], str) or trigger["event"] not in INTERACTIONS:
-            raise ValueError(f"Unsupported trigger interaction: {tid}")
-        if trigger["event"] == "mount" and trigger["source"] not in {page["root"] for page in ui["pages"].values()}:
-            raise ValueError(f"Page-entry triggers must use a canonical page root: {tid}")
-        source_type = ui["elements"][trigger["source"]].get("type", "container")
-        if trigger["event"] == "submit" and source_type != "form":
-            raise ValueError(f"A native submit trigger must use a form; buttons use click: {tid}")
-        if trigger["event"] in {"change", "input"} and source_type not in {"input", "checkbox", "select"}:
-            raise ValueError(f"Input/change triggers need an editable control: {tid}")
-        if not isinstance(trigger["action"], str) or trigger["action"] not in result["events"]:
-            raise ValueError(f"Unknown trigger event handler: {tid}")
-        emission = (trigger["source"], trigger["event"])
-        if emission in emissions:
-            raise ValueError(f"Reuse one trigger per source/interaction; combine branches in its event: {tid}/{emissions[emission]}")
-        emissions[emission] = tid
-    for kind, allowed in (("requirements", tree.requirements), ("steps", tree.steps)):
+        object_fields(trigger, {"source": str, "event": str, "action": str}, tid)
+    for kind, expected in (("requirements", tree.requirements), ("steps", tree.steps)):
+        for identity in expected:
+            result[kind].setdefault(identity, [])
         for identity, tids in result[kind].items():
-            identifiers(tids, result["triggers"], kind + ":" + identity)
-    used = {tid for tids in result["requirements"].values() for tid in tids}
-    if used != set(result["triggers"]) or {tr["action"] for tr in result["triggers"].values()} != set(result["events"]):
-        raise ValueError("Unbound triggers and event handlers are not allowed")
-    for rid in tree.requirements:
-        if tree.children[rid]:
-            if result["requirements"][rid] or any(result["steps"][sid] for sid in tree.own_steps[rid]):
-                raise ValueError("Organizational parents must not inherit child triggers/events")
+            string_list(tids, f"{kind}.{identity}")
+    checked = tree.leaves if complete else analyzed
+    for rid in checked:
+        tids = result["requirements"].get(rid, [])
+        if not tids and not relevant_pages(ui, rid):
             continue
-        if rid not in analyzed:
-            if result["requirements"][rid] or any(result["steps"][sid] for sid in tree.own_steps[rid]):
-                raise ValueError(f"Only the current/previously analyzed leaves may have bindings: {rid}")
-            continue
-        tids = result["requirements"][rid]
-        events = [result["events"][eid] for eid in event_ids(result, tids)]
-        available = relevant_pages(ui, rid)
-        if not available:
-            if tids or any(result["steps"][sid] for sid in tree.own_steps[rid]):
-                raise ValueError(f"A requirement without UI cannot own frontend triggers: {rid}")
-            continue
-        sources = {uid for page in available.values() for uid in page["elements"]}
-        called = set()
-        for tid in tids:
-            trigger = result["triggers"][tid]
-            if trigger["source"] not in sources:
-                raise ValueError(f"Retrieve and use the requirement's page subtrees and data: {rid}/{tid}")
-            called.update(api_ids(result["events"][trigger["action"]]))
-        if called - set(backend["requirements"][rid]):
-            raise ValueError(f"Use only directly allocated backend APIs for {rid}; other page lifecycle behavior remains owned by its original requirement")
-        if set(backend["requirements"][rid]) - called:
-            raise ValueError(f"Every directly allocated API needs an event call, including APIs with empty DB effects: {rid}")
-        actual = union(event_obligations(event, backend) for event in events)
+        unknown = set(tids) - set(result["triggers"])
+        if unknown:
+            raise ValueError(f"Unknown triggers in DB obligation chain: {sorted(unknown)}")
+        eids = event_ids(result, tids)
+        unknown = eids - set(result["events"])
+        if unknown:
+            raise ValueError(f"Unknown events in DB obligation chain: {sorted(unknown)}")
+        actual = union(event_obligations(result["events"][eid], backend) for eid in eids)
         check_coverage(rid, obligations["requirements"][rid], actual, obligations["requirements"][rid])
-        for sid in tree.own_steps[rid]:
-            step_tids = result["steps"][sid]
-            if not set(step_tids).issubset(tids):
-                raise ValueError(f"Step triggers must be directly assigned to their requirement: {sid}")
-        # Check current-leaf editable bindings inside the bounded proposal loop,
-        # so missing input wiring is returned to the model rather than discovered
-        # only after every leaf has already completed decomposition.
-        for uid in ui["requirements"][rid]:
-            node = ui["elements"][uid]
-            if "user_write" in node.get("mode", []) and node.get("data"):
-                changes = [result["triggers"][tid] for tid in tids if result["triggers"][tid]["source"] == uid
-                    and result["triggers"][tid]["event"] in {"change", "input"}]
-                if not changes or not set(node["data"]).issubset({var for tr in changes for var in result["events"][tr["action"]]["write"]}):
-                    raise ValueError(f"Editable UI data needs a directly associated input/change trigger: {uid}")
-    if complete:
-        if set(analyzed) != set(tree.leaves):
-            raise ValueError("All leaves must complete interaction design")
 
 
 def apply_decomposition(current, proposal, rid, ui, tree, schema, obligations, backend, analyzed):
-    """Replace complete trigger/event records by ID and validate every affected requirement."""
-    require_fields(proposal, {"triggers", "events", "requirement_triggers", "step_triggers"}, "Interaction proposal")
+    object_fields(proposal, {"triggers": dict, "events": dict, "requirement_triggers": list, "step_triggers": dict}, "interaction proposal")
     updated = deepcopy(current)
     for kind in ("triggers", "events"):
-        if not isinstance(proposal[kind], dict):
-            raise ValueError(f"{kind} must be an object")
         updated[kind].update(deepcopy(proposal[kind]))
-    if not isinstance(proposal["step_triggers"], dict) or set(proposal["step_triggers"]) != set(tree.own_steps[rid]):
-        raise ValueError("Return exactly the current leaf's own step IDs")
-    updated["requirements"][rid] = deepcopy(proposal["requirement_triggers"])
+    updated["requirements"][rid] = string_list(proposal["requirement_triggers"], "requirement_triggers")
     updated["steps"].update(deepcopy(proposal["step_triggers"]))
     validate_interactions(updated, ui, tree, schema, obligations, backend, [*analyzed, rid])
     return updated

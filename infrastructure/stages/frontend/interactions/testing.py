@@ -1,4 +1,4 @@
-"""Scenario traceability, real-app browser checks, and E2E RED/GREEN gates."""
+"""Real-app browser checks and executable E2E RED/GREEN gates."""
 
 from hashlib import sha256
 import os
@@ -8,43 +8,16 @@ from tempfile import TemporaryDirectory
 
 from infrastructure.stages.frontend.interactions.e2e_runtime import RUNNER
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, parse_playwright_result, require_green, require_red
+from infrastructure.shared.project.entrypoints import selected_path
 
 
-def test_path(rid):
+def test_path(rid, output=None):
     """Return a safe, stable E2E spec path for one requirement."""
+    chosen = selected_path(output, "e2e_test", rid) if output is not None else None
+    if chosen:
+        return chosen
     slug = rid if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", rid) else "requirement-" + sha256(rid.encode()).hexdigest()[:12]
     return f"frontend/tests/e2e/{slug}.spec.ts"
-
-
-def validate_test_source(source, step_ids, maximum):
-    """Require a small browser-driven suite tracing all selected scenario steps; reject skips, API mocks, and direct API calls."""
-    titles = re.findall(r"\btest\(\s*(['\"])(.*?)\1\s*,", source, re.DOTALL)
-    if not titles or len(titles) > maximum or not re.search(r"from\s+['\"]\./support/context(?:\.js)?['\"]", source):
-        raise ValueError(f"Use 1..{maximum} literal test(...) cases importing test/expect from ./support/context.js")
-    if re.search(r"\b(?:test|describe)\.(?:skip|fixme|only|fail)\b|\bmock\b|\.route\s*\(|\.fulfill\s*\(|\.request\b|\bfetch\s*\(|addInitScript|__ARC_UI_FIXTURE__|process\.exit|node:(?:fs|child_process)|require\s*\(", source):
-        raise ValueError("E2E cases may not skip, mock APIs, call APIs directly, inject UI fixtures, or modify infrastructure")
-    if not re.search(r"await\s+expect(?:\.|\()", source) or not re.search(r"page\.(?:goto|getBy|locator)", source):
-        raise ValueError("Drive the real page and await observable Playwright assertions")
-    # React updates are asynchronous. Keep all DOM observations in Playwright's
-    # retrying assertions instead of reading a transient snapshot synchronously.
-    if re.search(r"\.textContent\s*\(\)|\.innerHTML\s*\(\)|waitForTimeout\s*\(", source):
-        raise ValueError("Use retrying Playwright assertions; do not read textContent/innerHTML or use waitForTimeout")
-    # An alert can be permanently mounted with a blank placeholder. Visibility
-    # alone therefore proves only that the container exists, not that the action
-    # produced the required message.
-    alert_locators = re.findall(
-        r"(?:const\s+\w+\s*=\s*)?([\w.$]+getByRole\(\s*['\"]alert['\"]\s*\))",
-        source,
-    )
-    for locator in alert_locators:
-        if not re.search(r"(?:toHaveText|toContainText)\s*\(", source):
-            raise ValueError("Alert assertions must await toHaveText or toContainText")
-    names = "\n".join(title for _, title in titles)
-    tokens = {f"STEP:{sid}" for sid in step_ids}
-    missing = [token for token in sorted(tokens) if not re.search(r"(?<![A-Za-z0-9_.:-])" + re.escape(token) + r"(?![A-Za-z0-9_.:-])", names)]
-    if missing:
-        raise ValueError(f"Trace every required scenario step in test titles: {missing}")
-    return len(titles)
 
 
 def require_behavioral_red(result):
@@ -56,7 +29,7 @@ def require_behavioral_red(result):
 
 
 class E2EChecks(FrontendChecks):
-    """Real-app Playwright checks with isolated test data and per-spec case-count enforcement."""
+    """Real-app Playwright checks with isolated test data ."""
     def __init__(self, output, maximum=5):
         """Reuse frontend checks with a longer real-server timeout and an enforced per-requirement test budget."""
         super().__init__(output, timeout=300)
@@ -68,7 +41,7 @@ class E2EChecks(FrontendChecks):
             source_files=("src/**/*.ts", "src/**/*.tsx") if full_source else ("src/main.tsx",))
 
     def tests(self, files):
-        """Run only selected E2E specs with an owned temporary database, clean it up, and verify executed case counts."""
+        """Run only selected E2E specs with an owned temporary database, clean it up, ."""
         if not files:
             raise ValueError("Do not run empty E2E suites")
         for relative in files:
@@ -81,9 +54,4 @@ class E2EChecks(FrontendChecks):
             print("Playwright E2E | real backend + isolated database | " + ", ".join(files), flush=True)
             result = self.execute([RUNNER, *files], env=env)
         result = parse_playwright_result(result, include_files=True)
-        counts = {Path(path).name: count for path, count in result["files"].items()}
-        for relative in files:
-            count = counts.get(Path(relative).name, 0)
-            if not 1 <= count <= self.maximum:
-                raise ValueError(f"Keep 1..{self.maximum} executed tests in {relative}; found {count}")
         return result

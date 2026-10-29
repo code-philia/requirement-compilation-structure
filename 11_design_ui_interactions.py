@@ -6,7 +6,6 @@ from pathlib import Path
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.stages.frontend.context import load_frontend_context, load_ui_design, behavior_contexts
 from infrastructure.stages.frontend.interactions.synthesis import synthesize_interactions
-from infrastructure.stages.frontend.ui.testing import validate_ui_baseline
 from infrastructure.stages.frontend.interactions.design import empty_interactions, validate_interactions
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
@@ -19,7 +18,6 @@ def design_ui_interactions(input_dir: Path, arc_dir: Path, pause: bool = False, 
         raise ValueError("--max-attempts must be nonnegative; use 0 for unlimited attempts")
     tree, schema, obligations, backend, images, contexts = load_frontend_context(arc_dir, input_dir)
     ui = load_ui_design(arc_dir, tree, images)
-    validate_ui_baseline(arc_dir, ui)
     console = DemoConsole(pause)
     if not ui["pages"]:
         result = empty_interactions(tree)

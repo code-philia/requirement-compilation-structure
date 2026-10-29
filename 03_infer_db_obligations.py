@@ -121,7 +121,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
         obligations["requirements"][rid] = inferred["requirement"]
         obligations["steps"].update(inferred["steps"])
         console.show(f"{label} | 4. Inferred obligations (symbol-checked)", (
-            response["explanation"] + "\n\n"
+            response.get("explanation", "") + "\n\n"
             + format_obligations({rid: inferred["requirement"], **inferred["steps"]})
         ))
 

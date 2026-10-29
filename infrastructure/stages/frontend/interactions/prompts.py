@@ -19,8 +19,8 @@ ONLY on the event. No read sets, action writes, guards, DB effects, typed expres
 request/update trees or explanations. API and navigation permissions are derived from
 actions; DB effects are derived from called APIs by the compiler.
 
-Call only the supplied backend_apis. Every directly allocated API must be used, including
-read-only APIs or APIs with no DB effects. Preserve failure-without-writes. Local input
+Choose backend API calls that realize the requirement and its supplied DB obligations.
+Acceptance compares database read/write fields rather than requiring an exact API-ID set. Preserve failure-without-writes. Local input
 and navigation have no DB effects. A destination page's lifecycle API belongs to its
 own requirement; do not copy it into the current requirement's events. Navigation uses
 existing page IDs from page_inventory. UI-only variables are valid global state.

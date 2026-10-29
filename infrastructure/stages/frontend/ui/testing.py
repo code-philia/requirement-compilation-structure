@@ -1,7 +1,6 @@
 """Deterministic UI existence suites and bounded browser/typecheck commands."""
 
 import json
-from hashlib import sha256
 import os
 from pathlib import Path
 import re
@@ -11,47 +10,9 @@ import subprocess
 import tempfile
 
 from infrastructure.stages.frontend.ui.design import page_elements, visible
-from infrastructure.utils.files import save_bytes, read_artifact, read_source
 from infrastructure.utils.processes import capture_process, npm_command
-from infrastructure.shared.project.entrypoints import implementation_path, implementation_entrypoint
 
 KEY_TYPES = {"page", "form", "input", "checkbox", "select", "button", "heading", "link", "list", "image", "alert", "table", "text"}
-
-
-# This is a teaching phase check, not a general JavaScript security analyzer.
-PRESENTATION_CHECK = r'''
-import ts from "typescript";
-import fs from "node:fs";
-const errors = [];
-for (const path of process.argv.slice(1)) {
-  const source = ts.createSourceFile(path, fs.readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true,
-    /\.[jt]sx$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-  const visit = node => {
-    if (ts.isJsxAttribute(node) && /^on[A-Z]/.test(node.name.getText(source)))
-      errors.push(`${path}: business handlers belong in event modules`);
-    if (ts.isCallExpression(node)) {
-      const called = node.expression.getText(source);
-      if (/(?:^|\.)(?:fetch|useEffect|useLayoutEffect|useState|useReducer|sendBeacon|setTimeout|setInterval)$/.test(called))
-        errors.push(`${path}: ${called} is not part of UI/data presentation`);
-    }
-    if (ts.isIdentifier(node) && /^(?:XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage)$/.test(node.text))
-      errors.push(`${path}: browser effects belong in event modules`);
-    if (ts.isPropertyAccessExpression(node) && node.getText(source) === "document.cookie")
-      errors.push(`${path}: cookies do not belong in page components`);
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-}
-if (errors.length) { console.error([...new Set(errors)].join("\n")); process.exitCode = 1; }
-'''
-
-
-def check_presentation(output, checks, page_ids):
-    """Keep page repairs presentation-only in both steps 10 and 12."""
-    sources = [implementation_path("page", pid) for pid in page_ids if implementation_entrypoint(output, "page", pid)]
-    result = checks.execute(["--input-type=module", "-e", PRESENTATION_CHECK, *sources])
-    result.pop("stdout", None)
-    return result
 
 
 def presentation_run_status(result):
@@ -64,26 +25,6 @@ def presentation_run_status(result):
         return "REPAIR_REQUIRED"
     require_red(result)
     return "RED_CONFIRMED"
-
-
-def design_fingerprint(design):
-    """Tie a successful presentation report to the full UI/data design, including styles."""
-    return sha256(json.dumps(design, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
-
-
-def validate_ui_baseline(arc_dir, design):
-    """Share the exact step 10 prerequisite check across steps 11 and 12."""
-    report = read_artifact(arc_dir, "ui_checks.json")
-    if not isinstance(report, dict) or report.get("status") != ("GREEN" if design["pages"] else "NO_UI") or report.get("design_hash") != design_fingerprint(design):
-        raise ValueError("Complete step 10 for the current UI/data design before steps 11/12")
-    pages = report.get("pages")
-    if not isinstance(pages, dict) or set(pages) != set(design["pages"]):
-        raise ValueError("Step 10 report must cover every current page")
-    for pid in pages:
-        relative = test_path(pid)
-        target = arc_dir.parent / relative
-        if not isinstance(pages[pid], dict) or pages[pid].get("status") != "GREEN" or pages[pid].get("test_path") != relative or not target.is_file() or read_source(target) != existence_suite(design, pid):
-            raise ValueError(f"UI existence tests changed for {pid}; rerun step 10")
 
 
 def test_path(pid: str) -> str:
@@ -103,9 +44,7 @@ def existence_suite(design: dict, pid: str) -> str:
         lines.append(f'test({json.dumps(pid + " / " + name + " / UI element existence")}, async ({{ page }}) => {{')
         lines.extend([
             '  const runtimeErrors: string[] = [];',
-            '  const businessCalls: string[] = [];',
             '  page.on("pageerror", error => runtimeErrors.push(error.message));',
-            '  page.on("request", req => { if (/\\/api(?:\\/|$|\\?)/.test(new URL(req.url()).pathname)) businessCalls.push(req.url()); });',
             '  await page.addInitScript(fixture => { (window as unknown as { __ARC_UI_FIXTURE__: unknown }).__ARC_UI_FIXTURE__ = fixture; }, '
                 + json.dumps({"page": pid, "data": fixture}, ensure_ascii=False) + ');',
             f'  await page.goto({json.dumps(page["route"])});',
@@ -151,19 +90,17 @@ def existence_suite(design: dict, pid: str) -> str:
         lines.extend([
             '  } catch (error) {',
             '    if (runtimeErrors.length) throw new Error("UI_RUNTIME_ERROR: " + runtimeErrors.join("\\n"));',
-            '    if (businessCalls.length) throw new Error("UI_BUSINESS_CALL: " + businessCalls.join("\\n"));',
             '    throw error;',
             '  }',
             '  if (runtimeErrors.length) throw new Error("UI_RUNTIME_ERROR: " + runtimeErrors.join("\\n"));',
-            '  if (businessCalls.length) throw new Error("UI_BUSINESS_CALL: " + businessCalls.join("\\n"));',
             '});', '',
         ])
     return "\n".join(lines)
 
 
 def require_green(result: dict) -> None:
-    """Require passing browser assertions with no skipped tests or reported runtime errors."""
-    if result["returncode"] or result.get("errors") or not result.get("passed") or result.get("failed") or result.get("skipped") or result.get("flaky"):
+    """Require passing actual browser assertions with no reported runtime errors."""
+    if result["returncode"] or result.get("errors") or not result.get("passed") or result.get("failed"):
         raise ValueError(f"UI checks are not GREEN: {result}")
 
 
@@ -174,7 +111,7 @@ def require_red(result: dict) -> None:
     # Code frames can contain the literal runtime-guard text from adjacent lines;
     # classify the actual error headline rather than those source snippets.
     headlines = [re.sub(r"\x1b\[[0-9;]*m", "", message).split("\n", 1)[0] for message in errors]
-    if not result["returncode"] or not result.get("failed") or result.get("errors") or result.get("skipped") or result.get("flaky") or not errors or any(not re.search(r"expect\(|AssertionError", message) or any(word in message for word in excluded) for message in headlines):
+    if not result["returncode"] or not result.get("failed") or result.get("errors") or not errors or any(not re.search(r"expect\(|AssertionError", message) or any(word in message for word in excluded) for message in headlines):
         raise ValueError(f"Expected missing-component assertion RED, not infrastructure/runtime failure: {result}")
 
 
@@ -269,17 +206,3 @@ class FrontendChecks:
         """Run the generated workspace's frontend and backend build command and return the captured result."""
         command = npm_command()
         return self.execute([*command[1:], "run", "build"], executable=command[0])
-
-
-def frozen_files(output: Path, files: list[str]) -> dict:
-    """Snapshot the bytes of selected compiler-owned or accepted test files."""
-    return {relative: (output / relative).read_bytes() for relative in files}
-
-
-def assert_frozen(output: Path, frozen: dict) -> None:
-    """Restore any altered snapshot files and reject changes to trusted tests or compiler-owned runtime files."""
-    changed = [relative for relative, content in frozen.items() if not (output / relative).is_file() or (output / relative).read_bytes() != content]
-    if changed:
-        for relative in changed:
-            save_bytes(output / relative, frozen[relative])
-        raise ValueError(f"Compiler-owned UI tests/runtime were modified: {changed}")

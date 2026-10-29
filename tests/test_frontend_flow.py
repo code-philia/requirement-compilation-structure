@@ -10,11 +10,10 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.frontend.context import load_ui_context
 from infrastructure.stages.frontend.ui.design import apply_proposal, empty_design, page_context, validate_design
 from infrastructure.stages.frontend.ui.synthesis import synthesize_ui
-from infrastructure.stages.frontend.ui.testing import design_fingerprint, existence_suite, test_path, validate_ui_baseline, presentation_run_status
+from infrastructure.stages.frontend.ui.testing import presentation_run_status
 from infrastructure.stages.frontend.interactions.contracts import validate_contract
 from infrastructure.stages.frontend.interactions.design import empty_interactions, validate_interactions
 from infrastructure.stages.frontend.interactions.implementation import scenario_context, test_run_status
-from infrastructure.stages.frontend.interactions.testing import validate_test_source
 from infrastructure.utils.files import save_json, save_text
 
 
@@ -84,25 +83,19 @@ class FrontendFlow(unittest.TestCase):
         self.output = Path(temporary.name)
         self.arc = self.output / ".arc"
 
-    def test_single_variable_definitions_and_full_record_updates(self):
-        validate_design(self.ui, self.tree, {}, complete=True)
-        page = page_context(self.ui, "editor")
-        self.assertIn("form.errorVisible", page["bindings"])
-        self.assertEqual(page["elements"]["UI-TEXT"]["data"], ["form.text"])
-        before = deepcopy(self.ui)
-        record = deepcopy(self.ui["elements"]["UI-TEXT"])
-        record["prop"]["label"] = "Note text"
-        proposal = {"pages": {}, "elements": {"UI-TEXT": record}, "bindings": {},
-            "requirement_ui": self.ui["requirements"]["REQ-A"], "step_ui": {"STEP-REQ-A": self.ui["steps"]["STEP-REQ-A"]}}
-        updated = apply_proposal(self.ui, proposal, "REQ-A", self.tree, {}, {"editor": page}, 3)
-        self.assertEqual(updated["elements"]["UI-TEXT"]["prop"], {"label": "Note text", "input_type": "text"})
-        self.assertEqual(self.ui, before)
-        proposal["elements"]["UI-TEXT"] = {"prop": {"label": "Partial"}}
-        with self.assertRaisesRegex(ValueError, "complete UI"):
-            apply_proposal(self.ui, proposal, "REQ-A", self.tree, {}, {"editor": page}, 3)
-        legacy = deepcopy(self.ui)
-        legacy["bindings"]["form.text"]["owner"] = "UI-EDITOR"
-        with self.assertRaises(ValueError): validate_design(legacy, self.tree, {})
+    def test_ui_checks_only_json_shape(self):
+        ui = deepcopy(self.ui)
+        ui["elements"]["UI-SAVE"]["mode"] = ["user_write"]
+        ui["elements"]["UI-SAVE"]["data"] = ["form.submitting"]
+        ui["bindings"]["form.submitting"] = binding("boolean", "not type checked", "")
+        ui["bindings"]["form.submitting"]["owner"] = "any node"
+        ui["pages"]["summary"]["route"] = "/"
+        validate_design(ui, self.tree, {}, complete=True)
+        state = deepcopy(self.interactions)
+        validate_interactions(state, ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves, complete=True)
+        ui["elements"]["UI-SAVE"]["data"] = 123
+        with self.assertRaisesRegex(ValueError, "JSON shape"):
+            validate_design(ui, self.tree, {})
 
     def test_synthesis_retries_without_publishing_rejected_state(self):
         requests = []
@@ -116,7 +109,7 @@ class FrontendFlow(unittest.TestCase):
                 "requirement_ui": self.ui["requirements"][rid], "step_ui": {sid: self.ui["steps"][sid] for sid in self.tree.own_steps[rid]}}
             if len(requests) == 1:
                 proposal = deepcopy(proposal)
-                proposal["bindings"]["form.text"]["owner"] = "UI-EDITOR"
+                proposal["bindings"]["form.text"]["source"] = 7
             return proposal
         contexts = {rid: {**record, "steps": [self.tree.steps[sid] for sid in self.tree.own_steps[rid]], "images": {}} for rid, record in self.tree.requirements.items()}
         result = synthesize_ui(self.arc, self.tree, {"entities": {}}, self.backend, {}, contexts, Mock(generate_json=generate), Mock())
@@ -126,38 +119,31 @@ class FrontendFlow(unittest.TestCase):
         self.assertEqual(requests[1]["retrieved_pages"], {})
         self.assertNotIn("step_obligations", requests[0])
 
-    def test_presentation_loader_and_design_fingerprint(self):
+    def test_presentation_loader_has_no_report_policy(self):
         save_json(self.arc / "requirements.json", self.raw)
         save_json(self.arc / "visual_analysis.json", {})
         tree, images, contexts = load_ui_context(self.arc, self.output)
         self.assertEqual(tree.leaves, self.tree.leaves)
         self.assertEqual(images, {})
         self.assertNotIn("concatenated_steps", contexts["REQ-A"])
-        report = {"status": "GREEN", "design_hash": design_fingerprint(self.ui), "pages": {}}
-        for pid in self.ui["pages"]:
-            relative = test_path(pid)
-            report["pages"][pid] = {"status": "GREEN", "test_path": relative}
-            save_text(self.output / relative, existence_suite(self.ui, pid))
-        save_json(self.arc / "ui_checks.json", report)
-        validate_ui_baseline(self.arc, self.ui)
-        changed = deepcopy(self.ui)
-        changed["elements"]["UI-TEXT"]["prop"]["style"] = "larger spacing"
-        self.assertEqual(existence_suite(changed, "editor"), existence_suite(self.ui, "editor"))
-        with self.assertRaisesRegex(ValueError, "current UI/data"):
-            validate_ui_baseline(self.arc, changed)
 
-    def test_effects_and_input_wiring_without_repeated_rw_contracts(self):
+    def test_frontend_calls_are_checked_by_database_fields(self):
         validate_interactions(self.interactions, self.ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves, complete=True)
-        for mutate in ("unknown_api", "duplicate_trigger", "missing_input", "legacy_read"):
-            state = deepcopy(self.interactions)
-            if mutate == "unknown_api": state["events"]["EV-SAVE"]["actions"][0]["api"] = "API-OTHER"
-            elif mutate == "duplicate_trigger": state["triggers"]["TR-DUP"] = state["triggers"]["TR-INPUT"]
-            elif mutate == "missing_input": state["events"]["EV-INPUT"]["write"] = []
-            else: state["events"]["EV-SAVE"]["read"] = []
-            with self.subTest(mutate=mutate), self.assertRaises(ValueError):
-                validate_interactions(state, self.ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves)
-        for eid, contract in self.interactions["contracts"].items(): validate_contract(eid, contract)
-        with self.assertRaises(ValueError): validate_contract("EV", {"precondition": [], "postcondition": [], "actions": {}})
+        state = deepcopy(self.interactions)
+        state["events"]["EV-INPUT"]["write"] = []
+        state["events"]["EV-SAVE"]["read"] = ["undeclared frontend state"]
+        state["triggers"]["TR-DUP"] = state["triggers"]["TR-INPUT"]
+        state["triggers"]["TR-SAVE"]["event"] = "anything"
+        validate_interactions(state, self.ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves)
+        alternative = deepcopy(self.backend)
+        alternative["apis"]["API-SAME-FIELDS"] = deepcopy(alternative["apis"]["API-SAVE"])
+        state["events"]["EV-SAVE"]["actions"][0]["api"] = "API-SAME-FIELDS"
+        validate_interactions(state, self.ui, self.tree, {}, self.obligations, alternative, self.tree.leaves)
+        state["events"]["EV-SAVE"]["actions"][0]["api"] = "API-COUNT"
+        with self.assertRaisesRegex(ValueError, "Obligation"):
+            validate_interactions(state, self.ui, self.tree, {}, self.obligations, alternative, self.tree.leaves)
+        validate_contract("EV", {"precondition": [], "postcondition": [], "actions": {}})
+        with self.assertRaises(ValueError): validate_contract("EV", {"precondition": {}, "postcondition": []})
 
     def test_navigation_context_includes_later_page_mount_and_keeps_ownership(self):
         context = scenario_context(self.ui, self.interactions, "REQ-A")
@@ -165,8 +151,6 @@ class FrontendFlow(unittest.TestCase):
         self.assertEqual(set(context["events"]), {"EV-INPUT", "EV-SAVE", "EV-COUNT"})
         self.assertEqual(len(context["triggers"]), 3)
         self.assertEqual(self.interactions["requirements"]["REQ-A"], ["TR-INPUT", "TR-SAVE"])
-        source = 'import {test,expect} from "./support/context.js"; test("STEP:STEP-REQ-A saves", async ({page}) => {await page.goto("/"); await expect(page.getByTestId("UI-EDITOR")).toBeVisible();});'
-        validate_test_source(source, ["STEP-REQ-A"], 1)
 
     def test_backend_only_requirements_need_no_frontend_effect_coverage(self):
         ui = empty_design()

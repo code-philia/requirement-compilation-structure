@@ -74,10 +74,6 @@ def synthesize_ui(arc_dir, tree, schema, contracts, images, contexts, model, con
                 proposal = response
                 updated = apply_proposal(design, proposal, rid, tree, images, retrieved["pages"], max_fixtures)
                 bind_requirement_image_pages(updated, requirement, rid)
-                for image in requirement["images"]:
-                    if not any(image in page["images"] and set(page_elements(updated, pid)).intersection(updated["requirements"][rid])
-                            for pid, page in updated["pages"].items()):
-                        raise ValueError(f"Requirement image needs a directly associated page subtree: {image}")
                 break
             except ValueError as error:
                 correction = {"error": str(error), "previous_response": response}

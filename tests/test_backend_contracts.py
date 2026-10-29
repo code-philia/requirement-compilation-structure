@@ -9,7 +9,6 @@ from unittest.mock import Mock, patch
 
 from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.stages.backend.contracts import CONTRACT_KEYS, validate_contract, validate_contracts
-from infrastructure.stages.backend.testing import condition_tokens, validate_test_source
 from infrastructure.utils.files import save_json, save_text
 
 
@@ -73,28 +72,25 @@ class BackendContracts(unittest.TestCase):
     def validate(self, api):
         validate_contract({key: api[key] for key in CONTRACT_KEYS})
 
-    def test_semantic_conditions_keep_status_and_identity_checks(self):
-        self.validate(self.api)
-        for change in ("unknown_status", "success_as_rejection", "missing_q", "duplicate_id", "blank_description", "legacy_pointer"):
-            api = deepcopy(self.api)
-            if change == "unknown_status": api["postcondition"][0]["status"] = 201
-            elif change == "success_as_rejection": api["precondition"][0]["error_status"] = 200
-            elif change == "missing_q": api["postcondition"].pop()
-            elif change == "duplicate_id": api["postcondition"][1]["id"] = "Q-1"
-            elif change == "blank_description": api["precondition"][0]["description"] = " "
-            else: api["precondition"][0]["request_fields"] = ["/body/text"]
-            with self.subTest(change=change), self.assertRaises(ValueError): self.validate(api)
-        reader = {**self.design["apis"]["API-COUNT"], **conditions("API-COUNT")}
-        self.validate(reader)
+    def test_conditions_are_checked_for_json_shape_only(self):
+        api = deepcopy(self.api)
+        api["signature"]["method"] = "CUSTOM"
+        api["signature"]["path"] = "/arbitrary/path"
+        api["precondition"][0]["error_status"] = 200
+        api["precondition"][0]["request_fields"] = ["/not/declared"]
+        api["postcondition"] = []
+        self.validate(api)
+        api["postcondition"] = {}
+        with self.assertRaisesRegex(ValueError, "JSON shape"):
+            self.validate(api)
 
-    def test_test_titles_require_conditions_without_field_labels(self):
-        source = 'import { test } from "node:test"; import assert from "node:assert/strict";\ntest("P-1 Q-1 Q-2 saves valid text and rejects empty text", async () => { assert.equal(1, 1); });'
-        self.assertEqual(condition_tokens(self.api), {"P-1", "Q-1", "Q-2"})
-        validate_test_source(source, self.api, 1)
-        with self.assertRaisesRegex(ValueError, "Q-2"):
-            validate_test_source(source.replace("Q-2", ""), self.api, 1)
-        with self.assertRaisesRegex(ValueError, "at most 1"):
-            validate_test_source(source + '\ntest("another case", () => { assert.ok(true); });', self.api, 1)
+    def test_contracts_still_preserve_database_obligations(self):
+        contracts = {"apis": {aid: {**api, **conditions(aid)} for aid, api in self.design["apis"].items()},
+            "requirements": self.design["requirements"]}
+        validate_contracts(contracts, self.design)
+        contracts["apis"]["API-SAVE"]["write"] = []
+        with self.assertRaisesRegex(ValueError, "obligations changed"):
+            validate_contracts(contracts, self.design)
 
     def test_inference_uses_all_owners_and_preserves_interfaces(self):
         stage = import_module("07_infer_api_contracts")

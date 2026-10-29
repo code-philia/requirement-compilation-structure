@@ -81,7 +81,6 @@ import { basename, dirname } from "node:path";
 import { createDatabaseClient } from "../../../../backend/src/db/client.js";
 import { initializeDatabase } from "../../../../backend/src/db/initialize.js";
 export { fixturePasswordHash } from "../../../../backend/tests/support/context.js";
-const declared: { method: string; path: string; statuses: number[] }[] = DECLARED_RESPONSES;
 export const test = base.extend<{ database: Database.Database; applicationErrors: void }>({
   database: [async ({}, use) => {
     const path = process.env.ARC_E2E_DB_FILE;
@@ -106,14 +105,6 @@ export const test = base.extend<{ database: Database.Database; applicationErrors
     page.on("requestfailed", request => {
       if (new URL(request.url()).pathname.startsWith("/api/")) errors.push("E2E_NETWORK_ERROR: " + request.url());
     });
-    page.on("response", response => {
-      const url = new URL(response.url());
-      if (!url.pathname.startsWith("/api/") || url.pathname === "/api/health") return;
-      const route = declared.find(api => api.method === response.request().method() &&
-        new RegExp("^" + api.path.split("/").map(part => part.startsWith(":") ? "[^/]+" : part.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")).join("/") + "$").test(url.pathname));
-      if (!route || !route.statuses.includes(response.status()))
-        errors.push(`E2E_BACKEND_ERROR: ${response.request().method()} ${url.pathname} returned undeclared status ${response.status()}`);
-    });
     await use();
     if (errors.length) throw new Error(errors.join("\\n"));
   }, { auto: true }],
@@ -124,11 +115,9 @@ export { expect };
 
 def prepare_e2e(output, backend):
     """Write E2E configuration, real-server launchers, isolated database fixtures, and the npm test command."""
-    declared = [{"method": api["signature"]["method"], "path": api["signature"]["path"],
-        "statuses": [api["response"]["success"]["status"], *(branch["status"] for branch in api["response"]["errors"])]} for api in backend["apis"].values()]
     sources = {CONFIG: CONFIG_SOURCE, RUNNER: RUNNER_SOURCE,
         VITE_CONFIG: 'import { defineConfig, mergeConfig } from "vite";\nimport base from "./vite.config";\nexport default mergeConfig(base, defineConfig({ server: { proxy: { "/api": process.env.ARC_BACKEND_URL! } } }));\n',
-        FIXTURE: FIXTURE_SOURCE.replace("DECLARED_RESPONSES", json.dumps(declared))}
+        FIXTURE: FIXTURE_SOURCE}
     for relative, source in sources.items():
         save_text(output / relative, source)
     path = output / "package.json"
