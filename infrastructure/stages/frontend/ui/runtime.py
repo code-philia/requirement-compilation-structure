@@ -13,7 +13,7 @@ from infrastructure.utils.files import save_text
 
 PLAYWRIGHT_VERSION = "1.64.1"
 
-UI_RUNTIME = '''// Compiler-owned UI/data boundary. Business events are intentionally absent.
+UI_RUNTIME = '''// Compiler-owned UI types shared by presentation and interaction stages.
 export interface UiPageProps { data: Readonly<Record<string, unknown>> }
 
 declare global {
@@ -27,6 +27,22 @@ export function initialPageData(page: string, defaults: Record<string, unknown>)
   const fixture = development ? window.__ARC_UI_FIXTURE__ : undefined;
   return fixture?.page === page ? { ...defaults, ...fixture.data } : defaults;
 }
+
+export interface UiApiRequest {
+  params?: Record<string, unknown>; query?: Record<string, unknown>;
+  body?: Record<string, unknown>; headers?: Record<string, string>;
+  credentials?: RequestCredentials;
+}
+export interface UiApiResponse { status: number; body: unknown; headers: Record<string, string> }
+export interface UiEventContext {
+  readonly data: Readonly<Record<string, unknown>>;
+  readonly input: { value?: string; checked?: boolean; key?: string };
+  readonly trigger: { id: string; source: string; event: string };
+  update(patch: Record<string, unknown>): void;
+  navigate(pageId: string): void;
+  api(apiId: string, request?: UiApiRequest): Promise<UiApiResponse>;
+}
+export type UiEventHandler = (context: UiEventContext) => void | Promise<void>;
 '''
 
 PLAYWRIGHT_CONFIG = '''// Compiler-owned UI existence tests. No backend is started at this stage.

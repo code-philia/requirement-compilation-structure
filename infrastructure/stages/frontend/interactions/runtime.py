@@ -13,24 +13,6 @@ from infrastructure.utils.files import save_text
 EVENT_REGISTRY = "frontend/src/ui-events.ts"
 API_CLIENT = "frontend/src/ui-api.ts"
 
-EVENT_TYPES = '''
-export interface UiApiRequest {
-  params?: Record<string, unknown>; query?: Record<string, unknown>;
-  body?: Record<string, unknown>; headers?: Record<string, string>;
-  credentials?: RequestCredentials;
-}
-export interface UiApiResponse { status: number; body: unknown; headers: Record<string, string> }
-export interface UiEventContext {
-  readonly data: Readonly<Record<string, unknown>>;
-  readonly input: { value?: string; checked?: boolean; key?: string };
-  readonly trigger: { id: string; source: string; event: string };
-  update(patch: Record<string, unknown>): void;
-  navigate(pageId: string): void;
-  api(apiId: string, request?: UiApiRequest): Promise<UiApiResponse>;
-}
-export type UiEventHandler = (context: UiEventContext) => void | Promise<void>;
-'''
-
 CLIENT_SOURCE = '''
 export async function callApi(apiId: string, request: UiApiRequest = {}): Promise<UiApiResponse> {
   const signature = catalog[apiId];
@@ -152,7 +134,7 @@ def sync_interactions(output, ui, interactions, backend, active_events):
     """Import fixed handle exports directly; placeholders never touch their source."""
     active = set(active_events)
     active.intersection_update(interactions["events"])
-    save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME + EVENT_TYPES)
+    save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
     client = 'import type { UiApiRequest, UiApiResponse } from "./ui-runtime";\n'
     client += "const catalog: Record<string, { method: string; path: string }> = " + json.dumps({aid: {"method": api["signature"]["method"], "path": api["signature"]["path"]} for aid, api in backend["apis"].items()}) + ";\n"
     save_text(output / API_CLIENT, client + CLIENT_SOURCE)

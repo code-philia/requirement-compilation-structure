@@ -18,6 +18,16 @@ def source_paths(output: Path, root: str) -> list[str]:
         and path.suffix in {".ts", ".tsx", ".js", ".jsx", ".css", ".json", ".html", ".sql", ".md"})
 
 
+def editable_sources(output: Path, root: str) -> list[str]:
+    """Allow source repairs across the layer while retaining compiler-owned wiring."""
+    templates = Path(__file__).resolve().parents[1] / "project/templates"
+    generated = {"backend/src/api/register.ts", "frontend/src/ui-runtime.ts",
+        "frontend/src/ui-api.ts", "frontend/src/ui-events.ts"}
+    return [relative for relative in source_paths(output, root)
+        if relative not in generated and not (templates / relative).is_file()
+        and not relative.startswith("backend/src/db/")]
+
+
 class FileWorkspace:
     """Expose a single file map and accept edits only to explicitly writable paths."""
 

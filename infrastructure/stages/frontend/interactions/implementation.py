@@ -6,7 +6,7 @@ accepted scenarios and UI presence tests in regression checks."""
 
 import json
 
-from infrastructure.shared.agent.files import FileWorkspace, source_paths
+from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.interactions.e2e_runtime import FIXTURE, prepare_e2e
@@ -85,7 +85,13 @@ Use readable scenario titles and cover requirement behavior through UI and datab
 assertions. Keep a few meaningful workflows rather than a separate case for every input.
 Use actual UI IDs, exact API fields and database schema. Remember response.body is unknown
 in helper APIs; use appropriate casts for SQL rows and captured response objects.
-Only the generated test file is editable. The compiler owns fixtures, app startup,
+The current test and supplied writable frontend sources are editable. If compilation
+or execution fails in an existing page or handler, repair that source directly rather
+than repeatedly rewriting an unrelated test. Write tests first; do not implement new
+event handlers before their tests. Preserve existing behavior, UI IDs, contracts and
+already accepted scenarios. Read-only source files and other tests remain references.
+Do not redeclare compiler-owned runtime types inside page or test modules.
+The compiler owns fixtures, app startup,
 database reset and test commands. The generation gate checks TypeScript,
 and executable scenarios against the current application. Assertion RED is accepted;
 invalid locators, fixture/runtime errors, and timeouts need test repair, not skipped tests.
@@ -94,7 +100,7 @@ invalid locators, fixture/runtime errors, and timeouts need test repair, not ski
 IMPLEMENT_INSTRUCTIONS = '''Implement the current requirement's designed UI interactions against frozen E2E tests.
 Use only the supplied UI/data, trigger/event actions, contracts and canonical backend APIs.
 The context contains each scenario interaction once, including destination-page lifecycle
-behavior. target_event_ids selects the handlers to implement; preserve all other handlers.
+behavior. target_event_ids selects new handlers to implement; preserve other handlers' behavior.
 Use the existing implementation_paths and page_paths. When task.new_file is supplied,
 choose a source path for that target and create it in the first edit. Other missing
 handlers are implemented in subsequent calls; do not create their files in this call.
@@ -122,7 +128,7 @@ responses. Preserve failure-without-writes and existing state. Do not swallow er
 hardcode fixture credentials. Handler modules must have no top-level business effects.
 The compiler automatically suppresses business events for step 10 display fixtures;
 never detect tests or inspect fixture globals in your implementation. Page components
-should remain presentation-only. Only supplied page_paths are writable for data-rendering repair; preserve
+should remain presentation-only. Any supplied writable frontend source may be repaired; preserve
 UI IDs, semantics and Tailwind styles, but do not attach duplicate event handlers/hooks.
 Frozen backend, SQL, designs, fixtures, tests and compiler infrastructure cannot change.
 Inspect automatic browser/DB check feedback and iterate until current AND previously
@@ -197,7 +203,10 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             "max_tests": max_tests}
         agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
             FileWorkspace.for_target(output, "e2e_test", rid, existing=relative,
-                references=[FIXTURE, *source_paths(output, "backend/src/db")]),
+                writable=editable_sources(output, "frontend/src"),
+                references=[FIXTURE, *source_paths(output, "backend/src/db"),
+                    *source_paths(output, "frontend/src"),
+                    *(path for path in regression_files if path != relative), *ui_files]),
             test_gate, max_turns, console, label + " / Test Generation")
         report["requirements"][rid]["test_turns"] = agent["turns"]
         report["requirements"][rid]["test_path"] = relative
@@ -238,7 +247,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             for index, new_event in enumerate(missing or [None]):
                 event_paths = {eid: selected_path(output, "event", eid) for eid in sorted(targets)}
                 task = {**context, "implementation_paths": event_paths, "page_paths": page_paths}
-                writable = {path for path in [*event_paths.values(), *page_paths.values()] if path}
+                writable = set(editable_sources(output, "frontend/src"))
                 references = source_paths(output, "frontend/src") + regression_files + ui_files + ["frontend/package.json", "frontend/tsconfig.json"]
                 workspace = (FileWorkspace.for_target(output, "event", new_event, references, writable)
                     if new_event else FileWorkspace(output, writable, references))

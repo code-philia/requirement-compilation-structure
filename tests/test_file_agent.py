@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock
 
-from infrastructure.shared.agent.files import FileWorkspace
+from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.project.entrypoints import implementation_path, selected_path
 from infrastructure.shared.project.initialize import initialize_project
@@ -155,6 +155,45 @@ class FileAgentTests(unittest.TestCase):
         retry = model.generate_json.call_args_list[1].args[1]
         self.assertIn("new_file", retry["task"])
         self.assertIn("Create the target file", retry["feedback"][0]["error"])
+
+    def test_test_generation_can_repair_application_sources_but_not_frozen_files(self):
+        initialize_project(self.root)
+        page = "frontend/src/screens/home.tsx"
+        previous = "frontend/tests/e2e/accepted.spec.ts"
+        current = "frontend/tests/e2e/current.spec.ts"
+        save_text(self.root / page, "broken page")
+        save_text(self.root / previous, "accepted assertions")
+        save_text(self.root / "frontend/src/ui-runtime.ts", "compiler runtime")
+        workspace = FileWorkspace.for_target(self.root, "e2e_test", "REQ-CURRENT",
+            references=[*source_paths(self.root, "frontend/src"), previous],
+            writable=editable_sources(self.root, "frontend/src"))
+        model = Mock()
+        model.generate_json.side_effect = [
+            {"edits": [{"path": current, "content": "new assertions"}]},
+            {"edits": [{"path": page, "content": "fixed page"}]},
+        ]
+        def gate():
+            if read_source(self.root / page) != "fixed page":
+                raise ValueError(f"{page}: TypeScript error")
+            return {"green": True}
+        result = run_file_agent(model, "Generate tests; repair supplied writable sources", {},
+            workspace, gate, 2, Mock(), "Tests and source repair")
+        first = model.generate_json.call_args_list[0].args[1]
+        self.assertTrue(first["files"][page]["writable"])
+        self.assertFalse(first["files"]["frontend/src/ui-runtime.ts"]["writable"])
+        self.assertFalse(first["files"]["frontend/src/App.tsx"]["writable"])
+        self.assertFalse(first["files"][previous]["writable"])
+        self.assertEqual(result["turns"], 2)
+        self.assertEqual(read_source(self.root / previous), "accepted assertions")
+        self.assertEqual(read_source(self.root / current), "new assertions")
+
+    def test_backend_repair_scope_preserves_database_and_compiler_owned_sources(self):
+        initialize_project(self.root)
+        own = "backend/src/features/accounts.ts"
+        save_text(self.root / own, "application code")
+        save_text(self.root / "backend/src/db/tables/Account.sql", "schema")
+        save_text(self.root / "backend/src/api/register.ts", "compiler routes")
+        self.assertEqual(editable_sources(self.root, "backend/src"), [own])
 
     def test_creation_rejects_overwrite_and_rolls_back_failed_registration(self):
         frozen = "backend/src/compiler.ts"

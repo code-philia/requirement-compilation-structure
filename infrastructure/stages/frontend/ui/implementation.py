@@ -7,7 +7,7 @@ included in its checks. Tests and compiler-owned wiring are supplied as read-onl
 import json
 from pathlib import Path
 
-from infrastructure.shared.agent.files import FileWorkspace, source_paths
+from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.ui.design import owners, page_context
@@ -16,7 +16,7 @@ from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
 
-INSTRUCTIONS = """Implement ONLY the current page's UI Element (Data) Primitives.
+INSTRUCTIONS = """Implement the current page's UI Element (Data) Primitives.
 All requirements' UI/data have already been designed. Preserve the complete canonical
 design and previously accepted pages. Implement layout, style, labels, controls, default
 data presentation and conditional visibility using the supplied UiPageProps.data.
@@ -28,6 +28,8 @@ style tags or inline style objects. The global stylesheet is compiler-owned.
 For a new page, choose its source path under task.new_file.directory; otherwise edit
 implementation_path. Export Page, a named React component
 accepting UiPageProps. Current source, types and tests are supplied once in files;
+Other supplied writable frontend sources may be repaired to resolve compilation
+or presentation regressions; preserve their existing behavior and the frozen tests.
 the compiler owns routing and fixtures. Return complete file contents in edits.
 Import UiPageProps from the compiler-owned frontend/src/ui-runtime.ts, using a correct
 relative import. React/ReactDOM and Tailwind CSS are available; do not add dependencies.
@@ -110,6 +112,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                 "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
                 "implementation_path": selected_path(output, "page", pid)}
             workspace = FileWorkspace.for_target(output, "page", pid,
+                writable=editable_sources(output, "frontend/src"),
                 references=source_paths(output, "frontend/src") + files +
                     ["frontend/package.json", "frontend/tsconfig.json"])
             agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,

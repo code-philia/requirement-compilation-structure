@@ -4,7 +4,7 @@ import json
 from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.shared.agent.files import FileWorkspace, source_paths
+from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
@@ -55,8 +55,12 @@ step 12. All supplied requirement uses share this one suite.
 Use casts for response.body when needed (its transport type is unknown). Do not assume
 generated UUIDs, timestamps, random hashes, exact error wording, or fields not in the
 contract. Tests may not be skipped, focused, mocked, or weaken the contract. No external
-libraries beyond the installed stack and Node standard library. Do not edit app code,
-SQL, test support, or other test files. The gate executes TypeScript compilation;
+libraries beyond the installed stack and Node standard library. You may repair any
+supplied writable backend source when compilation or existing behavior is broken.
+Write the tests first; limit source repairs here to restoring existing behavior and
+compilability rather than implementing the new API before its tests. Do not edit SQL,
+compiler-owned wiring, test support or other test files. The gate executes TypeScript
+compilation and already accepted API tests;
 the explicit RED phase happens once the current requirement's tests are generated.
 Reference paths and current contents are supplied in files; select a new suite's path
 using task.new_file. Return edits containing complete file contents.
@@ -74,6 +78,8 @@ Return status/body/optional headers, not Express Response objects. Never create 
 open another database, alter schema, seed production data, or modify test files.
 Choose your source path under task.new_file.directory for a new API, or edit the
 existing implementation_path. Export the async function handle.
+Other supplied writable backend sources may also be repaired when needed; preserve
+their contracts and already accepted behavior.
 The compiler supplies all current backend sources and frozen tests in files.
 Import ApiRequest and ApiResponse from backend/src/api/types.ts using the correct
 relative .js ESM path. Routing and test bindings are maintained by Python.
@@ -165,6 +171,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     compiled = checks.typecheck(generation_files)
                     if compiled["returncode"]:
                         raise ValueError(f"Test TypeScript compilation failed: {compiled['output']}")
+                    if accepted:
+                        require_green(checks.tests([targets[key] for key in accepted]))
                     return compiled
 
                 context = {
@@ -176,7 +184,9 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 }
                 agent = run_file_agent(model, TEST_INSTRUCTIONS, context,
                     FileWorkspace.for_target(output, "backend_test", aid, existing=relative,
-                        references=source_paths(output, "backend/src") + ["backend/tests/support/context.ts", TEST_BINDINGS_PATH]), test_gate, max_turns, console, label + " / Test Generation")
+                        writable=editable_sources(output, "backend/src"),
+                        references=source_paths(output, "backend/src") + source_paths(output, "backend/tests")),
+                    test_gate, max_turns, console, label + " / Test Generation")
                 for owner in api_owners:
                     report["tests"].setdefault(owner, {})[aid] = targets[aid]
                 report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
@@ -234,6 +244,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     }
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context,
                         FileWorkspace.for_target(output, "api", aid,
+                            writable=editable_sources(output, "backend/src"),
                             references=source_paths(output, "backend/src") + source_paths(output, "backend/tests") + ["backend/package.json"]),
                         implementation_gate, max_turns, console, aid + " / Implementation", feedback=current)
                 accepted.append(aid)

@@ -113,6 +113,9 @@ class FrontendFlow(unittest.TestCase):
         def generate(instructions, payload):
             task = payload["task"]
             creation = task["new_file"]
+            if creation["kind"] == "e2e_test":
+                self.assertTrue(payload["files"]["frontend/src/screens/editor.tsx"]["writable"])
+                self.assertFalse(payload["files"]["frontend/src/ui-runtime.ts"]["writable"])
             calls.append(deepcopy(task))
             suffix = ".spec.ts" if creation["kind"] == "e2e_test" else ".ts"
             path = f"{creation['directory']}/chosen/{creation['target']}{suffix}"
@@ -146,6 +149,21 @@ class FrontendFlow(unittest.TestCase):
         self.assertEqual(report["requirements"]["REQ-B"]["implementation_turns"], 0)
         self.assertIn("chosen/REQ-A.spec.ts", report["requirements"]["REQ-A"]["test_path"])
         self.assertGreater(checks.tests.call_count, 3)
+
+    def test_runtime_types_survive_returning_to_presentation_stage(self):
+        from infrastructure.shared.project.initialize import initialize_project
+        from infrastructure.stages.frontend.ui.runtime import prepare_frontend
+        from infrastructure.stages.frontend.interactions.runtime import sync_interactions
+        from infrastructure.utils.files import read_source
+        initialize_project(self.output)
+        sync_interactions(self.output, {"pages": {}, "bindings": {}},
+            {"events": {}, "triggers": {}}, {"apis": {}}, [])
+        before = read_source(self.output / "frontend/src/ui-runtime.ts")
+        prepare_frontend(self.output)
+        after = read_source(self.output / "frontend/src/ui-runtime.ts")
+        self.assertEqual(before, after)
+        self.assertIn("export interface UiEventContext", after)
+        self.assertEqual(after.count("export type UiEventHandler"), 1)
 
     def test_synthesis_retries_without_publishing_rejected_state(self):
         requests = []
