@@ -1,7 +1,7 @@
 """Step 08 lowering: render backend registration and stable test bindings.
 
 Source strings below are compiler-owned TypeScript templates, not model output.
-Business API implementations use deterministic files and a fixed handle export;
+Business API implementations use model-selected files and a stable handle export;
 registration imports those files directly instead of creating per-API proxies."""
 
 from hashlib import sha256
@@ -25,7 +25,7 @@ def test_path(rid: str, aid: str) -> str:
 
 
 def api_entrypoint(output: Path, aid: str) -> dict | None:
-    """Resolve the fixed API implementation file and handle export."""
+    """Resolve the selected API implementation file and handle export."""
     return implementation_entrypoint(output, "api", aid)
 
 
@@ -47,13 +47,13 @@ def test_bindings_source(output: Path, apis: dict, stubbed=()) -> str:
 
 
 def sync_implementations(output: Path, apis: dict) -> None:
-    """Register fixed API files and refresh test-only bindings."""
+    """Register selected API files and refresh test-only bindings."""
     save_text(output / REGISTER_PATH, register_source(apis, output))
     save_text(output / TEST_BINDINGS_PATH, test_bindings_source(output, apis))
 
 
 def register_source(apis: dict, output: Path) -> str:
-    """Render Express registration that imports fixed implementations and checks contract request/response shapes."""
+    """Render Express registration that imports selected implementations directly."""
     lines = ['import type { Express } from "express";', 'import type Database from "better-sqlite3";',
         'import type { ApiRequest, ApiResponse } from "./types.js";']
     for number, (aid, api) in enumerate(apis.items()):

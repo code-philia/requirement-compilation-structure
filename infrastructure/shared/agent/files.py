@@ -1,4 +1,4 @@
-"""Compiler-selected files with one writable flag and whole-file edit batches."""
+"""Scoped whole-file edits with model-selected paths for new target files."""
 
 from pathlib import Path
 

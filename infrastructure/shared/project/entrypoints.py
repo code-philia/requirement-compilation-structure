@@ -37,7 +37,7 @@ def remember_path(output: Path, kind: str, identity: str, relative: str) -> None
 
 
 def implementation_path(kind: str, identity: str) -> str:
-    """Use readable, portable filenames with a stable suffix for normalized/case-only IDs."""
+    """Recognize legacy filenames for existing outputs; new filenames are model-selected."""
     directory, suffix = {"api": ("backend/src/handlers", ".ts"),
         "page": ("frontend/src/pages", ".tsx"), "event": ("frontend/src/events", ".ts")}[kind]
     if not isinstance(identity, str) or not identity:
@@ -64,6 +64,6 @@ def implementation_entrypoint(output: Path, kind: str, identity: str) -> dict | 
 
 
 def import_path(source: str, target: str, extension: str = ".js") -> str:
-    """Construct a portable import directly to the fixed implementation file."""
+    """Construct a portable import directly to the selected implementation file."""
     imported = posixpath.relpath(PurePosixPath(target).with_suffix(extension).as_posix(), PurePosixPath(source).parent.as_posix())
     return imported if imported.startswith(".") else "./" + imported

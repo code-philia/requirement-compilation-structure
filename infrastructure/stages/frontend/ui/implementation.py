@@ -55,7 +55,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     """Implement the complete saved UI/data design through component-existence TDD.
 
     Prepare the project and browser, generate and freeze presence tests, then
-    repair fixed-path page components until checks pass. Update the caller's
+    repair model-selected page components until checks pass. Update the caller's
     report; runtime wiring remains compiler-owned."""
     output = arc_dir.parent.resolve()
     prepare_frontend(output)

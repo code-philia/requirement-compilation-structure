@@ -97,6 +97,56 @@ class FrontendFlow(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JSON shape"):
             validate_design(ui, self.tree, {})
 
+    def test_multiple_new_events_keep_model_paths_and_run_complete_acceptance(self):
+        from unittest.mock import patch
+        from infrastructure.shared.agent.files import FileWorkspace
+        from infrastructure.shared.project.entrypoints import selected_path
+        from infrastructure.shared.project.initialize import initialize_project
+        from infrastructure.stages.frontend.interactions import implementation
+        initialize_project(self.output)
+        for pid in self.ui["pages"]:
+            workspace = FileWorkspace.for_target(self.output, "page", pid)
+            workspace.state()
+            workspace.apply({"edits": [{"path": f"frontend/src/screens/{pid}.tsx",
+                "content": "export function Page() {return null;}"}]})
+        calls = []
+        def generate(instructions, payload):
+            task = payload["task"]
+            creation = task["new_file"]
+            calls.append(deepcopy(task))
+            suffix = ".spec.ts" if creation["kind"] == "e2e_test" else ".ts"
+            path = f"{creation['directory']}/chosen/{creation['target']}{suffix}"
+            return {"edits": [{"path": path, "content": "export function handle() {}"}]}
+        checks, ui_checks = Mock(), Mock()
+        checks.typecheck.return_value = {"returncode": 0, "output": "compiled"}
+        checks.build.return_value = {"returncode": 0, "output": "built"}
+        green = {"returncode": 0, "output": "passed", "passed": 1, "failed": 0,
+            "skipped": 0, "flaky": 0, "errors": [], "failures": []}
+        ui_checks.tests.return_value = green
+        def test_events(files):
+            if all(selected_path(self.output, "event", eid) for eid in self.interactions["events"]):
+                return green
+            return {**green, "returncode": 1, "passed": 0, "failed": 1,
+                "failures": ["expect(received).toBe(expected)"]}
+        checks.tests.side_effect = test_events
+        backend = deepcopy(self.backend)
+        for aid, api in backend["apis"].items():
+            api["signature"] = {"method": "POST", "path": "/api/" + aid, "name": aid}
+        with patch.object(implementation, "install_dependencies"), \
+                patch.object(implementation, "E2EChecks", return_value=checks), \
+                patch.object(implementation, "FrontendChecks", return_value=ui_checks):
+            report = implementation.run_interaction_tdd(self.arc, self.tree, {"entities": {}},
+                backend, self.ui, self.interactions, {},
+                {rid: {"id": rid} for rid in self.tree.leaves}, Mock(generate_json=generate),
+                Mock(), {"requirements": {}}, max_turns=2)
+        self.assertEqual(report["status"], "GREEN")
+        creations = [task["new_file"]["target"] for task in calls if task["new_file"]["kind"] == "event"]
+        self.assertEqual(creations, ["EV-COUNT", "EV-INPUT", "EV-SAVE"])
+        self.assertEqual(report["requirements"]["REQ-A"]["implementation_turns"], 3)
+        self.assertEqual(report["requirements"]["REQ-B"]["implementation_turns"], 0)
+        self.assertIn("chosen/REQ-A.spec.ts", report["requirements"]["REQ-A"]["test_path"])
+        self.assertGreater(checks.tests.call_count, 3)
+
     def test_synthesis_retries_without_publishing_rejected_state(self):
         requests = []
         def generate(instructions, payload):
