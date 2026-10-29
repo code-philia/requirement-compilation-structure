@@ -35,18 +35,12 @@ OPENAI_BASE_URL=https://api.arc-bench.com/v1
 From the compiler directory, run the complete 00–12 pipeline without teaching pauses or interactive requirement browsing:
 
 ```bash
-uv run main.py input/requirements.yaml -o output/demo --port 3000
+uv run main.py input -o output/demo --port 3000
 ```
 
-`requirement_path` is the positional YAML document path. Images are resolved relative to that document, so other filenames and directories are supported. A directory argument selects its `requirements.yaml` file. `-o` / `--output-dir` specifies the generated application directory (`--ouput-dir` is also accepted). `--port` defaults to 3000 and sets the backend startup default in newly created templates; the application's `PORT` environment variable still takes precedence. Initialization preserves existing files, including an existing server's configured default.
+`requirement_path` is the positional input directory, which must contain `requirements.yaml`. Referenced images are resolved relative to that directory. Passing a YAML file directly is not supported. `-o` / `--output-dir` specifies the generated application directory (`--ouput-dir` is also accepted). `--port` defaults to 3000 and sets the backend startup default in newly created templates; the application's `PORT` environment variable still takes precedence. Initialization preserves existing files, including an existing server's configured default.
 
-`main.py` parses these arguments and creates `Compiler`. `compiler.py` stores the requirement path, input directory, output directory, `.arc` directory and port, and calls stage behaviors directly in `Compiler.pipeline()`. English stage comments identify every step, including the database obligation review in stage 04. The pipeline stops at the first failure and returns a nonzero CLI exit code; it never launches the numbered entry scripts or enters their argument parsers.
-
-Stage behaviors now live in importable modules under `infrastructure/stages/` and `infrastructure/shared/project/workflow.py`. The numbered scripts remain thin CLI wrappers for individual lessons and may be removed without affecting the main pipeline. Existing stage artifacts and the workspace's shared compiler/model logs retain their current formats.
-
-The new positional `requirement_path`, `-o` / `--output-dir` and `--port` options belong only to `main.py`. Numbered teaching scripts keep their original arguments, defaults and execution flow, including `--input`, `--output`, `--pause` and their existing stage-specific options; their commands below are unchanged.
-
-## Start the lab
+## Run the tutorial step by step
 ```bash
 # Step 1: Explore Requirement (Syntax) Tree
 uv run 01_explore_requirement.py --pause --output output/demo

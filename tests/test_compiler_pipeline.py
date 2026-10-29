@@ -33,21 +33,21 @@ class CompilerPipeline(unittest.TestCase):
         self.root = Path(temporary.name)
         self.input_dir = self.root / "source with spaces"
         self.input_dir.mkdir()
-        self.source = self.input_dir / "custom-document.yml"
+        self.source = self.input_dir / "requirements.yaml"
         self.source.write_text("id: ROOT\nname: Demo\nchildren: []\n", encoding="utf-8")
         self.output = self.root / "output with spaces"
 
     def test_cli_arguments_and_both_long_output_spellings(self):
         for flag in ("-o", "--output-dir", "--ouput-dir"):
             with self.subTest(flag=flag), patch.object(entrypoint, "Compiler") as cls:
-                entrypoint.main([str(self.source), flag, str(self.output), "--port", "4321"])
-                cls.assert_called_once_with(self.source, self.output, 4321)
+                entrypoint.main([str(self.input_dir), flag, str(self.output), "--port", "4321"])
+                cls.assert_called_once_with(self.input_dir, self.output, 4321)
                 cls.return_value.compile.assert_called_once_with()
-        args = entrypoint.build_parser().parse_args([str(self.source), "-o", str(self.output)])
+        args = entrypoint.build_parser().parse_args([str(self.input_dir), "-o", str(self.output)])
         self.assertEqual(args.port, 3000)
 
     def test_all_stages_run_in_order_with_one_workspace_and_stage_log_context(self):
-        instance = pipeline_module.Compiler(self.source, self.output, 4321)
+        instance = pipeline_module.Compiler(self.input_dir, self.output, 4321)
         calls = []
 
         def behavior(name):
@@ -63,13 +63,13 @@ class CompilerPipeline(unittest.TestCase):
         self.assertEqual(instance.completed_stages, [f"{i:02d}" for i in range(13)])
         self.assertEqual(calls[0][1:], ((self.output,), {"port": 4321}, "Stage 00 | Initialize project"))
         self.assertEqual(calls[1][1], (self.input_dir, self.output / ".arc"))
-        self.assertEqual(calls[1][2], {"requirement_path": self.source})
+        self.assertEqual(calls[1][2], {})
         for index, call in enumerate(calls):
             self.assertIn(f"Stage {index:02d}", call[3])
         self.assertIsNone(session_info())
 
     def test_failure_stops_before_later_stages(self):
-        instance = pipeline_module.Compiler(self.source, self.output)
+        instance = pipeline_module.Compiler(self.input_dir, self.output)
         with ExitStack() as stack, redirect_stdout(StringIO()):
             mocks = {name: stack.enter_context(patch.object(pipeline_module, name)) for name in BEHAVIORS}
             mocks["build_db_schema"].side_effect = RuntimeError("Schema synthesis failed")
@@ -83,11 +83,17 @@ class CompilerPipeline(unittest.TestCase):
     def test_invalid_inputs_fail_before_initialization(self):
         for port in (0, 65536, -1, True, "3000"):
             with self.subTest(port=port), self.assertRaisesRegex(ValueError, "Port"):
-                pipeline_module.Compiler(self.source, self.output, port)
+                pipeline_module.Compiler(self.input_dir, self.output, port)
         with self.assertRaisesRegex(ValueError, "does not exist"):
             pipeline_module.Compiler(self.input_dir / "absent.yaml", self.output)
         with self.assertRaisesRegex(ValueError, "inside the input"):
-            pipeline_module.Compiler(self.source, self.input_dir / "output")
+            pipeline_module.Compiler(self.input_dir, self.input_dir / "output")
+        with self.assertRaisesRegex(ValueError, "not a directory"):
+            pipeline_module.Compiler(self.source, self.output)
+        empty = self.root / "empty input"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "Requirement document does not exist"):
+            pipeline_module.Compiler(empty, self.output)
         self.assertFalse(self.output.exists())
 
     def test_template_port_is_workspace_local_and_preserves_existing_sources(self):
@@ -101,7 +107,7 @@ class CompilerPipeline(unittest.TestCase):
         self.assertEqual(initialize_project(self.output, port=5432), [])
         self.assertEqual(server.read_text(), "// Existing application source\n")
 
-    def test_custom_requirement_filename_and_source_relative_images(self):
+    def test_directory_requirements_and_source_relative_images(self):
         image = self.input_dir / "reference/page.png"
         image.parent.mkdir()
         image.write_bytes(b"test image handled by the fake vision model")
@@ -109,7 +115,7 @@ class CompilerPipeline(unittest.TestCase):
         model = Mock()
         model.analyze.return_value = {"layout": "one page", "elements": [], "style": "plain"}
         with patch("infrastructure.stages.requirements.exploration.VisualModel", return_value=model), redirect_stdout(StringIO()):
-            explore_requirement(self.input_dir, self.output / ".arc", requirement_path=self.source)
+            explore_requirement(self.input_dir, self.output / ".arc")
         model.analyze.assert_called_once_with(image)
         result = json.loads((self.output / ".arc/requirements.json").read_text())
         self.assertEqual(result["id"], "ROOT")
@@ -134,7 +140,7 @@ with ExitStack() as stack:
         stack.enter_context(patch.object(compiler, name))
     instance.compile()
 assert instance.completed_stages == [f'{i:02d}' for i in range(13)]
-""" % (BEHAVIORS, str(self.source), str(self.output))
+""" % (BEHAVIORS, str(self.input_dir), str(self.output))
         result = subprocess.run([sys.executable, "-c", probe], cwd=isolated, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         help_result = subprocess.run([sys.executable, "main.py", "--help"], cwd=isolated, capture_output=True, text=True)
@@ -146,7 +152,7 @@ assert instance.completed_stages == [f'{i:02d}' for i in range(13)]
             cls.return_value.current_stage = "Stage 08 | Backend TDD"
             cls.return_value.compile.side_effect = RuntimeError("Frozen tests are still red")
             with self.assertRaises(SystemExit) as raised:
-                entrypoint.main([str(self.source), "-o", str(self.output)])
+                entrypoint.main([str(self.input_dir), "-o", str(self.output)])
         self.assertEqual(raised.exception.code, 1)
         self.assertIn("Stage 08", errors.getvalue())
         self.assertIn("Frozen tests are still red", errors.getvalue())

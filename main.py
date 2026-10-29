@@ -9,7 +9,7 @@ from infrastructure.utils.presentation.logging import configure_console
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Compile requirements into a complete web application")
-    parser.add_argument("requirement_path", type=Path, help="Requirement YAML file (or a directory containing requirements.yaml)")
+    parser.add_argument("requirement_path", type=Path, help="Input directory containing requirements.yaml and referenced images")
     parser.add_argument("-o", "--output-dir", "--ouput-dir", dest="output_dir", required=True, type=Path,
                         help="Generated application and compilation artifact directory")
     parser.add_argument("--port", type=int, default=3000, help="Default backend port injected into newly initialized templates (default: 3000)")

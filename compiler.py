@@ -25,15 +25,15 @@ class Compiler:
     """Own the source document, application workspace, port and sequential pipeline."""
 
     def __init__(self, requirement_path: str | Path, output_dir: str | Path, port: int = 3000) -> None:
-        self.requirement_path = Path(requirement_path).expanduser().resolve()
-        if self.requirement_path.is_dir():
-            self.requirement_path = self.requirement_path / "requirements.yaml"
-        self.input_dir = self.requirement_path.parent
+        self.input_dir = Path(requirement_path).expanduser().resolve()
+        self.requirement_path = self.input_dir / "requirements.yaml"
         self.output_dir = Path(output_dir).expanduser().resolve()
         self.arc_dir = self.output_dir / ".arc"
         self.port = port
         self.current_stage: str | None = None
         self.completed_stages: list[str] = []
+        if not self.input_dir.is_dir():
+            raise ValueError(f"Input directory does not exist or is not a directory: {self.input_dir}")
         if not self.requirement_path.is_file():
             raise ValueError(f"Requirement document does not exist: {self.requirement_path}")
         if self.output_dir == self.input_dir or self.input_dir in self.output_dir.parents:
@@ -67,8 +67,7 @@ class Compiler:
         self._run_stage("00", project_initialization, self.output_dir, port=self.port)
 
         # Stage 01: parse the selected requirement document and analyze its reference images.
-        self._run_stage("01", explore_requirement, self.input_dir, self.arc_dir,
-                        requirement_path=self.requirement_path)
+        self._run_stage("01", explore_requirement, self.input_dir, self.arc_dir)
 
         # Stage 02: synthesize the shared database schema.
         self._run_stage("02", build_db_schema, self.arc_dir)

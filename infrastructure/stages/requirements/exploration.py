@@ -250,13 +250,12 @@ def collect_images(value: object) -> list[str]:
     return list(dict.fromkeys(references))
 
 
-def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False,
-        *, requirement_path: Path | None = None) -> dict:
+def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> dict:
     console = DemoConsole(pause)
     # --- Extension point 01A: requirement parsing -----------------------------
     # Try another source format or stronger syntax checks here. Preserve IDs,
     # containment, scenarios, and step text: later passes depend on these links.
-    source = requirement_path if requirement_path is not None else input_dir / "requirements.yaml"
+    source = input_dir / "requirements.yaml"
     try:
         requirements = yaml.safe_load(source.read_text(encoding="utf-8-sig"))
     except yaml.YAMLError as error:
