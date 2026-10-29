@@ -57,8 +57,9 @@ generated UUIDs, timestamps, random hashes, exact error wording, or fields not i
 contract. Tests may not be skipped, focused, mocked, or weaken the contract. No external
 libraries beyond the installed stack and Node standard library. Do not edit app code,
 SQL, test support, or other test files. The gate executes TypeScript compilation;
-the explicit RED phase happens once the current requirement's tests are generated. All needed file paths and
-contents are supplied in files. Return edits containing complete file contents.
+the explicit RED phase happens once the current requirement's tests are generated.
+Reference paths and current contents are supplied in files; select a new suite's path
+using task.new_file. Return edits containing complete file contents.
 A passing gate accepts the proposal.
 """
 

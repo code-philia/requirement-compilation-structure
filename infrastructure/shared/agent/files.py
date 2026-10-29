@@ -27,6 +27,7 @@ class FileWorkspace:
         self.files = self.writable | set(references)
         self.observed = {}
         self.new_file = new_file
+        self.target = new_file
         for path in self.files:
             self.path(path)
 
@@ -35,8 +36,26 @@ class FileWorkspace:
         """Let the model select a new target's path; retain an existing target's path."""
         relative = selected_path(output, kind, identity) or existing
         if relative and (output / relative).is_file():
-            return cls(output, {*writable, relative}, references)
+            workspace = cls(output, {*writable, relative}, references)
+            workspace.target = (kind, identity)
+            return workspace
         return cls(output, writable, references, new_file=(kind, identity))
+
+    def task_state(self, task: dict) -> dict:
+        """Refresh path hints after creation without changing earlier request snapshots."""
+        result = {**task}
+        result.pop("new_file", None)
+        if self.target is not None:
+            kind, identity = self.target
+            relative = selected_path(self.output, kind, identity)
+            if relative is not None and kind in {"api", "page", "backend_test", "e2e_test"}:
+                key = "test_path" if kind in {"backend_test", "e2e_test"} else "implementation_path"
+                result[key] = relative
+        for key, kind in (("implementation_paths", "event"), ("page_paths", "page")):
+            if isinstance(task.get(key), dict):
+                result[key] = {identity: selected_path(self.output, kind, identity) or relative
+                    for identity, relative in task[key].items()}
+        return {**result, **self.creation_task()}
 
     def creation_task(self) -> dict:
         """Explain the creation destination without prescribing a filename."""

@@ -82,27 +82,29 @@ In frontend packages, `design.py` defines and validates representations, `synthe
 
 Design stages retrieve existing definitions, request a structured model proposal, validate it, and publish accepted artifacts. Page retrieval returns the corresponding UI/data subtree for reuse. Obligation propagation in step 04 uses deterministic rules.
 
-Steps 08, 10, and 12 share `shared/agent/loop.py`. Each model request contains only `task`, `files`, and the latest `feedback`. Every file has its current `content` (null before creation) and a `writable` flag. Source and test contents appear only in this map. Backend implementation sees existing backend sources; frontend implementation sees existing frontend sources. Tests and compiler-owned runtime files are read-only.
+Steps 08, 10, and 12 share `shared/agent/loop.py`. Each model request contains only `task`, `files`, and the latest `feedback`. The `files` map supplies current file contents and a `writable` flag; null content means a supplied file does not exist yet. Tests are writable during their generation stage and read-only during implementation. Compiler-owned runtime files are references.
 
-The model returns one JSON object:
+The file-edit interface is a JSON response, not a callable tool. Creation and replacement use the same shape:
 
 ```json
-{"edits": [{"path": "the/supplied/writable/path.ts", "content": "complete final file contents"}]}
+{"edits": [{"path": "backend/src/greetings/hello.ts", "content": "export const greeting = 'Hello';\n"}]}
 ```
 
-Creation and replacement use the same format. Only explicitly supplied writable paths are accepted; a later edit for the same path wins. Arbitrary helper files, file deletion/moves, patch operations, shell tools and model-selected entrypoints are not supported. The compiler validates the whole batch before writing and restores original bytes on a write failure. Valid edits remain on disk after a failed acceptance check; the next request supplies refreshed files and the latest error. Every edit response, including an empty list, automatically runs fixed acceptance checks. An existing passing implementation is reused without an implementation-model call.
+For a new target, `task.new_file` supplies its identity, kind and destination directory. The model chooses the filename and subdirectories; that path does not need to appear in `files`. The first edit creates that target, and any additional edits may update supplied writable files. Each call creates only its designated target. The compiler remembers the chosen path in `.arc/implementation_paths.json` and maintains imports/registrations. The model returns no entrypoint or file-index fields.
 
-Implementation paths are derived from semantic IDs by `shared/project/entrypoints.py`. Filenames use a readable normalized prefix plus a stable ID hash to distinguish case-only IDs and avoid Windows reserved filenames. The exact path is supplied in the task; models do not calculate it.
+For existing files, the model chooses from `files` entries with `writable=true` and returns each changed file's **complete final content**, preserving unrelated code. The same shape creates a supplied writable file whose content is null. Unchanged files may be omitted. Paths are relative to the output workspace; use forward slashes and exact filename case. Source contents must be JSON strings with escaped newlines, quotes and backslashes. Patches, file deletion/moves, unrequested helper files and shell tools are not supported. A later edit for the same path wins.
 
-| Module | Directory | Fixed export |
+The compiler validates a batch before writing and restores original bytes on write failure. Valid edits remain after failed acceptance checks. On retry, task path hints and `files` are refreshed. Once creation succeeds, `task.new_file` disappears and the chosen file is supplied as writable: repair that file at the same path. An empty edit list runs acceptance checks only when no new target is awaiting creation; a new target must first be created. Existing passing implementations can be reused without another implementation-model call.
+
+| Module | Model-selected path under | Required export |
 | --- | --- | --- |
-| Backend API | `backend/src/handlers/` | `handle` |
-| UI page | `frontend/src/pages/` | `Page` |
-| UI event | `frontend/src/events/` | `handle` |
+| Backend API | `backend/src/` | `handle` |
+| UI page | `frontend/src/` | `Page` |
+| UI event | `frontend/src/` | `handle` |
+| Backend test | `backend/tests/` (`.test.ts`) | Node test suite |
+| E2E test | `frontend/tests/e2e/` (`.spec.ts`) | Playwright test suite |
 
-Routing, test bindings, page registration and event registration import these convention files directly. No file association index is created or read. API tests and E2E implementations proceed requirement by requirement; UI implementation proceeds page by page after all UI/data design is complete. Step 12 may also repair explicitly supplied page files while retaining their presentation boundary and existing regression tests.
-
-This protocol replaces the earlier file tools and `.arc/file_index.json`. Use a fresh output directory for the first run after this change, or regenerate steps 08, 10 and 12 and their downstream prerequisites in a clean workspace. Old model-selected paths are not migrated or inferred from an existing index.
+Routing, test bindings, page registration and event registration import the selected files directly. Existing convention files from earlier outputs are still recognized; models do not need to recreate them. The old `.arc/file_index.json` protocol is not used. API tests and E2E implementations proceed requirement by requirement; UI implementation proceeds page by page after UI/data design. Step 12 may also repair supplied writable page files while preserving the UI existence-test regressions.
 
 ## Execute the compiler
 

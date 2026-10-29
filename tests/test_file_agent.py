@@ -117,6 +117,45 @@ class FileAgentTests(unittest.TestCase):
         self.assertEqual(resumed.creation_task(), {})
         self.assertEqual(resumed.state()[relative]["content"], "repaired version")
 
+    def test_retry_refreshes_target_path_hints_for_all_model_created_files(self):
+        cases = [
+            ("api", "API-CREATE", "backend/src/register.ts", {"implementation_path": None}, "implementation_path"),
+            ("page", "PAGE-CREATE", "frontend/src/register.tsx", {"implementation_path": None}, "implementation_path"),
+            ("backend_test", "API-CREATE", "backend/tests/register.test.ts", {"test_path": None}, "test_path"),
+            ("e2e_test", "REQ-CREATE", "frontend/tests/e2e/register.spec.ts", {"test_path": None}, "test_path"),
+            ("event", "EV-CREATE", "frontend/src/register-event.ts", {"implementation_paths": {"EV-CREATE": None}}, "implementation_paths"),
+        ]
+        for kind, identity, relative, task, key in cases:
+            with self.subTest(kind=kind):
+                workspace = FileWorkspace.for_target(self.root, kind, identity)
+                model = Mock()
+                model.generate_json.side_effect = [
+                    {"edits": [{"path": relative, "content": "first version"}]},
+                    {"edits": [{"path": relative, "content": "repaired version"}]},
+                ]
+                gate = Mock(side_effect=[ValueError("Acceptance failed"), {"green": True}])
+                run_file_agent(model, "Implement target", task, workspace, gate, 2, Mock(), identity)
+                first, retry = [call.args[1] for call in model.generate_json.call_args_list]
+                self.assertIn("new_file", first["task"])
+                self.assertNotIn("new_file", retry["task"])
+                self.assertEqual(retry["task"][key], {identity: relative} if kind == "event" else relative)
+                self.assertEqual(first["task"][key], {identity: None} if kind == "event" else None)
+                self.assertEqual(task[key], {identity: None} if kind == "event" else None)
+                self.assertEqual(retry["files"][relative], {"content": "first version", "writable": True})
+                self.assertEqual(retry["feedback"], [{"error": "Acceptance failed"}])
+
+    def test_empty_creation_response_requests_creation_without_running_gate(self):
+        relative = "backend/src/created.ts"
+        workspace = FileWorkspace.for_target(self.root, "api", "API-CREATE")
+        model = Mock()
+        model.generate_json.side_effect = [{"edits": []}, {"edits": [{"path": relative, "content": "created"}]}]
+        gate = Mock(return_value={"green": True})
+        run_file_agent(model, "Create target", {}, workspace, gate, 2, Mock(), "Create")
+        gate.assert_called_once()
+        retry = model.generate_json.call_args_list[1].args[1]
+        self.assertIn("new_file", retry["task"])
+        self.assertIn("Create the target file", retry["feedback"][0]["error"])
+
     def test_creation_rejects_overwrite_and_rolls_back_failed_registration(self):
         frozen = "backend/src/compiler.ts"
         save_text(self.root / frozen, "compiler-owned")

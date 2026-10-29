@@ -6,7 +6,7 @@ from infrastructure.shared.agent.protocol import FILE_EDIT_RULES
 
 def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, gate,
         max_turns: int, console, label: str, feedback=None) -> dict:
-    """Supply current files once, apply whole-file edits and accept only a passing gate."""
+    """Refresh task paths and files each round; accept edits only after the gate passes."""
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
     feedback = [] if feedback is None else [feedback]
@@ -15,7 +15,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
             "Generate file edits, then run the stage's compilation and test acceptance checks.")
         try:
             response = model.generate_json(instructions + "\n\n" + FILE_EDIT_RULES,
-                {"task": {**task, **files.creation_task()}, "files": files.state(), "feedback": feedback})
+                {"task": files.task_state(task), "files": files.state(), "feedback": feedback})
             files.apply(response)
             if files.new_file is not None:
                 raise ValueError("Create the target file in the first edit before running acceptance checks")
