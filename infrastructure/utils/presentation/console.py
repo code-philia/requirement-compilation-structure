@@ -90,6 +90,41 @@ def _tone(title: str) -> str:
     return "info"
 
 
+class WaitingStatus:
+    """Show one static waiting line and clear it before displaying the result."""
+
+    def __init__(self) -> None:
+        stream = sys.stdout
+        self.terminal = getattr(stream, "terminal", stream)
+        self.interactive = stream.isatty()
+        self.columns = 0
+        self.closed = False
+        message = "[WAITING] Waiting for model response..."
+        session = session_info()
+        if self.interactive:
+            # Bypass the tee for terminal controls; keep one plain log entry.
+            if session:
+                with session["lock"]:
+                    session["log"].write(message + "\n")
+                    session["log"].flush()
+            message = _wrap(message, _width())[0]
+            with _render_lock:
+                self.terminal.write(highlight(message, "waiting"))
+                self.terminal.flush()
+                self.columns = display_width(message)
+        else:
+            print(message, flush=True)
+
+    def close(self) -> None:
+        with _render_lock:
+            if self.closed:
+                return
+            self.closed = True
+            if self.interactive:
+                self.terminal.write("\r" + " " * self.columns + "\r")
+                self.terminal.flush()
+
+
 class DemoConsole:
     """Show stage and activity in framed previews with optional teaching pauses."""
 

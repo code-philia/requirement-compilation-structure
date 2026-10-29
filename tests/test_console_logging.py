@@ -12,7 +12,7 @@ import httpx
 from openai import OpenAI
 
 from infrastructure.shared.models.text import TextModel
-from infrastructure.utils.presentation.console import DemoConsole, preview, show_panel, display_width
+from infrastructure.utils.presentation.console import DemoConsole, preview, show_panel, display_width, WaitingStatus
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.model_io import _http_request, _http_response, invoke
 
@@ -147,14 +147,34 @@ class ConsoleLogging(unittest.TestCase):
             show_panel("[MODEL OUTPUT]", "Response content", tone="output")
         self.assertNotIn("\x1b[", terminal.getvalue())
 
-    def test_waiting_heartbeat_includes_activity_and_elapsed_time(self):
+    def test_redirected_waiting_message_is_printed_only_once(self):
         model = self.model(lambda request: httpx.Response(200, json=self.response('{"ok":true}')))
         terminal = StringIO()
-        # Trigger one heartbeat without making the suite wait ten seconds.
-        with redirect_stdout(terminal), patch("infrastructure.utils.presentation.model_io.Event") as event:
-            event.return_value.wait.side_effect = [False, True]
+        with redirect_stdout(terminal):
             invoke(model.client, {"model": model.name, "messages": [{"role": "user", "content": "Generate."}]})
-        self.assertIn("elapsed (including transport retries)", terminal.getvalue())
+        self.assertEqual(terminal.getvalue().count("[WAITING]"), 1)
+        self.assertNotIn("\r", terminal.getvalue())
+
+    def test_interactive_waiting_is_static_and_keeps_log_plain(self):
+        terminal = StringIO()
+        terminal.isatty = lambda: True
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with redirect_stdout(terminal), console_log(root):
+                waiting = WaitingStatus()
+                initial = terminal.getvalue()
+                self.assertEqual(initial.count("[WAITING]"), 1)
+                self.assertNotIn("elapsed", initial)
+                waiting.close()
+                cleared = terminal.getvalue()
+                waiting.close()
+                self.assertEqual(terminal.getvalue(), cleared)
+            logged = (root / "compiler.log").read_bytes()
+        redraws = [item for item in terminal.getvalue().split("\r") if "[WAITING]" in item]
+        self.assertEqual(len(redraws), 1)
+        self.assertEqual(logged.count(b"[WAITING]"), 1)
+        self.assertNotIn(b"\r", logged)
+        self.assertNotIn(b"\x1b[", logged)
 
 
 if __name__ == "__main__":
