@@ -32,6 +32,9 @@ OPENAI_BASE_URL=https://api.arc-bench.com/v1
 
 ## Start the lab
 ```bash
+# Step 0: Initialize the project
+uv run 00_project_initialization.py --pause --output output/demo
+
 # Step 1: Explore Requirement (Syntax) Tree
 uv run 01_explore_requirement.py --pause --output output/demo
 
