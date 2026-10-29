@@ -6,7 +6,19 @@ Compile a requirement tree into a database, backend APIs, and an interactive fro
 
 Requires Python 3.11+, Node.js 22.12+, and npm. Building `better-sqlite3` from source may also require Python, make, and a C++ compiler.
 
-Linux/macOS setup (start from the directory containing `compiler`):
+Recommended: use [uv](https://docs.astral.sh/uv/). From the repository root (the directory containing `pyproject.toml`):
+
+```bash
+uv sync
+cp -n .env.example .env
+```
+
+On Windows PowerShell:
+
+```powershell
+uv sync
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
 
 ```bash
 cd compiler
@@ -16,7 +28,7 @@ python -m pip install -r requirements.txt
 cp -n .env.example .env
 ```
 
-Windows PowerShell setup (Python 3.11+ and Node/npm must be on PATH):
+Fallback without uv. Windows PowerShell setup (Python 3.11+ and Node/npm must be on PATH):
 
 ```powershell
 cd compiler
@@ -25,7 +37,7 @@ py -3 -m venv .venv
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Activation is optional. On Windows, replace `python` in the commands below with `.\.venv\Scripts\python.exe`. This avoids PowerShell activation-policy differences. For example:
+Activation is optional. With uv, prefix commands with `uv run` (e.g. `uv run python 01_explore_requirement.py ...`). With plain venv on Windows, replace `python` in the commands below with `.\.venv\Scripts\python.exe`. This avoids PowerShell activation-policy differences. For example:
 
 ```powershell
 .\.venv\Scripts\python.exe run_all.py --input input --output "outputs/demo"
@@ -113,10 +125,10 @@ Prepare `input/requirements.yaml` and its referenced images. Use the same input 
 Run all steps sequentially:
 
 ```bash
-python run_all.py --input input --output outputs/demo
+uv run python run_all.py --input input --output outputs/demo
 ```
 
-Expected result: steps 00-12 complete in order without pauses, producing an application under `outputs/demo/`. Execution stops immediately if a step fails.
+(`python run_all.py ...` also works inside an activated venv.) Expected result: steps 00-12 complete in order without pauses, producing an application under `outputs/demo/`. Execution stops immediately if a step fails.
 
 Each step can also run independently after its prerequisites have completed. Add `--pause` to a numbered script to wait for Enter between teaching panels. JSON filenames below are relative to `outputs/demo/.arc/`.
 
@@ -211,7 +223,7 @@ Rerun tests from the generated workspace after the corresponding implementation 
 Compiler protocol and portability checks can be run without model calls:
 
 ```bash
-python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
-On Windows, use `.\.venv\Scripts\python.exe` for that command. See [Windows compatibility review](WINDOWS_COMPATIBILITY.md) for the per-step audit, fixes, and validation limits.
+Without uv, run `python -m unittest discover -s tests -v` in the venv. On Windows without uv, use `.\.venv\Scripts\python.exe` for that command. See [Windows compatibility review](WINDOWS_COMPATIBILITY.md) for the per-step audit, fixes, and validation limits.
