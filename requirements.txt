@@ -2,4 +2,3 @@ PyYAML
 openai
 python-dotenv
 jsonschema>=4,<5
-httpx
