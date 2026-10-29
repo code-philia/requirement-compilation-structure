@@ -93,7 +93,7 @@ class BackendContracts(unittest.TestCase):
             validate_contracts(contracts, self.design)
 
     def test_inference_uses_all_owners_and_preserves_interfaces(self):
-        stage = import_module("07_infer_api_contracts")
+        stage = import_module("infrastructure.stages.backend.contract_inference")
         requests = []
         def generate(instructions, payload):
             requests.append(deepcopy(payload))

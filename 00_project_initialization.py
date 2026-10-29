@@ -1,22 +1,11 @@
-"""Step 00: initialize the application workspace for the selected technology stack."""
+"""Step 00: initialize the application workspace for the selected technology stack. CLI wrapper."""
 
 from contextlib import ExitStack
-from pathlib import Path
 
 from infrastructure.utils.cli import create_parser, resolve_directories
-from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
-from infrastructure.shared.project.initialize import DEFAULT_STACK, STACKS, initialize_project
-
-
-def project_initialization(output_dir: Path, pause: bool = False, stack: str = DEFAULT_STACK) -> list[str]:
-    created = initialize_project(output_dir, stack)
-    DemoConsole(pause).show(
-        f"Project initialization | {stack}",
-        "\n".join(created) or "Project files already exist; no files replaced.",
-    )
-    print(f"Project initialized: {output_dir}", flush=True)
-    return created
+from infrastructure.shared.project.initialize import DEFAULT_STACK, STACKS
+from infrastructure.shared.project.workflow import project_initialization
 
 
 def main() -> None:

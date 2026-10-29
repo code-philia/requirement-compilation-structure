@@ -31,10 +31,12 @@ def enable_import_case_checks(output_dir: Path, workspace: str) -> str:
     return relative
 
 
-def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK) -> list[str]:
+def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK, *, port: int = 3000) -> list[str]:
     # Templates contain infrastructure only. Existing application sources and
     # data are preserved; dependencies are installed separately by the TDD step.
     """Copy missing files from the chosen stack template and return their workspace-relative paths; preserve existing files."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("Port must be an integer between 1 and 65535")
     if stack not in STACKS:
         raise ValueError(f"Unknown technology stack: {stack}. Available: {', '.join(STACKS)}")
     configuration = STACKS[stack]
@@ -53,7 +55,11 @@ def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK) -> list[str
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             with target.open("x", encoding="utf-8", newline="\n") as stream:
-                stream.write(source.read_text(encoding="utf-8-sig"))
+                content = source.read_text(encoding="utf-8-sig")
+                if relative.as_posix() == "backend/src/server.ts":
+                    # Configure this workspace without changing the shared template or existing sources.
+                    content = content.replace('process.env.PORT ?? "3000"', f'process.env.PORT ?? "{port}"')
+                stream.write(content)
         except FileExistsError:
             if not target.is_file():
                 raise ValueError(f"Expected a project file: {target}")

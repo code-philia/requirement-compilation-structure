@@ -21,6 +21,18 @@ def session_info():
     return _session.get()
 
 
+@contextmanager
+def stage_scope(stage: str):
+    """Attribute model calls to the current pipeline stage within one shared log session."""
+    session = _session.get()
+    token = _session.set({**session, "stage": stage}) if session else None
+    try:
+        yield
+    finally:
+        if token is not None:
+            _session.reset(token)
+
+
 def full_detail(title: str, body: str) -> None:
     """Keep full panel content in the log without flooding the terminal."""
     session = _session.get()
