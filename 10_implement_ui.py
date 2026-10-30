@@ -13,7 +13,7 @@ from infrastructure.utils.files import save_json
 
 
 def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
-        max_turns: int = 18) -> dict:
+        max_turns: int = 5) -> dict:
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
     if not (arc_dir / "ui_design.json").is_file():
@@ -45,7 +45,7 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
 
 def main() -> None:
     parser = create_parser("Step 10: Playwright UI Existence Tests and UI Implementation TDD")
-    parser.add_argument("--max-turns", type=int, default=18, help="Maximum edit/check turns per page implementation")
+    parser.add_argument("--max-turns", type=int, default=5, help="Maximum edit/check turns per page implementation")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:

@@ -4,10 +4,10 @@ import json
 from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
+from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
+from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses, supplied_sources
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.runtime import TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green, require_red
@@ -34,7 +34,9 @@ Compute relative .js imports to api_module and support_module from the chosen te
 Use createTestDatabase(t) and request(partial) from support_module. Each test receives
 a fresh real SQLite database. Seed Given state directly with parameterized SQL, supplying
 required columns; do not invoke another API to manufacture fixtures. Bind booleans as 0/1.
-For credential fixtures, use fixturePasswordHash(password); no account is preseeded.
+Use the supplied test utility definitions for function signatures and fixture data
+conventions. Construct fixtures compatible with those conventions and the API contract;
+do not guess helper arguments or substitute arbitrary encoded values. No account is preseeded.
 
 Within max_tests, prioritize meaningful success and requirement-defined rejection
 branches. Combine related assertions rather than generating a separate case for each
@@ -50,6 +52,8 @@ other tests and infrastructure follow the files map. During test generation, rep
 supplied writable sources only to restore existing behavior or compilation, not to
 implement the new operation. The compiler compiles generated tests and runs accepted
 API regressions, then establishes assertion RED against a 501 stub before implementation.
+When repairing tests, preserve requirement-defined cases and assertions. Missing API
+behavior is expected RED; fix test/fixture errors without deleting that behavioral coverage.
 """
 
 IMPLEMENT_INSTRUCTIONS = """Implement task.api for all_requirement_uses against its generated tests.
@@ -63,9 +67,9 @@ Implement request validation, API preconditions, success/rejection responses and
 effects according to the contract and scenarios. Use the supplied connection, parameterized
 better-sqlite3 SQL, and transactions for related writes. Respect schema-generated integer
 keys and use node:crypto for UUIDs or hashing when the schema/contract requires them.
-Credential APIs must verify existing fixturePasswordHash records, encoded as
-scrypt$saltHex$hashHex with a 64-byte scrypt digest. Production storage must satisfy the
-contract and keep plaintext passwords out of persistent data; do not assert random hashes.
+Use the supplied test utilities and frozen tests to understand existing fixture data
+conventions. Preserve compatibility when reading those records. Production storage must
+satisfy the contract and keep plaintext passwords out of persistent data.
 Preserve required comparison rules and shared credential/header conventions.
 
 Do not start a server, open another database, change schema or seed production data.
@@ -78,7 +82,7 @@ failures without weakening assertions or detecting tests to fake business behavi
 """
 
 
-def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 18, max_tests: int = 5) -> dict:
+def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 5, max_tests: int = 5) -> dict:
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
     if max_tests < 1:
@@ -101,6 +105,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         print("No Backend API Primitives require implementation; no tests or model calls were run.")
         return report
     checks = BackendChecks(output)
+    selection = SourceFiles(output, root="backend/src", tests_root="backend/tests")
     model = TextModel() if contracts["apis"] else None
     owners = {aid: [rid for rid in tree.postorder if aid in contracts["requirements"][rid]] for aid in contracts["apis"]}
     targets = {aid: selected_path(output, "backend_test", aid) or test_path(ids[0], aid) for aid, ids in owners.items()}
@@ -152,11 +157,11 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     "max_tests": max_tests,
                     "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
                 }
-                agent = run_file_agent(model, TEST_INSTRUCTIONS, context,
-                    FileWorkspace.for_target(output, "backend_test", aid, existing=relative,
-                        writable=editable_sources(output, "backend/src"),
-                        references=source_paths(output, "backend/src") + source_paths(output, "backend/tests")),
-                    test_gate, max_turns, console, label + " / Test Generation")
+                workspace = selection.workspace(target=("backend_test", aid), existing=relative,
+                    references=[TEST_BINDINGS_PATH, *supplied_sources(output, api, schema)])
+                agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
+                    test_gate, max_turns, console, label + " / Test Generation",
+                    feedback_filter=lambda value: selection.feedback(workspace, value))
                 for owner in api_owners:
                     report["tests"].setdefault(owner, {})[aid] = targets[aid]
                 report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
@@ -203,20 +208,21 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     require_green(result["tests"])
                     return result
 
-                current = implementation_checks()
-                if current["tests"] and not current["tests"]["returncode"] and current["tests"]["tests"]:
-                    agent = {"turns": 0, "checks": implementation_gate()}
+                entry = selected_path(output, "api", aid)
+                current = implementation_checks() if entry and (output / entry).is_file() else None
+                if current and current["tests"] and not current["tests"]["returncode"] and current["tests"]["tests"]:
+                    agent = {"turns": 0, "checks": current}
                 else:
                     context = {
                         "api_id": aid, "api": api, "db_schema": schema["entities"],
                         "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
                         "implementation_path": selected_path(output, "api", aid),
                     }
-                    agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context,
-                        FileWorkspace.for_target(output, "api", aid,
-                            writable=editable_sources(output, "backend/src"),
-                            references=source_paths(output, "backend/src") + source_paths(output, "backend/tests") + ["backend/package.json"]),
-                        implementation_gate, max_turns, console, aid + " / Implementation", feedback=current)
+                    workspace = selection.workspace(target=("api", aid),
+                        references=[*files_by_api[aid], *supplied_sources(output, api, schema)])
+                    agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
+                        implementation_gate, max_turns, console, aid + " / Implementation", feedback=current,
+                        feedback_filter=lambda value: selection.feedback(workspace, value))
                 accepted.append(aid)
                 result = agent["checks"]["tests"]
                 report["green"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}
@@ -251,7 +257,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
 
 def main() -> None:
     parser = create_parser("Step 08: TDD-driven API Implementation (P / Q / Dataflow Obligations)")
-    parser.add_argument("--max-turns", type=int, default=18, help="Maximum edit rounds per test/implementation agent")
+    parser.add_argument("--max-turns", type=int, default=5, help="Maximum edit rounds per test/implementation agent")
     parser.add_argument("--max-tests", type=int, default=5, help="Maximum key contract tests per API (default: 5)")
     args = parser.parse_args()
     with ExitStack() as stack:

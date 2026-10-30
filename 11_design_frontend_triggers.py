@@ -13,9 +13,9 @@ from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
 
 
-def design_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = False, max_attempts: int = 0) -> dict:
-    if max_attempts < 0:
-        raise ValueError("--max-attempts must be nonnegative; use 0 for unlimited attempts")
+def design_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = False, max_attempts: int = 5) -> dict:
+    if max_attempts < 1:
+        raise ValueError("--max-attempts must be positive")
     tree, _, backend, images, contexts = load_frontend_context(arc_dir, input_dir)
     ui = load_ui_design(arc_dir, tree)
     console = DemoConsole(pause)
@@ -32,8 +32,8 @@ def design_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = False
 
 def main() -> None:
     parser = create_parser("Step 11: Frontend Trigger Design")
-    parser.add_argument("--max-attempts", type=int, default=0,
-        help="Maximum proposals per trigger design; 0 retries until interrupted (default: 0)")
+    parser.add_argument("--max-attempts", type=int, default=5,
+        help="Maximum proposals per trigger design; including the first proposal (default: 5)")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:

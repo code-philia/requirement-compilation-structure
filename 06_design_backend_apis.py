@@ -121,7 +121,7 @@ Return only API definitions and requirement associations.
 """
 
 
-def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 0) -> dict:
+def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 5) -> dict:
     tree, schema, obligations = load_context(arc_dir)
     if top_k < 1:
         raise ValueError("--top-k must be positive")
@@ -187,7 +187,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
 def main() -> None:
     parser = create_parser("Step 06: Complete Backend API Design / Obligation Propagation")
     parser.add_argument("--top-k", type=int, default=6, help="Number of API retrieval hits")
-    parser.add_argument("--max-attempts", type=int, default=0, help="Maximum proposals per requirement; 0 retries until interrupted")
+    parser.add_argument("--max-attempts", type=int, default=5, help="Maximum proposals per requirement; including the first proposal (default: 5)")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:
