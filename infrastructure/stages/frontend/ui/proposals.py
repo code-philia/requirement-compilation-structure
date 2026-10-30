@@ -1,4 +1,4 @@
-"""One complete-record example for step 09; graph validation owns the protocol."""
+"""One complete-record example for step 09; complete records illustrate the protocol."""
 
 import json
 

@@ -1,14 +1,14 @@
-"""P/Q semantics, shared API context and simplified backend TDD regressions."""
+"""Complete API design, shared requirement context and obligation coverage."""
 
 from copy import deepcopy
 from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import json
 from unittest.mock import Mock, patch
 
 from infrastructure.shared.project.initialize import initialize_project
-from infrastructure.stages.backend.contracts import CONTRACT_KEYS, validate_contract, validate_contracts
 from infrastructure.utils.files import save_json, save_text
 
 
@@ -61,52 +61,88 @@ def conditions(aid):
             {"id": "Q-2", "description": "Reject empty text without inserting a note", "status": 400}]}
 
 
-class BackendContracts(unittest.TestCase):
+class BackendDesign(unittest.TestCase):
     def setUp(self):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.output = Path(temporary.name)
         self.arc, self.schema, self.design = prepare_artifacts(self.output)
-        self.api = {**self.design["apis"]["API-SAVE"], **conditions("API-SAVE")}
+        self.stage = import_module("06_design_backend_apis")
 
-    def validate(self, api):
-        validate_contract({key: api[key] for key in CONTRACT_KEYS})
+    def proposal(self, rid):
+        ids = self.design["requirements"][rid]
+        return {"apis": {aid: {**deepcopy(self.design["apis"][aid]), **conditions(aid)} for aid in ids},
+            "requirement_apis": ids}
 
-    def test_conditions_are_checked_for_json_shape_only(self):
-        api = deepcopy(self.api)
-        api["signature"]["method"] = "CUSTOM"
-        api["signature"]["path"] = "/arbitrary/path"
-        api["precondition"][0]["error_status"] = 200
-        api["precondition"][0]["request_fields"] = ["/not/declared"]
-        api["postcondition"] = []
-        self.validate(api)
-        api["postcondition"] = {}
-        with self.assertRaisesRegex(ValueError, "JSON shape"):
-            self.validate(api)
+    def run_design(self, generate):
+        with patch.object(self.stage, "TextModel", return_value=Mock(generate_json=generate)), \
+                patch.object(self.stage, "DemoConsole", return_value=Mock()):
+            return self.stage.design_backend_apis(self.arc)
 
-    def test_contracts_still_preserve_database_obligations(self):
-        contracts = {"apis": {aid: {**api, **conditions(aid)} for aid, api in self.design["apis"].items()},
-            "requirements": self.design["requirements"]}
-        validate_contracts(contracts, self.design)
-        contracts["apis"]["API-SAVE"]["write"] = []
-        with self.assertRaisesRegex(ValueError, "obligations changed"):
-            validate_contracts(contracts, self.design)
-
-    def test_inference_uses_all_owners_and_preserves_interfaces(self):
-        stage = import_module("07_infer_api_contracts")
+    def test_complete_api_and_shared_updates_are_designed_in_one_call_per_requirement(self):
         requests = []
         def generate(instructions, payload):
             requests.append(deepcopy(payload))
-            return {"contract": conditions(payload["api_id"])}
-        model = Mock(generate_json=Mock(side_effect=generate))
-        with patch.object(stage, "TextModel", return_value=model), patch.object(stage, "DemoConsole", return_value=Mock()):
-            result = stage.infer_api_contracts(self.arc)
-        self.assertEqual(len(requests), 2)
-        self.assertEqual([use["id"] for use in requests[0]["all_requirement_uses"]], ["REQ-A", "REQ-B"])
-        self.assertNotIn("concatenated_steps", requests[0]["all_requirement_uses"][0])
-        self.assertEqual(requests[1]["existing_contracts"], {"API-SAVE": result["apis"]["API-SAVE"]})
-        validate_contracts(result, self.design)
+            proposal = self.proposal(payload["requirement"]["id"])
+            if payload["requirement"]["id"] == "REQ-B":
+                proposal["apis"]["API-SAVE"]["request"]["body"]["description"] = "Shared note input"
+                proposal["apis"]["API-SAVE"]["postcondition"][0]["description"] = "Save notes for both requirements"
+            return proposal
+        result = self.run_design(generate)
+        self.assertEqual(len(requests), 3)
+        self.assertEqual([call["requirement"]["id"] for call in requests], ["REQ-A", "REQ-B", "REQ-C"])
+        shared = requests[1]
+        self.assertEqual([use["id"] for use in shared["api_uses"]["API-SAVE"]], ["REQ-A"])
+        self.assertEqual(shared["api_uses"]["API-SAVE"][0]["steps"][0]["id"], "STEP-REQ-A")
+        self.assertEqual(shared["requirement"]["steps"][0]["id"], "STEP-REQ-B")
+        self.assertIn("postcondition", shared["retrieved_apis"]["API-SAVE"])
+        self.assertEqual(result["requirements"]["REQ-A"], result["requirements"]["REQ-B"])
+        self.assertEqual(result["apis"]["API-SAVE"]["request"]["body"]["description"], "Shared note input")
+        self.assertEqual(result["apis"]["API-SAVE"]["postcondition"][0]["description"], "Save notes for both requirements")
+        self.assertEqual(json.loads((self.arc / "backend_apis.json").read_text()), result)
+        for api in result["apis"].values():
+            self.assertTrue({"signature", "request", "response", "read", "write", "precondition", "postcondition"} <= set(api))
 
+    def test_shared_api_updates_recheck_previous_requirement_coverage(self):
+        requests = []
+        def generate(instructions, payload):
+            requests.append(deepcopy(payload))
+            rid = payload["requirement"]["id"]
+            proposal = self.proposal(rid)
+            if rid == "REQ-B" and "correction" not in payload:
+                writer = proposal["apis"]["API-SAVE"]
+                proposal["apis"]["API-OTHER"] = deepcopy(writer)
+                writer["write"] = []
+                proposal["requirement_apis"] = ["API-OTHER"]
+            return proposal
+        result = self.run_design(generate)
+        self.assertEqual(len(requests), 4)
+        feedback = requests[2]["correction"]["obligation_coverage"]
+        self.assertEqual(feedback["requirement_id"], "REQ-A")
+        self.assertEqual(feedback["missing"]["write"], ["Note.id", "Note.text"])
+        self.assertNotIn("API-OTHER", requests[2]["api_inventory"])
+        self.assertNotIn("API-OTHER", result["apis"])
+
+    def test_complete_api_design_has_no_pq_semantic_gate(self):
+        def generate(instructions, payload):
+            proposal = self.proposal(payload["requirement"]["id"])
+            for api in proposal["apis"].values():
+                api["precondition"] = []
+                api["postcondition"] = []
+            return proposal
+        result = self.run_design(generate)
+        self.assertEqual(result["apis"]["API-SAVE"]["postcondition"], [])
+
+    def test_invalid_json_is_retried_with_the_original_response(self):
+        requests = []
+        def generate(instructions, payload):
+            requests.append(deepcopy(payload))
+            if len(requests) == 1:
+                raise json.JSONDecodeError("Invalid JSON", "{broken", 1)
+            return self.proposal(payload["requirement"]["id"])
+        self.run_design(generate)
+        self.assertEqual(len(requests), 4)
+        self.assertEqual(requests[1]["correction"]["invalid_response"], "{broken")
 
 
 if __name__ == "__main__":

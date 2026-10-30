@@ -39,9 +39,10 @@ Use semantic HTML and associated labels. Use prop.input_type and exact option/la
 All designed UI elements must be represented, including structural containers. Static
 text and visual evidence supply layout and style; do not paste a screenshot as the UI.
 Read frontend values from data[var]; use type assertions as needed. Use defaultValue
-and defaultChecked for native editable inputs. Do not add onChange, onClick, onSubmit,
+and defaultChecked for native editable inputs. The host captures native input/change
+events and synchronizes user_write data bindings; no business trigger is needed for this. Do not add onChange, onClick, onSubmit,
 effects, custom hooks, state transitions, validation, business navigation, API calls,
-session restoration, localStorage or cookie changes. Triggers/events are intentionally
+session restoration, localStorage or cookie changes. Business triggers are intentionally
 empty. The compiler suppresses native form submissions; ordinary structural href links
 may identify the designed routes. Leave business-handler slots for the next script.
 Respect prop.visible booleans and equality predicates. Fixture states are supplied
@@ -123,7 +124,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"}})
         save_json(arc_dir / "ui_checks.json", report)
         console.show(label + " | GREEN", agent["checks"]["tests"]["output"])
-    console.show("UI final regression", "Run all current pages' existence suites and build both frontend and backend for npm start. Business triggers/events remain empty.")
+    console.show("UI final regression", "Run all current pages' existence suites and build both frontend and backend for npm start. Business triggers remain empty.")
     final = checks.tests([test_path(pid) for pid in accepted])
     require_green(final)
     compiled = checks.typecheck([test_path(pid) for pid in accepted])

@@ -3,17 +3,17 @@
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 import unittest
 from unittest.mock import Mock
 
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.frontend.context import load_ui_context
-from infrastructure.stages.frontend.ui.design import apply_proposal, empty_design, page_context, validate_design
+from infrastructure.stages.frontend.ui.design import apply_proposal, empty_design, page_context, normalize_design
 from infrastructure.stages.frontend.ui.synthesis import synthesize_ui
 from infrastructure.stages.frontend.ui.testing import presentation_run_status
-from infrastructure.stages.frontend.interactions.contracts import validate_contract
-from infrastructure.stages.frontend.interactions.design import empty_interactions, validate_interactions
-from infrastructure.stages.frontend.interactions.implementation import scenario_context, test_run_status
+from infrastructure.stages.frontend.triggers.design import empty_triggers, trigger_obligations
+from infrastructure.stages.frontend.triggers.implementation import scenario_context, test_run_status
 from infrastructure.utils.files import save_json, save_text
 
 
@@ -50,24 +50,48 @@ def frontend_fixture():
         "requirements": {"ROOT": [], "REQ-A": ["UI-EDITOR", "UI-FORM", "UI-TEXT", "UI-SAVE", "UI-ERROR"],
             "REQ-B": ["UI-EDITOR", "UI-FORM", "UI-TEXT", "UI-SAVE", "UI-ERROR"], "REQ-C": ["UI-SUMMARY", "UI-COUNT", "UI-BACK"]},
         "steps": {"STEP-REQ-A": ["UI-TEXT", "UI-SAVE", "UI-ERROR"], "STEP-REQ-B": ["UI-TEXT", "UI-SAVE"], "STEP-REQ-C": ["UI-COUNT", "UI-BACK"]}}
-    interactions = {"triggers": {
-        "TR-INPUT": {"source": "UI-TEXT", "event": "change", "action": "EV-INPUT"},
-        "TR-SAVE": {"source": "UI-FORM", "event": "submit", "action": "EV-SAVE"},
-        "TR-COUNT": {"source": "UI-SUMMARY", "event": "mount", "action": "EV-COUNT"}},
-        "events": {
-            "EV-INPUT": {"description": "Remember native text", "write": ["form.text"], "actions": [{"id": "SET-TEXT", "kind": "local", "description": "Write input.value into form.text"}]},
-            "EV-SAVE": {"description": "Save or show the rejection", "write": ["form.error", "form.errorVisible"], "actions": [
-                {"id": "SAVE", "kind": "api", "api": "API-SAVE", "description": "POST form.text as body.text"},
-                {"id": "ERROR", "kind": "local", "description": "On SAVE status 400 show its error message and set form.errorVisible=true"},
-                {"id": "OPEN-SUMMARY", "kind": "navigate", "page": "summary", "description": "On SAVE status 200 navigate to summary"}]},
-            "EV-COUNT": {"description": "Load persisted count on entry", "write": ["summary.count"], "actions": [
-                {"id": "COUNT", "kind": "api", "api": "API-COUNT", "description": "GET the current count"},
-                {"id": "SHOW-COUNT", "kind": "local", "description": "Write String(COUNT response.body.count) to summary.count"}]}},
-        "contracts": {"EV-INPUT": {"precondition": [], "postcondition": ["The current native text is available to submit."]},
-            "EV-SAVE": {"precondition": [], "postcondition": ["A successful save persists one note and opens summary.", "A 400 response displays the error and performs no write."]},
-            "EV-COUNT": {"precondition": [], "postcondition": ["Show the count on entry and refresh; leave the database unchanged."]}},
-        "requirements": {"ROOT": [], "REQ-A": ["TR-INPUT", "TR-SAVE"], "REQ-B": ["TR-INPUT", "TR-SAVE"], "REQ-C": ["TR-COUNT"]},
-        "steps": {"STEP-REQ-A": ["TR-INPUT", "TR-SAVE"], "STEP-REQ-B": ["TR-INPUT", "TR-SAVE"], "STEP-REQ-C": ["TR-COUNT"]}}
+    interactions = {'triggers': {'TR-INPUT': {'source': 'UI-TEXT',
+                               'event': 'change',
+                               'guard': None,
+                               'read': [],
+                               'action': [{'kind': 'ui',
+                                           'description': 'Write input.value into form.text',
+                                           'ui': 'UI-TEXT'}],
+                               'write': ['form.text']},
+                  'TR-SAVE': {'source': 'UI-FORM',
+                              'event': 'submit',
+                              'guard': None,
+                              'read': ['form.text'],
+                              'action': [{'kind': 'api',
+                                          'api': 'API-SAVE',
+                                          'description': 'POST form.text as body.text'},
+                                         {'kind': 'ui',
+                                          'description': 'On SAVE status 400 show its error message and set '
+                                                         'form.errorVisible=true',
+                                          'ui': 'UI-FORM'},
+                                         {'kind': 'ui',
+                                          'description': 'On SAVE status 200 navigate to summary',
+                                          'ui': 'UI-SUMMARY'}],
+                              'write': ['form.error', 'form.errorVisible']},
+                  'TR-COUNT': {'source': 'UI-SUMMARY',
+                               'event': 'mount',
+                               'guard': None,
+                               'read': [],
+                               'action': [{'kind': 'api',
+                                           'api': 'API-COUNT',
+                                           'description': 'GET the current count'},
+                                          {'kind': 'ui',
+                                           'description': 'Write String(COUNT response.body.count) to '
+                                                          'summary.count',
+                                           'ui': 'UI-SUMMARY'}],
+                               'write': ['summary.count']}},
+     'requirements': {'ROOT': [],
+                      'REQ-A': ['TR-INPUT', 'TR-SAVE'],
+                      'REQ-B': ['TR-INPUT', 'TR-SAVE'],
+                      'REQ-C': ['TR-COUNT']},
+     'steps': {'STEP-REQ-A': ['TR-INPUT', 'TR-SAVE'],
+               'STEP-REQ-B': ['TR-INPUT', 'TR-SAVE'],
+               'STEP-REQ-C': ['TR-COUNT']}}
     backend = {"requirements": {"ROOT": [], "REQ-A": ["API-SAVE"], "REQ-B": ["API-SAVE"], "REQ-C": ["API-COUNT"]},
         "apis": {"API-SAVE": {"read": [], "write": ["Note.id", "Note.text"]}, "API-COUNT": {"read": ["Note.id", "Note.text"], "write": []}}}
     obligations = {"requirements": {rid: {"read": [] if rid != "REQ-C" else ["Note.id", "Note.text"],
@@ -83,19 +107,14 @@ class FrontendFlow(unittest.TestCase):
         self.output = Path(temporary.name)
         self.arc = self.output / ".arc"
 
-    def test_ui_checks_only_json_shape(self):
+    def test_ui_design_accepts_model_metadata_without_type_or_semantic_gates(self):
         ui = deepcopy(self.ui)
-        ui["elements"]["UI-SAVE"]["mode"] = ["user_write"]
-        ui["elements"]["UI-SAVE"]["data"] = ["form.submitting"]
-        ui["bindings"]["form.submitting"] = binding("boolean", "not type checked", "")
-        ui["bindings"]["form.submitting"]["owner"] = "any node"
+        ui["bindings"]["form.text"]["dtype"] = "custom"
+        ui["bindings"]["form.text"]["source"] = 123
         ui["pages"]["summary"]["route"] = "/"
-        validate_design(ui, self.tree, {}, complete=True)
-        state = deepcopy(self.interactions)
-        validate_interactions(state, ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves, complete=True)
-        ui["elements"]["UI-SAVE"]["data"] = 123
-        with self.assertRaisesRegex(ValueError, "JSON shape"):
-            validate_design(ui, self.tree, {})
+        normalize_design(ui, self.tree)
+        self.assertEqual(ui["bindings"]["form.text"]["source"], 123)
+
 
     def test_multiple_new_events_keep_model_paths_and_run_complete_acceptance(self):
         """Create every navigation dependency before accepting behavioral GREEN."""
@@ -104,7 +123,7 @@ class FrontendFlow(unittest.TestCase):
     def test_green_tests_do_not_skip_missing_or_deleted_event_files(self):
         """Even inadequate GREEN tests cannot bypass required implementation files."""
         from infrastructure.shared.project.entrypoints import remember_path
-        remember_path(self.output, "event", "EV-COUNT", "frontend/src/deleted.ts")
+        remember_path(self.output, "trigger", "TR-COUNT", "frontend/src/deleted.ts")
         self.check_event_creation(early_green=True)
 
     def test_requirement_repair_can_edit_every_created_handler(self):
@@ -117,7 +136,7 @@ class FrontendFlow(unittest.TestCase):
         from infrastructure.shared.agent.files import FileWorkspace
         from infrastructure.shared.project.entrypoints import selected_path
         from infrastructure.shared.project.initialize import initialize_project
-        from infrastructure.stages.frontend.interactions import implementation
+        from infrastructure.stages.frontend.triggers import implementation
         initialize_project(self.output)
         for pid in self.ui["pages"]:
             workspace = FileWorkspace.for_target(self.output, "page", pid)
@@ -130,20 +149,20 @@ class FrontendFlow(unittest.TestCase):
             nonlocal repaired
             task = payload["task"]
             if "new_file" not in task:
-                self.assertEqual(set(task["events"]), set(self.interactions["events"]))
-                for eid in self.interactions["events"]:
-                    path = selected_path(self.output, "event", eid)
+                self.assertEqual(set(task["triggers"]), set(self.interactions["triggers"]))
+                for eid in self.interactions["triggers"]:
+                    path = selected_path(self.output, "trigger", eid)
                     self.assertTrue(payload["files"][path]["writable"], eid)
                 self.assertNotIn("frontend/tests/ui/editor.spec.ts", payload["files"])
                 repaired = True
-                return {"edits": [{"path": selected_path(self.output, "event", "EV-INPUT"),
+                return {"edits": [{"path": selected_path(self.output, "trigger", "TR-INPUT"),
                     "content": "export function handle() { /* repaired */ }"}]}
             creation = task["new_file"]
             if creation["kind"] == "e2e_test":
                 self.assertNotIn("frontend/src/screens/editor.tsx", payload["files"])
                 self.assertFalse(payload["files"]["frontend/src/ui-runtime.ts"]["writable"])
             else:
-                self.assertEqual(set(task["events"]), {creation["target"]})
+                self.assertEqual(set(task["triggers"]), {creation["target"]})
                 self.assertEqual(set(payload["files"]), {"frontend/src/ui-runtime.ts"})
             calls.append(deepcopy(task))
             suffix = ".spec.ts" if creation["kind"] == "e2e_test" else ".ts"
@@ -156,7 +175,7 @@ class FrontendFlow(unittest.TestCase):
             "skipped": 0, "flaky": 0, "errors": [], "failures": []}
         ui_checks.tests.return_value = green
         def test_events(files):
-            if early_green or (all(selected_path(self.output, "event", eid) for eid in self.interactions["events"])
+            if early_green or (all(selected_path(self.output, "trigger", eid) for eid in self.interactions["triggers"])
                     and (not needs_repair or repaired)):
                 return green
             return {**green, "returncode": 1, "passed": 0, "failed": 1,
@@ -168,65 +187,65 @@ class FrontendFlow(unittest.TestCase):
         with patch.object(implementation, "install_dependencies"), \
                 patch.object(implementation, "E2EChecks", return_value=checks), \
                 patch.object(implementation, "FrontendChecks", return_value=ui_checks):
-            report = implementation.run_interaction_tdd(self.arc, self.tree, {"entities": {}},
+            report = implementation.run_trigger_tdd(self.arc, self.tree, {"entities": {}},
                 backend, self.ui, self.interactions, {},
                 {rid: {"id": rid} for rid in self.tree.leaves}, Mock(generate_json=generate),
                 Mock(), {"requirements": {}}, max_turns=2)
         self.assertEqual(report["status"], "GREEN")
-        creations = [task["new_file"]["target"] for task in calls if task["new_file"]["kind"] == "event"]
-        self.assertEqual(creations, ["EV-COUNT", "EV-INPUT", "EV-SAVE"])
+        creations = [task["new_file"]["target"] for task in calls if task["new_file"]["kind"] == "trigger"]
+        self.assertEqual(creations, ["TR-COUNT", "TR-INPUT", "TR-SAVE"])
         self.assertEqual(report["requirements"]["REQ-A"]["implementation_turns"], 4 if needs_repair else 3)
         self.assertEqual(report["requirements"]["REQ-B"]["implementation_turns"], 0)
         self.assertIn("chosen/REQ-A.spec.ts", report["requirements"]["REQ-A"]["test_path"])
         self.assertGreater(checks.tests.call_count, 3)
 
-    def test_single_event_context_keeps_contract_and_form_data_without_other_events(self):
-        """Keep complete local contracts and form fields without unrelated layout/API context."""
-        from infrastructure.stages.frontend.interactions.scope import model_context
+    def test_single_trigger_context_supplies_frontend_data_and_derived_db_effects(self):
+        from infrastructure.stages.frontend.triggers.scope import model_context
         context = scenario_context(self.ui, self.interactions, "REQ-A")
-        context.update({"backend_apis": self.backend["apis"], "requirement": {"id": "REQ-A"}})
-        context["page_subtrees"]["editor"]["elements"]["UI-TEXT"]["prop"]["style"] = "layout " * 1000
-        selected = model_context(context, {"EV-SAVE"})
-        self.assertEqual(set(selected["events"]), {"EV-SAVE"})
-        self.assertEqual(selected["contracts"]["EV-SAVE"], self.interactions["contracts"]["EV-SAVE"])
+        context.update({"backend_apis": self.backend["apis"], "requirement": {"id": "REQ-A"},
+            "obligations": {tid: trigger_obligations(tr, self.backend) for tid, tr in context["triggers"].items()}})
+        selected = model_context(context, {"TR-SAVE"})
+        self.assertEqual(set(selected["triggers"]), {"TR-SAVE"})
+        self.assertEqual(selected["obligations"]["TR-SAVE"], {"read": [], "write": ["Note.id", "Note.text"]})
         self.assertEqual(set(selected["backend_apis"]), {"API-SAVE"})
         self.assertIn("form.text", selected["page_subtrees"]["editor"]["bindings"])
-        self.assertNotIn("style", selected["page_subtrees"]["editor"]["elements"]["UI-TEXT"]["prop"])
-        self.assertNotIn("fixtures", selected["page_subtrees"]["editor"])
+        self.assertNotIn("events", selected)
+        self.assertNotIn("contracts", selected)
+
 
     def test_repair_scope_keeps_all_handlers_and_transitive_imports_writable(self):
         """Do not omit required handlers/helpers, including a missing indexed file."""
         from infrastructure.shared.project.entrypoints import remember_path
-        from infrastructure.stages.frontend.interactions.scope import InteractionFiles
-        paths = {"EV-INPUT": "frontend/src/events/input.ts", "EV-SAVE": "frontend/src/events/save.ts",
-            "EV-COUNT": "frontend/src/events/deleted.ts"}
+        from infrastructure.stages.frontend.triggers.scope import TriggerFiles
+        paths = {"TR-INPUT": "frontend/src/events/input.ts", "TR-SAVE": "frontend/src/events/save.ts",
+            "TR-COUNT": "frontend/src/events/deleted.ts"}
         for eid, relative in paths.items():
-            remember_path(self.output, "event", eid, relative)
-        save_text(self.output / paths["EV-INPUT"], 'import { value } from "../shared/value.js";')
-        save_text(self.output / paths["EV-SAVE"], "export function handle() {}")
+            remember_path(self.output, "trigger", eid, relative)
+        save_text(self.output / paths["TR-INPUT"], 'import { value } from "../shared/value.js";')
+        save_text(self.output / paths["TR-SAVE"], "export function handle() {}")
         save_text(self.output / "frontend/src/shared/value.ts", 'export { value } from "./nested";')
         save_text(self.output / "frontend/src/shared/nested/index.ts", 'import "../value.js"; export const value = 1;')
         save_text(self.output / "frontend/src/unrelated.ts", "unrelated")
-        selected = InteractionFiles(self.output, self.ui)
-        workspace = selected.workspace(events=set(paths))
+        selected = TriggerFiles(self.output, self.ui)
+        workspace = selected.workspace(triggers=set(paths))
         files = workspace.state()
         for relative in [*paths.values(), "frontend/src/shared/value.ts", "frontend/src/shared/nested/index.ts"]:
             self.assertTrue(files[relative]["writable"], relative)
-        self.assertIsNone(files[paths["EV-COUNT"]]["content"])
+        self.assertIsNone(files[paths["TR-COUNT"]]["content"])
         self.assertNotIn("frontend/src/unrelated.ts", files)
         self.assertFalse(files["frontend/src/ui-runtime.ts"]["writable"])
 
     def test_feedback_expands_page_dependencies_and_preserves_frozen_tests(self):
         """A locator/compiler error exposes repairable sources, never accepted tests."""
         from infrastructure.shared.project.entrypoints import remember_path
-        from infrastructure.stages.frontend.interactions.scope import InteractionFiles
+        from infrastructure.stages.frontend.triggers.scope import TriggerFiles
         page, helper = "frontend/src/screens/summary.tsx", "frontend/src/shared/count.ts"
         remember_path(self.output, "page", "summary", page)
         save_text(self.output / page, 'import { count } from "../shared/count.js";')
         save_text(self.output / helper, "export const count = 0;")
         frozen = "frontend/tests/e2e/accepted.spec.ts"
         save_text(self.output / frozen, "accepted assertions")
-        selected = InteractionFiles(self.output, self.ui)
+        selected = TriggerFiles(self.output, self.ui)
         generation = selected.workspace(target=("e2e_test", "REQ-A"))
         generation.state()
         generation.apply({"edits": [{"path": "frontend/tests/e2e/new.spec.ts", "content": "new assertions"}]})
@@ -246,12 +265,12 @@ class FrontendFlow(unittest.TestCase):
     def test_agent_retry_receives_sources_identified_by_failed_checks(self):
         """A file omitted initially becomes writable before the next model repair request."""
         from infrastructure.shared.agent.loop import run_file_agent
-        from infrastructure.stages.frontend.interactions.scope import InteractionFiles
+        from infrastructure.stages.frontend.triggers.scope import TriggerFiles
         page = "frontend/src/screens/broken.tsx"
         helper = "frontend/src/shared/value.ts"
         save_text(self.output / page, 'import { value } from "../shared/value.js";')
         save_text(self.output / helper, "export const value = false;")
-        selection = InteractionFiles(self.output)
+        selection = TriggerFiles(self.output)
         workspace = selection.workspace()
         calls = []
         def generate(instructions, payload):
@@ -270,17 +289,17 @@ class FrontendFlow(unittest.TestCase):
     def test_runtime_types_survive_returning_to_presentation_stage(self):
         from infrastructure.shared.project.initialize import initialize_project
         from infrastructure.stages.frontend.ui.runtime import prepare_frontend
-        from infrastructure.stages.frontend.interactions.runtime import sync_interactions
+        from infrastructure.stages.frontend.triggers.runtime import sync_triggers
         from infrastructure.utils.files import read_source
         initialize_project(self.output)
-        sync_interactions(self.output, {"pages": {}, "bindings": {}},
-            {"events": {}, "triggers": {}}, {"apis": {}}, [])
+        sync_triggers(self.output, {"pages": {}, "bindings": {}, "elements": {}},
+            {"triggers": {}}, {"apis": {}}, [])
         before = read_source(self.output / "frontend/src/ui-runtime.ts")
         prepare_frontend(self.output)
         after = read_source(self.output / "frontend/src/ui-runtime.ts")
         self.assertEqual(before, after)
-        self.assertIn("export interface UiEventContext", after)
-        self.assertEqual(after.count("export type UiEventHandler"), 1)
+        self.assertIn("export interface UiTriggerContext", after)
+        self.assertEqual(after.count("export type UiTriggerHandler"), 1)
 
     def test_synthesis_retries_without_publishing_rejected_state(self):
         requests = []
@@ -292,16 +311,11 @@ class FrontendFlow(unittest.TestCase):
             proposal = {"pages": {page: self.ui["pages"][page]} if rid != "REQ-B" else {},
                 "elements": context["elements"] if rid != "REQ-B" else {}, "bindings": context["bindings"] if rid != "REQ-B" else {},
                 "requirement_ui": self.ui["requirements"][rid], "step_ui": {sid: self.ui["steps"][sid] for sid in self.tree.own_steps[rid]}}
-            if len(requests) == 1:
-                proposal = deepcopy(proposal)
-                proposal["bindings"]["form.text"]["source"] = 7
             return proposal
         contexts = {rid: {**record, "steps": [self.tree.steps[sid] for sid in self.tree.own_steps[rid]], "images": {}} for rid, record in self.tree.requirements.items()}
-        result = synthesize_ui(self.arc, self.tree, {"entities": {}}, self.backend, {}, contexts, Mock(generate_json=generate), Mock())
+        result = synthesize_ui(self.arc, self.tree, {}, contexts, Mock(generate_json=generate), Mock())
         self.assertEqual(result, self.ui)
-        self.assertEqual(len(requests), 4)
-        self.assertIn("correction", requests[1])
-        self.assertEqual(requests[1]["retrieved_pages"], {})
+        self.assertEqual(len(requests), 3)
         self.assertNotIn("step_obligations", requests[0])
 
     def test_presentation_loader_has_no_report_policy(self):
@@ -312,39 +326,61 @@ class FrontendFlow(unittest.TestCase):
         self.assertEqual(images, {})
         self.assertNotIn("concatenated_steps", contexts["REQ-A"])
 
-    def test_frontend_calls_are_checked_by_database_fields(self):
-        validate_interactions(self.interactions, self.ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves, complete=True)
-        state = deepcopy(self.interactions)
-        state["events"]["EV-INPUT"]["write"] = []
-        state["events"]["EV-SAVE"]["read"] = ["undeclared frontend state"]
-        state["triggers"]["TR-DUP"] = state["triggers"]["TR-INPUT"]
-        state["triggers"]["TR-SAVE"]["event"] = "anything"
-        validate_interactions(state, self.ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves)
-        alternative = deepcopy(self.backend)
-        alternative["apis"]["API-SAME-FIELDS"] = deepcopy(alternative["apis"]["API-SAVE"])
-        state["events"]["EV-SAVE"]["actions"][0]["api"] = "API-SAME-FIELDS"
-        validate_interactions(state, self.ui, self.tree, {}, self.obligations, alternative, self.tree.leaves)
-        state["events"]["EV-SAVE"]["actions"][0]["api"] = "API-COUNT"
-        with self.assertRaisesRegex(ValueError, "Obligation"):
-            validate_interactions(state, self.ui, self.tree, {}, self.obligations, alternative, self.tree.leaves)
-        validate_contract("EV", {"precondition": [], "postcondition": [], "actions": {}})
-        with self.assertRaises(ValueError): validate_contract("EV", {"precondition": {}, "postcondition": []})
+    def test_trigger_context_does_not_load_requirement_obligations_or_check_coverage(self):
+        from infrastructure.stages.frontend.triggers.context import load_e2e_context
+        for name, value in (("requirements", self.raw), ("visual_analysis", {}),
+                ("db_schema", {"entities": {}}), ("backend_apis", self.backend),
+                ("ui_design", self.ui), ("frontend_triggers", empty_triggers(self.tree))):
+            save_json(self.arc / (name + ".json"), value)
+        self.assertFalse((self.arc / "db_obligations.json").exists())
+        _, _, backend, _, triggers, _, _ = load_e2e_context(self.arc, self.output)
+        self.assertEqual(backend, self.backend)
+        self.assertEqual(triggers["triggers"], {})
+
+    def test_trigger_db_effects_are_derived_without_frontend_coverage_validation(self):
+        from infrastructure.stages.frontend.triggers.design import apply_decomposition
+        trigger = deepcopy(self.interactions["triggers"]["TR-SAVE"])
+        trigger["action"] = [{"kind": "api", "api": "API-COUNT", "description": "Read count"}]
+        result = apply_decomposition(empty_triggers(self.tree),
+            {"triggers": {"T": trigger}, "requirement_triggers": ["T"], "step_triggers": {}}, "REQ-A")
+        self.assertEqual(trigger_obligations(result["triggers"]["T"], self.backend),
+            {"read": ["Note.id", "Note.text"], "write": []})
+        self.assertEqual(result["triggers"]["T"]["read"], ["form.text"])
+
+    def test_trigger_synthesis_only_retries_json_and_has_no_contract_pass(self):
+        from infrastructure.stages.frontend.triggers.synthesis import synthesize_triggers
+        calls = []
+
+        def generate(instructions, payload):
+            calls.append(deepcopy(payload))
+            if len(calls) == 1:
+                raise json.JSONDecodeError("Invalid JSON", "{broken", 1)
+            rid = payload["requirement"]["id"]
+            ids = self.interactions["requirements"][rid]
+            return {"triggers": {tid: self.interactions["triggers"][tid] for tid in ids},
+                "requirement_triggers": ids, "step_triggers": {}}
+
+        result = synthesize_triggers(self.arc, self.ui, self.tree, self.backend,
+            self.tree.requirements, Mock(generate_json=generate), Mock())
+        self.assertEqual(len(calls), 4)
+        self.assertIn("correction", calls[1])
+        self.assertTrue(all("obligations" not in call for call in calls))
+        self.assertEqual(set(result), {"triggers", "requirements", "steps"})
+        self.assertTrue((self.arc / "frontend_triggers.json").is_file())
+
 
     def test_navigation_context_includes_later_page_mount_and_keeps_ownership(self):
         context = scenario_context(self.ui, self.interactions, "REQ-A")
         self.assertEqual(set(context["page_subtrees"]), {"editor", "summary"})
-        self.assertEqual(set(context["events"]), {"EV-INPUT", "EV-SAVE", "EV-COUNT"})
+        self.assertEqual(set(context["triggers"]), {"TR-INPUT", "TR-SAVE", "TR-COUNT"})
         self.assertEqual(len(context["triggers"]), 3)
         self.assertEqual(self.interactions["requirements"]["REQ-A"], ["TR-INPUT", "TR-SAVE"])
 
-    def test_backend_only_requirements_need_no_frontend_effect_coverage(self):
-        ui = empty_design()
-        ui["requirements"] = {rid: [] for rid in self.tree.requirements}
-        ui["steps"] = {sid: [] for sid in self.tree.steps}
-        validate_design(ui, self.tree, {}, complete=True)
-        interactions = empty_interactions(self.tree)
-        validate_interactions(interactions, ui, self.tree, {}, self.obligations, self.backend, self.tree.leaves, complete=True)
-        self.assertEqual(scenario_context(ui, interactions, "REQ-A")["events"], {})
+    def test_backend_only_requirements_need_no_frontend_triggers(self):
+        ui = normalize_design(empty_design(), self.tree)
+        triggers = empty_triggers(self.tree)
+        self.assertEqual(scenario_context(ui, triggers, "REQ-A")["triggers"], {})
+
 
     def test_frontend_runtime_failure_is_repair_not_test_regeneration(self):
         report = {"returncode": 1, "failed": 1, "errors": [], "failures": ["E2E_RUNTIME_ERROR: Broken handler"]}

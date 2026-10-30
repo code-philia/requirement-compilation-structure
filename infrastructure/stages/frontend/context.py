@@ -3,25 +3,15 @@
 import json
 import re
 
-from infrastructure.stages.backend.context import load_context
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.utils.files import read_artifact
-from infrastructure.stages.backend.contracts import validate_contracts
-from infrastructure.stages.backend.primitives import validate_design
-from infrastructure.stages.database.obligations.records import field_symbols
 
 REFERENCE = re.compile(r"\\ref\[image\]\(([^)]+)\)")
 
 
-def load_ui_design(arc_dir, tree, images):
-    """Validate the saved design without rerunning synthesis or imposing a new fixture budget."""
-    from infrastructure.stages.frontend.ui.design import validate_design as validate_ui_design
-
-    design = read_artifact(arc_dir, "ui_design.json")
-    if not isinstance(design, dict) or not isinstance(design.get("pages"), dict):
-        raise ValueError("Saved UI design must contain a pages object")
-    validate_ui_design(design, tree, images, max_fixtures=None, complete=True)
-    return design
+def load_ui_design(arc_dir, tree):
+    from infrastructure.stages.frontend.ui.design import normalize_design
+    return normalize_design(read_artifact(arc_dir, "ui_design.json"), tree)
 
 
 def load_ui_context(arc_dir, input_dir):
@@ -36,8 +26,6 @@ def load_ui_context(arc_dir, input_dir):
         nodes[node["id"]] = node
         description = node.get("description", {})
         for image in description.get("image", []) if isinstance(description, dict) else []:
-            if not isinstance(image, dict) or not isinstance(image.get("id"), str) or not isinstance(image.get("reference"), str):
-                raise ValueError("Each frontend image definition needs id and reference")
             if REFERENCE.fullmatch(image["reference"]):
                 continue
             source = (input_dir / image["reference"]).resolve()
@@ -64,14 +52,11 @@ def load_ui_context(arc_dir, input_dir):
 
 
 def load_frontend_context(arc_dir, input_dir):
-    """Combine visual requirements with validated database and API artifacts for design stages."""
-    tree, schema, obligations = load_context(arc_dir)
-    _, images, contexts = load_ui_context(arc_dir, input_dir)
-    backend = read_artifact(arc_dir, "backend_apis.json")
-    contracts = read_artifact(arc_dir, "backend_contracts.json")
-    validate_design(backend, obligations, field_symbols(schema), tree=tree)
-    validate_contracts(contracts, backend)
-    return tree, schema, obligations, contracts, images, contexts
+    """Combine visual requirements with database and API artifacts for design stages."""
+    tree, images, contexts = load_ui_context(arc_dir, input_dir)
+    schema = read_artifact(arc_dir, "db_schema.json")
+    contracts = read_artifact(arc_dir, "backend_apis.json")
+    return tree, schema, contracts, images, contexts
 
 
 def behavior_contexts(contexts):

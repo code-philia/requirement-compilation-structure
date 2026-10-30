@@ -7,11 +7,11 @@ from unittest.mock import Mock
 
 from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.shared.project.entrypoints import implementation_path, selected_path
+from infrastructure.shared.project.entrypoints import remember_path, selected_path
 from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.stages.backend.runtime import prepare_runtime, sync_implementations
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pages
-from infrastructure.stages.frontend.interactions.runtime import sync_interactions
+from infrastructure.stages.frontend.triggers.runtime import sync_triggers
 from infrastructure.utils.files import read_source, save_text
 
 
@@ -73,27 +73,28 @@ class FileAgentTests(unittest.TestCase):
         api = {"API-EXAMPLE": {"signature": {"name": "example", "method": "GET", "path": "/api/example"}}}
         prepare_runtime(self.root, api)
         self.assertIn("status: 501", read_source(self.root / "backend/src/api/register.ts"))
-        api_path = implementation_path("api", "API-EXAMPLE")
-        page_path = implementation_path("page", "PAGE-EXAMPLE")
-        event_path = implementation_path("event", "EVENT-EXAMPLE")
+        api_path = "backend/src/handlers/example.ts"
+        page_path = "frontend/src/pages/example.tsx"
+        event_path = "frontend/src/triggers/example.ts"
         save_text(self.root / api_path, "export async function handle() {}")
         save_text(self.root / page_path, "export function Page() {}")
         save_text(self.root / event_path, "export function handle() {}")
+        for kind, identity, path in (("api", "API-EXAMPLE", api_path), ("page", "PAGE-EXAMPLE", page_path), ("trigger", "EVENT-EXAMPLE", event_path)):
+            remember_path(self.root, kind, identity, path)
         sync_implementations(self.root, api)
         self.assertIn("handle as handler0", read_source(self.root / "backend/src/api/register.ts"))
         self.assertIn("handle as example", read_source(self.root / "backend/tests/support/apis.ts"))
-        ui = {"pages": {"PAGE-EXAMPLE": {"route": "/", "root": "UI-ROOT"}}, "bindings": {}}
+        ui = {"pages": {"PAGE-EXAMPLE": {"route": "/", "root": "UI-ROOT"}}, "bindings": {}, "elements": {}}
         prepare_frontend(self.root)
         sync_pages(self.root, ui)
         self.assertIn("Page as Page0", read_source(self.root / "frontend/src/App.tsx"))
-        interactions = {"events": {"EVENT-EXAMPLE": {"write": [], "actions": []}}, "triggers": {}}
-        sync_interactions(self.root, ui, interactions, {"apis": api}, [])
-        self.assertNotIn("handle as event0", read_source(self.root / "frontend/src/ui-events.ts"))
-        sync_interactions(self.root, ui, interactions, {"apis": api}, ["EVENT-EXAMPLE"])
-        self.assertIn("handle as event0", read_source(self.root / "frontend/src/ui-events.ts"))
+        interactions = {"triggers": {"EVENT-EXAMPLE": {"source": "UI-ROOT", "event": "mount", "action": [], "read": [], "write": []}}}
+        sync_triggers(self.root, ui, interactions, {"apis": api}, [])
+        self.assertNotIn("handle as trigger0", read_source(self.root / "frontend/src/ui-triggers.ts"))
+        sync_triggers(self.root, ui, interactions, {"apis": api}, ["EVENT-EXAMPLE"])
+        self.assertIn("handle as trigger0", read_source(self.root / "frontend/src/ui-triggers.ts"))
         self.assertFalse((self.root / ".arc/file_index.json").exists())
-        names = [implementation_path("api", identity).casefold() for identity in ("API-A", "api-a", "API/A", "API:A", "CON", "中文")]
-        self.assertEqual(len(set(names)), len(names))
+
 
     def test_model_selects_new_path_and_repairs_it_without_response_metadata(self):
         workspace = FileWorkspace.for_target(self.root, "api", "API-CREATE")
@@ -123,7 +124,7 @@ class FileAgentTests(unittest.TestCase):
             ("page", "PAGE-CREATE", "frontend/src/register.tsx", {"implementation_path": None}, "implementation_path"),
             ("backend_test", "API-CREATE", "backend/tests/register.test.ts", {"test_path": None}, "test_path"),
             ("e2e_test", "REQ-CREATE", "frontend/tests/e2e/register.spec.ts", {"test_path": None}, "test_path"),
-            ("event", "EV-CREATE", "frontend/src/register-event.ts", {"implementation_paths": {"EV-CREATE": None}}, "implementation_paths"),
+            ("trigger", "TR-CREATE", "frontend/src/register-event.ts", {"implementation_paths": {"TR-CREATE": None}}, "implementation_paths"),
         ]
         for kind, identity, relative, task, key in cases:
             with self.subTest(kind=kind):
@@ -138,9 +139,9 @@ class FileAgentTests(unittest.TestCase):
                 first, retry = [call.args[1] for call in model.generate_json.call_args_list]
                 self.assertIn("new_file", first["task"])
                 self.assertNotIn("new_file", retry["task"])
-                self.assertEqual(retry["task"][key], {identity: relative} if kind == "event" else relative)
-                self.assertEqual(first["task"][key], {identity: None} if kind == "event" else None)
-                self.assertEqual(task[key], {identity: None} if kind == "event" else None)
+                self.assertEqual(retry["task"][key], {identity: relative} if kind == "trigger" else relative)
+                self.assertEqual(first["task"][key], {identity: None} if kind == "trigger" else None)
+                self.assertEqual(task[key], {identity: None} if kind == "trigger" else None)
                 self.assertEqual(retry["files"][relative], {"content": "first version", "writable": True})
                 self.assertEqual(retry["feedback"], [{"error": "Acceptance failed"}])
 
@@ -217,23 +218,23 @@ class FileAgentTests(unittest.TestCase):
         prepare_runtime(self.root, api)
         paths = {"api": ("API-CUSTOM", "backend/src/features/account/read.ts", "export async function handle() {}"),
             "page": ("PAGE-CUSTOM", "frontend/src/screens/account.tsx", "export function Page() {}"),
-            "event": ("EVENT-CUSTOM", "frontend/src/behavior/account/load.ts", "export function handle() {}")}
+            "trigger": ("TR-CUSTOM", "frontend/src/behavior/account/load.ts", "export function handle() {}")}
         for kind, (identity, path, content) in paths.items():
             workspace = FileWorkspace.for_target(self.root, kind, identity)
             workspace.state()
             workspace.apply({"edits": [{"path": path, "content": content}]})
         sync_implementations(self.root, api)
         self.assertIn("../features/account/read.js", read_source(self.root / "backend/src/api/register.ts"))
-        ui = {"pages": {"PAGE-CUSTOM": {"route": "/", "root": "UI-ROOT"}}, "bindings": {}}
+        ui = {"pages": {"PAGE-CUSTOM": {"route": "/", "root": "UI-ROOT"}}, "bindings": {}, "elements": {}}
         prepare_frontend(self.root)
         sync_pages(self.root, ui)
         self.assertIn("./screens/account", read_source(self.root / "frontend/src/App.tsx"))
-        interactions = {"events": {"EVENT-CUSTOM": {"write": [], "actions": []}}, "triggers": {}}
-        sync_interactions(self.root, ui, interactions, {"apis": api}, ["EVENT-CUSTOM"])
-        self.assertIn("./behavior/account/load", read_source(self.root / "frontend/src/ui-events.ts"))
+        interactions = {"triggers": {"TR-CUSTOM": {"source": "UI-ROOT", "event": "mount", "action": [], "write": [], "read": []}}}
+        sync_triggers(self.root, ui, interactions, {"apis": api}, ["TR-CUSTOM"])
+        self.assertIn("./behavior/account/load", read_source(self.root / "frontend/src/ui-triggers.ts"))
 
     def test_new_test_file_paths_are_chosen_by_model(self):
-        from infrastructure.stages.frontend.interactions.testing import test_path
+        from infrastructure.stages.frontend.triggers.testing import test_path
         relative = "frontend/tests/e2e/accounts/register-flow.spec.ts"
         workspace = FileWorkspace.for_target(self.root, "e2e_test", "REQ-REGISTER")
         workspace.state()

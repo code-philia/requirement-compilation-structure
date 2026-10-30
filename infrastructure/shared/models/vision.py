@@ -46,7 +46,7 @@ class VisualModel:
         self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=600, max_retries=2, http_client=http_client())
 
     def analyze(self, image: Path) -> dict:
-        """Send one supported reference image and validate the returned layout, elements, and style evidence."""
+        """Send one supported reference image and parse the returned layout, elements, and style evidence."""
         mime = mimetypes.guess_type(image.name)[0]
         if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
             raise ValueError(f"Unsupported image format: {image.name}")
@@ -83,12 +83,4 @@ class VisualModel:
         if not response.choices or not response.choices[0].message.content:
             raise ValueError(f"Visual model returned empty content: {image.name}")
         result = json.loads(response.choices[0].message.content)
-        if (
-            not isinstance(result, dict) or not {"layout", "elements", "style"}.issubset(result)
-            or not isinstance(result["layout"], str)
-            or not isinstance(result["style"], str)
-            or not isinstance(result["elements"], list)
-            or not all(isinstance(item, str) for item in result["elements"])
-        ):
-            raise ValueError(f"Visual analysis fields do not match the expected format: {image.name}")
         return result

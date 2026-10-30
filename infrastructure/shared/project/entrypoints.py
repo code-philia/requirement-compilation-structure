@@ -1,31 +1,22 @@
 """Model-selected source paths, stable exports and portable imports."""
 
-from hashlib import sha256
 import posixpath
 from pathlib import Path, PurePosixPath
-import re
 import json
 
 from infrastructure.utils.paths import check_path_case
 from infrastructure.utils.files import save_json
 
 
-FILE_ROOTS = {"api": "backend/src", "page": "frontend/src", "event": "frontend/src",
+FILE_ROOTS = {"api": "backend/src", "page": "frontend/src", "trigger": "frontend/src",
     "backend_test": "backend/tests", "e2e_test": "frontend/tests/e2e"}
 
 
 def selected_path(output: Path, kind: str, identity: str) -> str | None:
-    """Read a model-selected path; recognize existing convention files on resume."""
+    """Read the implementation path selected for a model ID."""
     index = output / ".arc/implementation_paths.json"
     paths = json.loads(index.read_text(encoding="utf-8-sig")) if index.is_file() else {}
-    chosen = paths.get(kind, {}).get(identity)
-    if chosen is not None:
-        return chosen
-    if kind in {"api", "page", "event"}:
-        legacy = implementation_path(kind, identity)
-        if (output / legacy).is_file():
-            return legacy
-    return None
+    return paths.get(kind, {}).get(identity)
 
 
 def remember_path(output: Path, kind: str, identity: str, relative: str) -> None:
@@ -34,17 +25,6 @@ def remember_path(output: Path, kind: str, identity: str, relative: str) -> None
     paths = json.loads(index.read_text(encoding="utf-8-sig")) if index.is_file() else {}
     paths.setdefault(kind, {})[identity] = relative
     save_json(index, paths)
-
-
-def implementation_path(kind: str, identity: str) -> str:
-    """Recognize legacy filenames for existing outputs; new filenames are model-selected."""
-    directory, suffix = {"api": ("backend/src/handlers", ".ts"),
-        "page": ("frontend/src/pages", ".tsx"), "event": ("frontend/src/events", ".ts")}[kind]
-    if not isinstance(identity, str) or not identity:
-        raise ValueError("Implementation IDs must be nonempty strings")
-    slug = re.sub(r"[^a-z0-9_-]", "-", identity.lower())[:40]
-    name = f"module-{slug}-{sha256(identity.encode()).hexdigest()[:16]}"
-    return f"{directory}/{name}{suffix}"
 
 
 def implementation_entrypoint(output: Path, kind: str, identity: str) -> dict | None:

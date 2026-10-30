@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
 
-from infrastructure.stages.frontend.interactions.e2e_runtime import RUNNER
+from infrastructure.stages.frontend.triggers.e2e_runtime import RUNNER
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, parse_playwright_result, require_green, require_red
 from infrastructure.shared.project.entrypoints import selected_path
 
@@ -29,9 +29,9 @@ def require_behavioral_red(result):
 
 
 class E2EChecks(FrontendChecks):
-    """Real-app Playwright checks with isolated test data ."""
+    """Real-app Playwright checks with isolated test data."""
     def __init__(self, output, maximum=5):
-        """Reuse frontend checks with a longer real-server timeout and an enforced per-requirement test budget."""
+        """Reuse frontend checks with a longer real-server timeout and a per-requirement test-count hint."""
         super().__init__(output, timeout=300)
         self.maximum = maximum
 

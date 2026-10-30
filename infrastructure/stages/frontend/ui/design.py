@@ -1,46 +1,33 @@
-"""Canonical page/UI/data records and validated incremental design updates."""
+"""Canonical UI/data records and incremental design updates."""
 
 from copy import deepcopy
 
-from infrastructure.shared.models.structure import object_fields, string_list
 
 
-INSTRUCTIONS = """Design UI/data for the current leaf requirement; implementation happens later.
-Return exactly {pages:{}, elements:{}, bindings:{}, requirement_ui:[], step_ui:{}}.
-Return new or changed records only, with each record COMPLETE. Records replace by ID;
-there is no recursive merge, deletion or special patch syntax. Pure reuse needs only
-requirement_ui and step_ui references. Preserve previously accepted IDs, routes, roots,
-UI types, parents, data references and unrelated props/fixtures when updating a record.
-Only retrieved existing pages/elements/bindings may be updated. New IDs must be unique.
+INSTRUCTIONS = """Design UI and frontend data for the current leaf requirement.
+Use requirement scenarios, supplied reference images and existing page subtrees.
+Return {pages:{}, elements:{}, bindings:{}, requirement_ui:[], step_ui:{}}.
+Return complete new or changed records keyed by ID; existing records may be reused
+by reference. Updates replace records. Keep existing behavior when sharing a page.
 
-Page records have exactly name, route, root, images, fixtures. Routes are concrete paths.
-Element records have exactly type, parent, mode, data, prop. A page root has type=page
-and parent=null; other nodes reference a parent ID. Supported types are page,container,
-form,input,checkbox,select,button,text,heading,link,list,item,image,alert,table.
-mode is a list containing user_read and/or user_write, or []. data is a list of VARIABLE
-NAMES, not objects. All variable definitions live in bindings, keyed by variable name.
-Each binding has exactly dtype, constraints (string list), initial, source (nonempty
-origin description). dtype is string,integer,number,boolean,array,object,null. Initial
-values must match dtype. No owner fields or duplicated type/constraint descriptors.
-Variables may be shared across pages; use explicit stable names. Include frontend-only
-state such as errors, selections and loading. Do not expose password hashes or session
-credentials; DB fields do not automatically require controls. Document API/input/local
-origins in source. Actual production defaults must not be fake backend response data.
+Pages contain name, route, root (UI ID), images (image IDs), fixtures.
+Fixtures describe display states: default={} plus useful variable overrides.
+Elements contain type, parent (UI ID or null), mode, data, prop.
+A page root is a UI element of type page. Other types describe ordinary HTML/UI
+controls. mode is a list of user_read/user_write; data lists frontend variable names.
+prop contains static labels/text/options/layout/style and optional visible conditions.
 
-prop describes static text,label,placeholder,input_type,options,style,level,href,alt.
-Optional prop.visible is a boolean or {var:VARIABLE_NAME,equals:VALUE}; complex decisions
-belong to events. Label real inputs and buttons. Checkbox data must reference a boolean.
-Every page has fixtures.default={}; add at most max_fixtures other display states,
-overriding page variables. Include fixtures making conditional UI visible. Fixtures
-are only display-test data. Preserve existing fixtures when replacing a page record.
+Bindings define frontend variables once, keyed by variable name, with dtype,
+constraints (descriptions), initial and source (origin description).
+Include input values, results, selections, loading and error state as needed.
+Native editable values are synchronized by the UI host. Business behavior belongs
+to triggers, designed later. UI does not declare database obligations or DB mappings.
+Use data bindings to display API results later, without inventing production data.
 
-Design only this requirement's owned content. A navigation destination does not authorize
-creating another requirement's forms or behavior. Reuse retrieved pages. requirement_ui
-lists directly involved UI IDs. step_ui includes every supplied own step ID exactly once,
-using [] for non-UI behavior. Non-UI requirements can return empty records and associations.
-Use image.page hints for page IDs and attach provided images to the directly associated
-page. Images supply visible layout/labels/style, not hidden business rules. No events,
-handlers, executable expressions, implementation code or tests belong in this output.
+requirement_ui lists the UI elements used by this requirement; step_ui associates
+scenario steps with UI IDs. Non-UI requirements may return empty records and lists.
+Images provide visual evidence; use image.page hints when supplied.
+Do not return triggers, handlers, code or tests in this design response.
 """
 
 
@@ -88,46 +75,28 @@ def visible(design: dict, uid: str, values: dict) -> bool:
     return True
 
 
-def validate_design(design, tree, images, max_fixtures=None, complete=False):
-    """Read UI JSON containers only; do not impose control, scope or design policies."""
-    object_fields(design, {key: dict for key in ("pages", "elements", "bindings", "requirements", "steps")}, "UI design")
+def normalize_design(design, tree):
+    """Fill optional display metadata; accept model decisions without design gates."""
     for pid, page in design["pages"].items():
-        object_fields(page, {"route": str, "root": str}, f"page {pid}")
         page.setdefault("name", pid)
         page.setdefault("images", [])
         page.setdefault("fixtures", {"default": {}})
-        object_fields(page, {"name": str, "images": list, "fixtures": dict}, f"page {pid}")
-        string_list(page["images"], f"{pid}.images")
-        for name, fixture in page["fixtures"].items():
-            object_fields(fixture, {}, f"{pid}.fixtures.{name}")
-    for uid, node in design["elements"].items():
-        object_fields(node, {"type": str, "parent": (str, type(None))}, f"element {uid}")
+    for node in design["elements"].values():
         node.setdefault("mode", [])
         node.setdefault("data", [])
         node.setdefault("prop", {})
-        object_fields(node, {"mode": list, "data": list, "prop": dict}, uid)
-        string_list(node["mode"], f"{uid}.mode")
-        string_list(node["data"], f"{uid}.data")
-    for var, record in design["bindings"].items():
-        object_fields(record, {"dtype": str, "constraints": list, "source": str}, f"binding {var}")
-        if "initial" not in record:
-            raise ValueError(f"Invalid JSON shape: bindings.{var}.initial")
-        string_list(record["constraints"], f"{var}.constraints")
     for kind, expected in (("requirements", tree.requirements), ("steps", tree.steps)):
         for identity in expected:
             design[kind].setdefault(identity, [])
-        for identity, values in design[kind].items():
-            string_list(values, f"{kind}.{identity}")
+    return design
 
 
-def apply_proposal(design, proposal, rid, tree, images, retrieved, max_fixtures):
+def apply_proposal(design, proposal, rid, tree):
     """Replace supplied JSON records without retrieval, immutable-identity or UI-policy gates."""
-    object_fields(proposal, {"pages": dict, "elements": dict, "bindings": dict,
-        "requirement_ui": list, "step_ui": dict}, "UI proposal")
     updated = deepcopy(design)
     for kind in ("pages", "elements", "bindings"):
         updated[kind].update(deepcopy(proposal[kind]))
-    updated["requirements"][rid] = string_list(proposal["requirement_ui"], "requirement_ui")
+    updated["requirements"][rid] = proposal["requirement_ui"]
     updated["steps"].update(deepcopy(proposal["step_ui"]))
-    validate_design(updated, tree, images)
+    normalize_design(updated, tree)
     return updated

@@ -29,12 +29,11 @@ class RichArtifacts(unittest.TestCase):
         self.assertEqual(after, copy)
 
     def test_trigger_api_database_chain_uses_declared_relationships(self):
-        design = {"triggers": {"logout": {"source": "logout-button", "event": "click", "action": "end-session"}},
-            "events": {"end-session": {"actions": [{"kind": "api", "api": "logoutApi"}]}},
+        design = {"triggers": {"logout": {"source": "logout-button", "event": "click", "action": [{"kind": "api", "api": "logoutApi"}]}},
             "requirements": {"REQ-4": ["logout"]}}
         backend = {"backend_apis": {"apis": {"logoutApi": {"read": ["Session.id"], "write": ["Session.active"]}}}}
-        result = self.render("ui_interactions", design, context=backend)
-        for label in ("REQ-4", "logout-button", "click", "end-session", "logoutApi", "Session.id", "Session.active"):
+        result = self.render("frontend_triggers", design, context=backend)
+        for label in ("REQ-4", "logout-button", "click", "logoutApi", "Session.id", "Session.active"):
             self.assertIn(label, result)
         self.assertNotIn("Account.password", result)
 

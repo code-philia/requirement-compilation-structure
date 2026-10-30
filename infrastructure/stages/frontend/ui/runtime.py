@@ -28,13 +28,20 @@ export function initialPageData(page: string, defaults: Record<string, unknown>)
   return fixture?.page === page ? { ...defaults, ...fixture.data } : defaults;
 }
 
+export function syncInput(target: EventTarget | null, bindings: Record<string, string[]>, update: (patch: Record<string, unknown>) => void) {
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+  const variables = bindings[target.getAttribute("data-testid") ?? ""] ?? [];
+  const value = target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value;
+  if (variables.length) update(Object.fromEntries(variables.map(name => [name, value])));
+}
+
 export interface UiApiRequest {
   params?: Record<string, unknown>; query?: Record<string, unknown>;
   body?: Record<string, unknown>; headers?: Record<string, string>;
   credentials?: RequestCredentials;
 }
 export interface UiApiResponse { status: number; body: unknown; headers: Record<string, string> }
-export interface UiEventContext {
+export interface UiTriggerContext {
   readonly data: Readonly<Record<string, unknown>>;
   readonly input: { value?: string; checked?: boolean; key?: string };
   readonly trigger: { id: string; source: string; event: string };
@@ -42,7 +49,7 @@ export interface UiEventContext {
   navigate(pageId: string): void;
   api(apiId: string, request?: UiApiRequest): Promise<UiApiResponse>;
 }
-export type UiEventHandler = (context: UiEventContext) => void | Promise<void>;
+export type UiTriggerHandler = (context: UiTriggerContext) => void | Promise<void>;
 '''
 
 PLAYWRIGHT_CONFIG = '''// Compiler-owned UI existence tests. No backend is started at this stage.
@@ -117,7 +124,7 @@ def prepare_frontend(output: Path) -> None:
 
 def sync_pages(output: Path, design: dict) -> None:
     """Regenerate the page registry from fixed Page exports."""
-    imports, routes = ['import { initialPageData } from "./ui-runtime";'], []
+    imports, routes = ['import { useState } from "react";', 'import { initialPageData, syncInput } from "./ui-runtime";'], []
     defaults = {var: binding["initial"] for var, binding in design["bindings"].items()}
     for number, (pid, page) in enumerate(design["pages"].items()):
         entry = implementation_entrypoint(output, "page", pid)
@@ -129,10 +136,11 @@ def sync_pages(output: Path, design: dict) -> None:
         else:
             body = '<main><h1>UI implementation pending</h1></main>'
         routes.append(f'    case {json.dumps(page["route"])}: {{\n'
-            f'      const data = initialPageData({json.dumps(pid)}, defaults);\n'
-            f'      return <div onSubmit={{event => event.preventDefault()}}>{body}</div>;\n    }}')
-    source = "// Compiler-owned routes and display data. No business triggers/events.\n" + "\n".join(imports)
+            f'      const data = initialPageData({json.dumps(pid)}, state);\n'
+            f'      return <div onSubmit={{event => event.preventDefault()}} onInputCapture={{event => syncInput(event.target, inputBindings, update)}} onChangeCapture={{event => syncInput(event.target, inputBindings, update)}}>{body}</div>;\n    }}')
+    source = "// Compiler-owned routes and display data. UI data bindings without business triggers.\n" + "\n".join(imports)
     source += "\n\nconst defaults: Record<string, unknown> = " + json.dumps(defaults, ensure_ascii=False, indent=2) + ";\n"
-    source += '\nexport function App() {\n  switch (window.location.pathname) {\n' + "\n".join(routes)
+    source += "\nconst inputBindings: Record<string, string[]> = " + json.dumps({uid: node["data"] for uid, node in design["elements"].items() if "user_write" in node.get("mode", []) and node.get("data")}) + ";\n"
+    source += '\nexport function App() {\n  const [state, setState] = useState(defaults);\n  const update = (patch: Record<string, unknown>) => setState(current => ({ ...current, ...patch }));\n  switch (window.location.pathname) {\n' + "\n".join(routes)
     source += '\n    default: return <main><h1>Page not found</h1></main>;\n  }\n}\n'
     save_text(output / "frontend/src/App.tsx", source)

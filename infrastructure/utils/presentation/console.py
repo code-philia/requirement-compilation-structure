@@ -185,7 +185,7 @@ def show_dashboard(stage: str, artifacts: dict) -> None:
     number = stage.removeprefix("Stage ").split(" | ", 1)[0]
     passes = Text()
     names = {"00": "Init", "01": "Requirements", "02": "Schema", "03": "R/W", "04": "Review*",
-        "05": "SQL", "06": "APIs", "07": "P/Q", "08": "Backend TDD", "09": "UI",
+        "05": "SQL", "06": "APIs + P/Q", "07": "API review", "08": "Backend TDD", "09": "UI",
         "10": "UI TDD", "11": "Triggers", "12": "E2E"}
     for index, (key, name) in enumerate(names.items()):
         if index:

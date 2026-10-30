@@ -1,6 +1,6 @@
 """Small model contexts without reducing the compiler's implementation or test scope.
 
-Event creation sees one event. Requirement repair sees every required handler.
+Trigger creation sees one trigger. Requirement repair sees every required handler.
 Source dependencies and files named by failed checks are added as needed; tests
 remain read-only except for the current suite during test generation.
 """
@@ -11,13 +11,13 @@ import re
 
 from infrastructure.shared.agent.files import FileWorkspace, editable_sources, source_paths
 from infrastructure.shared.project.entrypoints import selected_path
-from infrastructure.stages.frontend.interactions.design import api_ids
+from infrastructure.stages.frontend.triggers.design import api_ids
 from infrastructure.utils.files import read_source
 
 RUNTIME = "frontend/src/ui-runtime.ts"
 
 
-class InteractionCheckFailure(ValueError):
+class TriggerCheckFailure(ValueError):
     """Keep full reports for logs while exposing structured, compact repair feedback."""
 
     def __init__(self, message, report):
@@ -26,51 +26,21 @@ class InteractionCheckFailure(ValueError):
         super().__init__(f"{message}: {report}")
 
 
-def model_context(context, event_ids=None):
-    """Select exact event contracts and semantic UI/data; omit visual layout and fixtures.
-
-    Requirement/test tasks retain all scenario elements and bindings. A single
-    event needs its trigger sources, declared writes, and variables mentioned in
-    its actions/contracts. API contracts are selected by actual event calls.
-    """
-    selected = set(context["events"]) if event_ids is None else set(event_ids)
-    events = {eid: context["events"][eid] for eid in sorted(selected)}
-    contracts = {eid: context["contracts"][eid] for eid in sorted(selected)}
-    triggers = {tid: trigger for tid, trigger in context["triggers"].items() if trigger["action"] in selected}
-    sources = {trigger["source"] for trigger in triggers.values()}
-    mentioned = json.dumps({"events": events, "contracts": contracts}, ensure_ascii=False)
-    pages = {}
-    for pid, subtree in context["page_subtrees"].items():
-        # A form-level trigger may describe its inputs collectively. Keep all
-        # descendant data rather than requiring exact variable names in prose.
-        source_elements = set(sources)
-        while True:
-            descendants = {uid for uid, element in subtree["elements"].items()
-                if element.get("parent") in source_elements}
-            if descendants.issubset(source_elements):
-                break
-            source_elements.update(descendants)
-        bindings = subtree["bindings"]
-        variables = set(bindings) if event_ids is None else {
-            var for var in bindings if var in mentioned or any(
-                var in element.get("data", []) for uid, element in subtree["elements"].items() if uid in source_elements)}
-        elements = {uid: {**element, "prop": {key: value for key, value in element.get("prop", {}).items()
-            if key not in {"style", "className"}}}
-            for uid, element in subtree["elements"].items()
-            if event_ids is None or uid in sources or variables.intersection(element.get("data", []))}
-        pages[pid] = {**{key: value for key, value in subtree.items()
-            if key in {"id", "name", "route", "root"}}, "elements": elements,
-            "bindings": {var: bindings[var] for var in sorted(variables)}}
-    called = {aid for event in events.values() for aid in api_ids(event)}
-    result = {"page_subtrees": pages, "triggers": triggers, "events": events, "contracts": contracts,
-        "target_event_ids": sorted(selected),
+def model_context(context, trigger_ids=None):
+    """Supply selected triggers, complete page data, API contracts and derived DB effects."""
+    selected = set(context["triggers"]) if trigger_ids is None else set(trigger_ids)
+    triggers = {tid: context["triggers"][tid] for tid in sorted(selected)}
+    called = {aid for trigger in triggers.values() for aid in api_ids(trigger)}
+    result = {"page_subtrees": context["page_subtrees"], "triggers": triggers,
+        "obligations": {tid: context["obligations"][tid] for tid in sorted(selected)},
+        "target_trigger_ids": sorted(selected),
         "backend_apis": {aid: context["backend_apis"][aid] for aid in sorted(called)}}
-    if event_ids is None:
+    if "requirement" in context:
         result["requirement"] = context["requirement"]
     return result
 
 
-class InteractionFiles:
+class TriggerFiles:
     """Select sources by semantic ownership, imports, and concrete failure feedback.
 
     The available-file catalogue is compiler-only. It is never sent wholesale to
@@ -120,14 +90,14 @@ class InteractionFiles:
                 if found:
                     pending.append(found)
 
-    def workspace(self, *, events=(), references=(), target=None, existing=None):
+    def workspace(self, *, triggers=(), references=(), target=None, existing=None):
         """Include all requested handlers; a missing new target retains model-selected naming."""
         self.sources.update(source_paths(self.output, "frontend/src"))
         self.editable.update(editable_sources(self.output, "frontend/src"))
         self.tests.update(source_paths(self.output, "frontend/tests"))
         workspace = (FileWorkspace.for_target(self.output, *target, existing=existing)
             if target else FileWorkspace(self.output, ()))
-        paths = self.paths("event", events)
+        paths = self.paths("trigger", triggers)
         # New handlers may have been created since this catalogue was built.
         self.sources.update(paths)
         self.editable.update(paths)

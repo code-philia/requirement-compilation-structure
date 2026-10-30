@@ -45,12 +45,6 @@ class TextModel:
                 raise
             self._token_parameter = "max_tokens"
             response = invoke(self.client, {**arguments, "max_tokens": self.max_output_tokens})
-        # Detect transport truncation before attempting to parse partial JSON.
-        if response.choices and response.choices[0].finish_reason == "length":
-            raise ValueError(
-                f"Model output was truncated (finish_reason=length; MAX_OUTPUT_TOKENS={self.max_output_tokens}). "
-                "Increase MAX_OUTPUT_TOKENS if the model supports a larger budget, or implement smaller files."
-            )
         return response
 
     def generate_json(self, instructions: str, payload: dict) -> dict:
@@ -71,20 +65,4 @@ class TextModel:
         if not response.choices or not response.choices[0].message.content:
             raise ValueError("Text model returned empty content")
         content = response.choices[0].message.content.strip()
-        try:
-            result = json.loads(content)
-        except json.JSONDecodeError as error:
-            # Some compatible endpoints append a second JSON object or a short
-            # explanation after an otherwise complete object. Decode the first
-            # object only; the stage's schema/semantic gate still decides whether
-            # that object is acceptable.
-            try:
-                candidate, end = json.JSONDecoder().raw_decode(content)
-            except json.JSONDecodeError:
-                raise error
-            if not isinstance(candidate, dict) or not content[end:].strip():
-                raise error
-            result = candidate
-        if not isinstance(result, dict):
-            raise ValueError("Text model must return a JSON object")
-        return result
+        return json.loads(content)

@@ -4,7 +4,6 @@ from pathlib import Path
 
 from infrastructure.utils.files import read_source, save_bytes, save_text
 from infrastructure.utils.paths import check_path_case, relative_path
-from infrastructure.shared.models.structure import object_fields
 from infrastructure.shared.project.entrypoints import FILE_ROOTS, remember_path, selected_path
 
 EXCLUDED = {"node_modules", ".git", ".arc", "dist", "build", "coverage", "__pycache__", ".venv"}
@@ -22,7 +21,7 @@ def editable_sources(output: Path, root: str) -> list[str]:
     """Allow source repairs across the layer while retaining compiler-owned wiring."""
     templates = Path(__file__).resolve().parents[1] / "project/templates"
     generated = {"backend/src/api/register.ts", "frontend/src/ui-runtime.ts",
-        "frontend/src/ui-api.ts", "frontend/src/ui-events.ts"}
+        "frontend/src/ui-api.ts", "frontend/src/ui-triggers.ts"}
     return [relative for relative in source_paths(output, root)
         if relative not in generated and not (templates / relative).is_file()
         and not relative.startswith("backend/src/db/")]
@@ -61,7 +60,7 @@ class FileWorkspace:
             if relative is not None and kind in {"api", "page", "backend_test", "e2e_test"}:
                 key = "test_path" if kind in {"backend_test", "e2e_test"} else "implementation_path"
                 result[key] = relative
-        for key, kind in (("implementation_paths", "event"), ("page_paths", "page")):
+        for key, kind in (("implementation_paths", "trigger"), ("page_paths", "page")):
             if isinstance(task.get(key), dict):
                 result[key] = {identity: selected_path(self.output, kind, identity) or relative
                     for identity, relative in task[key].items()}
@@ -100,11 +99,9 @@ class FileWorkspace:
 
     def apply(self, response: dict) -> None:
         """Validate the complete batch before writing; restore original bytes on write failure."""
-        object_fields(response, {"edits": list}, "file response")
         staged, originals = {}, {}
         created = None
         for number, edit in enumerate(response["edits"]):
-            object_fields(edit, {"path": str, "content": str}, "file edit")
             relative = edit["path"]
             target = self.path(relative)
             if relative == created:

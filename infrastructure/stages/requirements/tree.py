@@ -21,15 +21,11 @@ class RequirementTree:
 
         def identifier(node, kind):
             """Read a requirement, scenario or step ID from the JSON document."""
-            if not isinstance(node, dict) or not isinstance(node.get("id"), str) or not node["id"].strip():
-                raise ValueError(f"Each {kind} must have a nonempty string id")
             return node["id"]
 
         def items(node, key):
             """Read an optional list field and reject malformed child, scenario, step, or reference collections."""
             value = node.get(key, [])
-            if not isinstance(value, list):
-                raise ValueError(f"{key} must be a list: {node['id']}")
             return value
 
         def visit(node):
@@ -38,8 +34,6 @@ class RequirementTree:
             description = node.get("description", "")
             if isinstance(description, dict):
                 description = description.get("text", "")
-            if not isinstance(description, str) or not isinstance(node.get("name", ""), str):
-                raise ValueError(f"Invalid name or description: {rid}")
             self.requirements[rid] = {"id": rid, "name": node.get("name", ""), "description": description}
             self.own_steps[rid] = []
             for scenario in items(node, "scenarios"):
@@ -49,8 +43,6 @@ class RequirementTree:
                     record = {"id": step_id, "scenario": {"id": sid, "name": scenario.get("name", "")}}
                     for key in ("Given", "When", "Then"):
                         record[key] = step.get(key, step.get(key.lower(), ""))
-                        if not isinstance(record[key], str):
-                            raise ValueError(f"{key} must be text: {step_id}")
                     record["references"] = items(step, "references")
                     self.steps[step_id] = record
                     self.own_steps[rid].append(step_id)

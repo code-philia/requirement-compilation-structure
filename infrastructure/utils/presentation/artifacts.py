@@ -10,8 +10,8 @@ from rich.tree import Tree
 ARTIFACTS = {
     "requirements": "Requirements", "db_schema": "DB schema",
     "db_obligations": "DB obligations", "backend_apis": "Backend APIs",
-    "backend_contracts": "API contracts", "ui_design": "Frontend UI",
-    "ui_interactions": "Frontend interactions",
+    "ui_design": "Frontend UI",
+    "frontend_triggers": "Frontend triggers",
 }
 LIMIT = 36
 
@@ -56,8 +56,8 @@ def inventory(kind, data):
         return {f"{entity}.{field}": value for entity, record in data.get("entities", {}).items()
             for field, value in record.get("fields", {}).items()}
     keys = {"db_obligations": ("requirements", "steps"), "backend_apis": ("apis",),
-        "backend_contracts": ("apis",), "ui_design": ("pages", "elements", "bindings"),
-        "ui_interactions": ("triggers", "events", "contracts")}.get(kind, ())
+        "ui_design": ("pages", "elements", "bindings"),
+        "frontend_triggers": ("triggers",)}.get(kind, ())
     return {f"{registry}:{key}": value for registry in keys for key, value in data.get(registry, {}).items()}
 
 
@@ -109,7 +109,7 @@ def render_artifact(kind, data, previous=None, context=None):
         for rid, record in list(data.get("requirements", {}).items())[:LIMIT]:
             view.add_row(text(rid), text(joined(record.get("read", [])), 500), text(joined(record.get("write", [])), 500))
         views.append(view)
-    elif kind in {"backend_apis", "backend_contracts"}:
+    elif kind == "backend_apis":
         view = table("Δ", "API / HTTP / owners", "DB effects")
         for aid, api in list(data.get("apis", {}).items())[:LIMIT]:
             signature = api.get("signature", {})
@@ -118,7 +118,7 @@ def render_artifact(kind, data, previous=None, context=None):
             view.add_row(changed(old, "apis:" + aid, api), text(aid + "\n" + endpoint + "\n" + joined(owners)),
                 Text.assemble("READ  ", text(joined(api.get("read", []))), "\nWRITE ", text(joined(api.get("write", [])))))
         views.append(view)
-        if kind == "backend_contracts":
+        if any("precondition" in api for api in data.get("apis", {}).values()):
             contracts = table("API", "P · Preconditions", "Q · Postconditions")
             for aid, api in list(data.get("apis", {}).items())[:12]:
                 def conditions(key):
@@ -163,16 +163,14 @@ def render_artifact(kind, data, previous=None, context=None):
             bindings.add_row(text(name), text(record.get("dtype", "?")), text(record.get("source", "—")))
         if bindings.row_count:
             views.append(bindings)
-    elif kind == "ui_interactions":
-        root = Tree("UI trigger → event → API → DB fields", guide_style="cyan")
-        backend = (context or {}).get("backend_contracts", (context or {}).get("backend_apis", {})).get("apis", {})
+    elif kind == "frontend_triggers":
+        root = Tree("UI trigger → API → DB fields", guide_style="cyan")
+        backend = (context or {}).get("backend_apis", {}).get("apis", {})
         for tid, trigger in list(data.get("triggers", {}).items())[:LIMIT]:
             owners = [rid for rid, ids in data.get("requirements", {}).items() if tid in ids]
             branch = root.add(text(f"{tid} · {trigger.get('source')} / {trigger.get('event')} · {joined(owners)}"))
-            eid = trigger.get("action")
-            event = data.get("events", {}).get(eid, {})
-            node = branch.add(text(eid))
-            for action in event.get("actions", [])[:8]:
+            node = branch
+            for action in trigger.get("action", [])[:8]:
                 if action.get("kind") == "api":
                     aid = action.get("api")
                     api = backend.get(aid, {})
@@ -180,12 +178,12 @@ def render_artifact(kind, data, previous=None, context=None):
                     if api:
                         api_node.add(text("READ  " + joined(api.get("read", []))))
                         api_node.add(text("WRITE " + joined(api.get("write", []))))
-                elif action.get("kind") == "navigate":
-                    node.add(text("Navigate → " + str(action.get("page"))))
+                elif action.get("kind") == "ui":
+                    node.add(text("UI → " + str(action.get("ui")) + " · " + str(action.get("description", ""))))
                 else:
                     node.add(text(f"{action.get('kind', '')} · {action.get('description', '')}"))
-            if event.get("write"):
-                node.add(text("Frontend writes → " + joined(event["write"])))
+            if trigger.get("write"):
+                node.add(text("Frontend writes → " + joined(trigger["write"])))
         views.append(root)
     else:
         view = table("Field", "Value")
@@ -202,7 +200,7 @@ def proposal_kind(data):
     if not isinstance(data, dict):
         return None
     for key, kind in (("entities", "db_schema"), ("apis", "backend_apis"), ("pages", "ui_design"),
-            ("triggers", "ui_interactions"), ("children", "requirements")):
+            ("triggers", "frontend_triggers"), ("children", "requirements")):
         if key in data:
             return kind
     return None

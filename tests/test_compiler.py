@@ -11,7 +11,6 @@ import sys
 from unittest.mock import patch
 
 import main
-import run_all
 from infrastructure.compiler import Compiler
 from infrastructure.utils.presentation.logging import session_info
 
@@ -23,13 +22,13 @@ PASSES = [
     ("03_infer_db_obligations", "infer_db_obligations"),
     ("04_check_db_obligations", "check_db_obligations"),
     ("05_implement_db", "implement_db"),
-    ("06_decompose_backend_apis", "decompose_backend_apis"),
-    ("07_infer_api_contracts", "infer_api_contracts"),
+    ("06_design_backend_apis", "design_backend_apis"),
+    ("07_check_backend_apis", "check_backend_apis"),
     ("08_implement_backend_tdd", "implement_backend_tdd"),
     ("09_design_ui", "design_frontend_ui"),
     ("10_implement_ui", "implement_frontend_ui"),
-    ("11_design_ui_interactions", "design_ui_interactions"),
-    ("12_implement_frontend_tdd", "implement_frontend_interactions"),
+    ("11_design_frontend_triggers", "design_frontend_triggers"),
+    ("12_implement_frontend_tdd", "implement_frontend_triggers"),
 ]
 
 
@@ -112,8 +111,7 @@ class CompilerPipeline(unittest.TestCase):
             proposals = {
                 '02_build_db_schema': {'entities': {}, 'related_fields': []},
                 '03_infer_db_obligations': {'requirement': {'read': [], 'write': []}, 'steps': {}},
-                '06_decompose_backend_apis': {'apis': {}, 'requirement_apis': []},
-                '07_infer_api_contracts': {},
+                '06_design_backend_apis': {'apis': {}, 'requirement_apis': []},
                 '09_design_ui': {'pages': {}, 'elements': {}, 'bindings': {}, 'requirement_ui': [], 'step_ui': {}},
             }
             with ExitStack() as stack, redirect_stdout(StringIO()):
@@ -128,8 +126,8 @@ class CompilerPipeline(unittest.TestCase):
             self.assertEqual(sum(model.return_value.generate_json.call_count for model in models), 4)
             self.assertEqual(compiler.artifacts['backend_checks']['status'], 'NO_APIS')
             self.assertEqual(compiler.artifacts['frontend_e2e']['status'], 'NO_UI')
-            for name in ('requirements', 'db_schema', 'db_obligations', 'backend_apis', 'backend_contracts',
-                    'backend_tdd', 'ui_design', 'ui_checks', 'ui_interactions', 'frontend_e2e'):
+            for name in ('requirements', 'db_schema', 'db_obligations', 'backend_apis',
+                    'backend_tdd', 'ui_design', 'ui_checks', 'frontend_triggers', 'frontend_e2e'):
                 self.assertTrue((compiler.arc_dir / (name + '.json')).is_file(), name)
             self.assertIsNone(compiler.current_stage)
 
@@ -154,7 +152,6 @@ class CompilerCLI(unittest.TestCase):
             args = main.parse_args(['--input', str(source), '--output', str(output)])
             self.assertFalse(args.model_log)
             self.assertTrue(main.parse_args(['--input', str(source), '--output', str(output), '--debug-model-io']).model_log)
-            self.assertIs(run_all.main, main.main)
 
     def test_invalid_locations_fail_before_creating_compiler_or_output(self):
         with TemporaryDirectory() as temporary:

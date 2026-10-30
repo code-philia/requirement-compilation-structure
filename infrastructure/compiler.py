@@ -26,10 +26,10 @@ class Compiler:
             return getattr(import_module(module), function)(*arguments)
 
     def compile(self) -> Path:
-        """Execute passes 00–12 in order and return the generated application directory."""
+        """Execute the 13 compilation passes in order and return the generated application directory."""
         self.artifacts.clear()
         show_panel("Requirement compiler | Pipeline",
-            f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: 00–12\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
+            f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: 13\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
         self.artifacts["project_files"] = self._run(
             "00_project_initialization", "project_initialization", self.output_dir)
         self.artifacts["requirements"] = self._run(
@@ -43,19 +43,19 @@ class Compiler:
         self.artifacts["db_implementations"] = self._run(
             "05_implement_db", "implement_db", self.arc_dir)
         self.artifacts["backend_apis"] = self._run(
-            "06_decompose_backend_apis", "decompose_backend_apis", self.arc_dir)
-        self.artifacts["backend_contracts"] = self._run(
-            "07_infer_api_contracts", "infer_api_contracts", self.arc_dir)
+            "06_design_backend_apis", "design_backend_apis", self.arc_dir)
+        self.artifacts["backend_apis"] = self._run(
+            "07_check_backend_apis", "check_backend_apis", self.arc_dir)
         self.artifacts["backend_checks"] = self._run(
             "08_implement_backend_tdd", "implement_backend_tdd", self.arc_dir)
         self.artifacts["ui_design"] = self._run(
             "09_design_ui", "design_frontend_ui", self.input_dir, self.arc_dir)
         self.artifacts["ui_checks"] = self._run(
             "10_implement_ui", "implement_frontend_ui", self.input_dir, self.arc_dir)
-        self.artifacts["ui_interactions"] = self._run(
-            "11_design_ui_interactions", "design_ui_interactions", self.input_dir, self.arc_dir)
+        self.artifacts["frontend_triggers"] = self._run(
+            "11_design_frontend_triggers", "design_frontend_triggers", self.input_dir, self.arc_dir)
         self.artifacts["frontend_e2e"] = self._run(
-            "12_implement_frontend_tdd", "implement_frontend_interactions", self.input_dir, self.arc_dir)
+            "12_implement_frontend_tdd", "implement_frontend_triggers", self.input_dir, self.arc_dir)
         self.current_stage = None
         show_panel("[DONE] Requirement compilation completed", f"Application: {self.output_dir}", tone="success")
         return self.output_dir

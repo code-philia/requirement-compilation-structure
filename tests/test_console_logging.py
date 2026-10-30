@@ -109,7 +109,7 @@ class ConsoleLogging(unittest.TestCase):
         model = self.model(handler)
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with patch("sys.argv", ["07_infer_api_contracts.py"]), redirect_stdout(StringIO()), console_log(root, debug_model_io=True):
+            with patch("sys.argv", ["06_design_backend_apis.py"]), redirect_stdout(StringIO()), console_log(root, debug_model_io=True):
                 self.assertEqual(model.generate_json("Generate.\nKeep line breaks.", {}), {"ok": True})
             records = [json.loads(line) for line in (root / "model_calls.jsonl").read_text().splitlines()]
             directory = root / ".arc" / "model_logs"
@@ -121,7 +121,7 @@ class ConsoleLogging(unittest.TestCase):
             for index, (request_record, response_record) in enumerate(zip(request_records, response_records)):
                 call_id = request_record["call_id"]
                 attempt = 1 + sum(record["call_id"] == call_id for record in request_records[:index])
-                input_file = next(directory.glob(f"07.*.{call_id[:8]}.{attempt}.model.input"))
+                input_file = next(directory.glob(f"06.*.{call_id[:8]}.{attempt}.model.input"))
                 output_file = input_file.with_name(input_file.name.removesuffix(".input") + ".ouput")
                 self.assertEqual(input_file.read_text(), "Generate.\nKeep line breaks.\nReturn exactly one JSON object without Markdown.\n\n{}")
                 body = json.loads(response_record["body"])
@@ -167,7 +167,7 @@ class ConsoleLogging(unittest.TestCase):
         terminal = StringIO()
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with redirect_stdout(terminal), console_log(root, model_log=False, stage="07_infer_api_contracts.py"):
+            with redirect_stdout(terminal), console_log(root, model_log=False, stage="06_design_backend_apis.py"):
                 result = model.generate_json("PRIVATE-MODEL-PROMPT", {"task": "private"})
             self.assertEqual(result, {"secret": marker})
             logged = (root / "compiler.log").read_text()
@@ -177,7 +177,7 @@ class ConsoleLogging(unittest.TestCase):
             self.assertFalse((root / ".arc" / "model_logs").exists())
         self.assertRegex(terminal.getvalue(), r"Input\s+│ 10")
         self.assertIn("Round-trip latency", terminal.getvalue())
-        self.assertIn("Stage 07", terminal.getvalue())
+        self.assertIn("Stage 06", terminal.getvalue())
 
     def test_missing_usage_has_no_local_estimate(self):
         summary = _usage_summary({})

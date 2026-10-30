@@ -37,7 +37,7 @@ def existence_suite(design: dict, pid: str) -> str:
     page = design["pages"][pid]
     elements = page_elements(design, pid)
     defaults = {var: binding["initial"] for var, binding in design["bindings"].items()}
-    lines = ['// Compiler-owned existence assertions, generated from the validated UI/data design.',
+    lines = ['// Compiler-owned existence assertions, generated from the UI/data design.',
         'import { test, expect } from "@playwright/test";', '']
     for name, fixture in page["fixtures"].items():
         values = defaults | fixture

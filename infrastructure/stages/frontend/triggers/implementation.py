@@ -1,7 +1,7 @@
-"""Step 12 orchestration: scenario test generation -> event repair -> regression.
+"""Step 12 orchestration: scenario test generation -> trigger repair -> regression.
 
 For each leaf requirement, one agent generates key E2E cases and another repairs
-the event implementation. Complete that requirement before advancing; include
+the trigger implementation. Complete that requirement before advancing; include
 accepted scenarios and UI presence tests in regression checks."""
 
 import json
@@ -9,34 +9,32 @@ import json
 from infrastructure.shared.agent.files import source_paths
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.project.entrypoints import selected_path
-from infrastructure.stages.frontend.interactions.e2e_runtime import FIXTURE, prepare_e2e
-from infrastructure.stages.frontend.interactions.testing import E2EChecks, require_behavioral_red, test_path
-from infrastructure.stages.frontend.interactions.runtime import sync_interactions
+from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare_e2e
+from infrastructure.stages.frontend.triggers.testing import E2EChecks, require_behavioral_red, test_path
+from infrastructure.stages.frontend.triggers.runtime import sync_triggers
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
-from infrastructure.stages.frontend.interactions.design import api_ids, event_ids, relevant_pages
-from infrastructure.stages.frontend.interactions.scope import InteractionCheckFailure, InteractionFiles, model_context
+from infrastructure.stages.frontend.triggers.design import api_ids, trigger_obligations, relevant_pages
+from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, TriggerFiles, model_context
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
 
 
-def scenario_context(ui, interactions, rid):
-    """Include current pages and reachable navigation pages, with each interaction exactly once."""
+def scenario_context(ui, design, rid):
+    """Include the requirement's triggers and navigation destination lifecycle triggers."""
     pages = set(relevant_pages(ui, rid))
     while True:
         elements = {uid for pid in pages for uid in page_elements(ui, pid)}
-        tids = set(interactions["requirements"].get(rid, [])) | {
-            tid for tid, trigger in interactions["triggers"].items() if trigger["source"] in elements}
-        eids = event_ids(interactions, tids)
-        destinations = {action["page"] for eid in eids for action in interactions["events"][eid]["actions"] if action["kind"] == "navigate" and action["page"] in ui["pages"]}
+        tids = set(design["requirements"].get(rid, [])) | {
+            tid for tid, trigger in design["triggers"].items() if trigger["source"] in elements}
+        targets = {action.get("ui") for tid in tids for action in design["triggers"][tid]["action"] if action["kind"] == "ui"}
+        destinations = {pid for pid, page in ui["pages"].items() if page["root"] in targets}
         hrefs = {ui["elements"][uid]["prop"].get("href") for uid in elements}
         destinations.update(pid for pid, page in ui["pages"].items() if page["route"] in hrefs)
         if destinations.issubset(pages):
             return {"page_subtrees": {pid: page_context(ui, pid) for pid in sorted(pages)},
-                "triggers": {tid: interactions["triggers"][tid] for tid in sorted(tids)},
-                "events": {eid: interactions["events"][eid] for eid in sorted(eids)},
-                "contracts": {eid: interactions["contracts"][eid] for eid in sorted(eids)}}
+                "triggers": {tid: design["triggers"][tid] for tid in sorted(tids)}}
         pages.update(destinations)
 
 
@@ -75,7 +73,7 @@ For alerts, assert the declared message with toHaveText/toContainText rather tha
 asserting that an always-mounted alert element is visible.
 Do not assume UUIDs, hashes, timestamps or exact wording not specified by contracts.
 Use expect assertions on UI results before inspecting network observations. Missing
-interactions must fail by assertion, not by an unbounded waitForResponse or a test timeout.
+design must fail by assertion, not by an unbounded waitForResponse or a test timeout.
 Use Playwright's retrying assertions for every asynchronous UI result: toHaveText,
 toContainText, toHaveValue, toBeChecked, toHaveURL, and locator state assertions.
 Never use textContent(), innerHTML(), waitForTimeout(), or a synchronous length check
@@ -90,7 +88,7 @@ The current test and supplied writable frontend sources are editable. Failed che
 automatically supply the affected source files and their local dependencies. If compilation
 or execution fails in an existing page or handler, repair that source directly rather
 than repeatedly rewriting an unrelated test. Write tests first; do not implement new
-event handlers before their tests. Preserve existing behavior, UI IDs, contracts and
+trigger implementations before their tests. Preserve existing behavior, UI IDs, contracts and
 already accepted scenarios. Read-only source files and other tests remain references.
 Do not redeclare compiler-owned runtime types inside page or test modules.
 The compiler owns fixtures, app startup,
@@ -99,31 +97,32 @@ and executable scenarios against the current application. Assertion RED is accep
 invalid locators, fixture/runtime errors, and timeouts need test repair, not skipped tests.
 '''
 
-IMPLEMENT_INSTRUCTIONS = '''Implement the current requirement's designed UI interactions against frozen E2E tests.
-Use only the supplied UI/data, trigger/event actions, contracts and canonical backend APIs.
-During creation, the context describes one event. During requirement repair it describes
-all required events, including destination-page lifecycle behavior. Preserve other handlers' behavior.
+IMPLEMENT_INSTRUCTIONS = '''Implement the current requirement's designed UI design against E2E tests.
+Use the supplied requirement, UI/data, trigger guards, frontend read/write sets and ordered actions, plus canonical backend APIs.
+During creation, the context describes one trigger. During requirement repair it describes
+all required triggers, including destination-page lifecycle behavior. Preserve other handlers' behavior.
 Use supplied implementation_paths and page IDs. When task.new_file is supplied,
 choose a source path for that target and create it in the first edit. Other missing
 handlers are implemented in subsequent calls; do not create their files in this call.
 The compiler captures DOM click/change/input/submit/keyboard events and page mount, owns
-central frontend data, and imports each event's fixed handle export.
-Export handle with signature (context: UiEventContext) => void | Promise<void>,
-importing its type from ui-runtime. Use one source file per event.
-The compiler owns App.tsx, ui-runtime.ts, ui-events.ts, ui-api.ts and routing.
+central frontend data, and imports each trigger's fixed handle export.
+Export handle with signature (context: UiTriggerContext) => void | Promise<void>,
+importing its type from ui-runtime. Use one source file per trigger.
+The compiler owns App.tsx, ui-runtime.ts, ui-triggers.ts, ui-api.ts and routing.
 Return complete file contents in edits; the compiler remembers the selected path and registers it.
-UiEventContext provides:
+UiTriggerContext provides:
 - data: latest readonly frontend variable values, keyed by the designed var strings;
 - input: native value (string), checked (boolean), key (string) as appropriate;
 - trigger: id/source/event, so shared handlers can implement their enabling rules;
-- update({var:value,...}): update only the event's declared frontend writes;
+- update({var:value,...}): update only the trigger's frontend data;
 - api(apiId,{params,query,body,headers,credentials}): real canonical HTTP call returning
   {status,body:unknown,headers}. Follow action descriptions and fixed API schemas; use same-origin/include
   credentials; browser cookies are automatic, never manually read or stored;
-- navigate(pageId): navigate to the event's declared target page.
-Implement semantic P, ordered actions, local validation, value transformations, status/error
-branches, frontend Q and navigation. Read native changes from input and persist them
-with update. Convert number inputs explicitly. Do not normalize exact-match usernames.
+- navigate(pageId): navigate to the target page.
+Implement the guard, ordered actions, value transformations, status/error branches
+and navigation. UI input values are synchronized before business triggers run.
+The derived DB obligations describe API effects; connect UI data to API requests
+and API responses to UI data in ordinary code. Convert number inputs explicitly. Do not normalize exact-match usernames.
 Do not store plaintext credentials or session tokens outside transient designed data.
 All API access must use context.api, not alternate endpoints, direct DB access or fake
 responses. Preserve failure-without-writes and existing state. Do not swallow errors or
@@ -136,22 +135,21 @@ Frozen backend, SQL, designs, fixtures, tests and compiler infrastructure cannot
 Creation checks compilation; a separate requirement repair phase runs all behavior checks.
 Failed checks automatically supply affected sources and their local imports for repair.
 Inspect automatic browser/DB check feedback and iterate until current AND previously
-accepted requirements and all UI existence tests pass. Missing required implementation files
-still prevent acceptance even if an inadequate current implementation appears to pass.
+accepted requirements and all UI existence tests pass. 
 '''
 
 
-def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images, contexts,
+def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts,
         model, console, report, max_turns=18, max_tests=5):
-    """Implement interactions one requirement at a time through real-app E2E TDD.
+    """Implement design one requirement at a time through real-app E2E TDD.
 
     Prepare dependencies/runtime, generate and freeze key scenario tests, then
-    activate and repair the current event handlers before advancing. Regress
+    activate and repair the current trigger implementations before advancing. Regress
     accepted E2E/UI tests, build the app, and update the caller's report."""
     output = arc_dir.parent.resolve()
     prepare_frontend(output)
     prepare_e2e(output, backend)
-    sync_interactions(output, ui, interactions, backend, [])
+    sync_triggers(output, ui, design, backend, [])
     console.show("E2E preparation | Dependencies", "Install workspace dependencies and Chromium. Each browser run owns a new real test database; production data is not used.")
     install_dependencies(output)
     checks, ui_checks = E2EChecks(output, max_tests), FrontendChecks(output)
@@ -160,33 +158,33 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
     baseline = ui_checks.tests(ui_files)
     require_green(baseline)
     accepted, implemented = [], set()
-    selection = InteractionFiles(output, ui)
+    selection = TriggerFiles(output, ui)
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "frontend_e2e.json", report)
     for number, rid in enumerate(tree.leaves, 1):
-        tids = interactions["requirements"][rid]
-        eids = event_ids(interactions, tids)
+        tids = set(design["requirements"][rid])
         steps = tree.own_steps[rid]
         label = f"E2E requirement {number}/{len(tree.leaves)} {rid}"
-        context = scenario_context(ui, interactions, rid)
+        context = scenario_context(ui, design, rid)
         pages = context["page_subtrees"]
-        if not pages and not eids:
-            report["requirements"][rid] = {"status": "NO_INTERACTIONS", "events": []}
+        if not pages and not tids:
+            report["requirements"][rid] = {"status": "NO_TRIGGERS", "triggers": []}
             save_json(arc_dir / "frontend_e2e.json", report)
             continue
-        context_eids = set(context["events"])
-        targets = eids | (context_eids - implemented)
-        active = implemented | context_eids
+        context_tids = set(context["triggers"])
+        targets = tids | (context_tids - implemented)
+        active = implemented | context_tids
         relative = test_path(rid, output)
-        called = {aid for event in context["events"].values() for aid in api_ids(event)}
-        context.update({"requirement": contexts[rid], "target_event_ids": sorted(targets),
+        called = {aid for trigger in context["triggers"].values() for aid in api_ids(trigger)}
+        context["obligations"] = {tid: trigger_obligations(trigger, backend) for tid, trigger in context["triggers"].items()}
+        context.update({"requirement": contexts[rid], "target_trigger_ids": sorted(targets),
             "backend_apis": {aid: backend["apis"][aid] for aid in sorted(called)}})
         console.show(label + " | Scenario context", json.dumps(context, ensure_ascii=False, indent=2))
-        report["requirements"][rid] = {"status": "GENERATING_TESTS", "events": sorted(eids),
-            "target_events": sorted(targets), "test_path": relative}
+        report["requirements"][rid] = {"status": "GENERATING_TESTS", "triggers": sorted(tids),
+            "target_triggers": sorted(targets), "test_path": relative}
         save_json(arc_dir / "frontend_e2e.json", report)
         regression_files = [test_path(key, output) for key in [*accepted, rid]]
-        sync_interactions(output, ui, interactions, backend, active)
+        sync_triggers(output, ui, design, backend, active)
 
         def generation_checks():
             """Typecheck selected tests; test_gate also runs the real application."""
@@ -204,7 +202,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             try:
                 status = test_run_status(behavior)
             except ValueError as error:
-                raise InteractionCheckFailure("Repair invalid E2E tests or affected application sources", behavior) from error
+                raise TriggerCheckFailure("Repair invalid E2E tests or affected application sources", behavior) from error
             return {"typecheck": compiled, "behavior": behavior, "status": status}
 
         test_context = {**model_context(context), "schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
@@ -219,7 +217,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
 
         def implementation_checks():
             """Refresh registrations and execute actual compilation, E2E and UI regressions."""
-            sync_interactions(output, ui, interactions, backend, active)
+            sync_triggers(output, ui, design, backend, active)
             compiled = checks.typecheck([*regression_files, *ui_files])
             if compiled["returncode"]:
                 return {"typecheck": compiled, "e2e": None, "ui": None}
@@ -228,11 +226,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             return {"typecheck": compiled, "e2e": tested, "ui": presence}
 
         def implementation_gate():
-            """Accept current event handlers only after compilation and all required browser regressions pass."""
-            missing_paths = [eid for eid in sorted(targets)
-                if not (path := selected_path(output, "event", eid)) or not (output / path).is_file()]
-            if missing_paths:
-                raise ValueError(f"Missing required event implementations: {missing_paths}")
+            """Accept current trigger implementations only after compilation and all required browser regressions pass."""
             result = implementation_checks()
             for kind in ("typecheck",):
                 if result[kind] and result[kind]["returncode"]:
@@ -241,14 +235,14 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
                 require_green(result["e2e"])
                 require_green(result["ui"])
             except ValueError as error:
-                raise InteractionCheckFailure("Requirement behavior or UI regression failed", result) from error
+                raise TriggerCheckFailure("Requirement behavior or UI regression failed", result) from error
             return result
 
         current = implementation_checks()
         report["requirements"][rid]["status"] = test_run_status(current["e2e"]) if current["e2e"] is not None else "REPAIR_REQUIRED"
         save_json(arc_dir / "frontend_e2e.json", report)
-        missing = [eid for eid in sorted(targets)
-            if not (path := selected_path(output, "event", eid)) or not (output / path).is_file()]
+        missing = [tid for tid in sorted(targets)
+            if not (path := selected_path(output, "trigger", tid)) or not (output / path).is_file()]
         if not missing and current["e2e"] and current["e2e"]["returncode"] == 0 and current["ui"] and current["ui"]["returncode"] == 0:
             require_green(current["e2e"])
             require_green(current["ui"])
@@ -256,21 +250,21 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
         else:
             total_turns = 0
             # Keep the complete target set, including cross-page dependencies.
-            # Each creation request sees only its own event and actual imports.
-            for new_event in missing:
-                task = {**model_context(context, {new_event}),
-                    "implementation_paths": {new_event: selected_path(output, "event", new_event)}}
-                workspace = selection.workspace(target=("event", new_event))
+            # Each creation request sees only its own trigger and actual imports.
+            for new_trigger in missing:
+                task = {**model_context(context, {new_trigger}),
+                    "implementation_paths": {new_trigger: selected_path(output, "trigger", new_trigger)}}
+                workspace = selection.workspace(target=("trigger", new_trigger))
 
                 def creation_gate():
-                    sync_interactions(output, ui, interactions, backend, active)
+                    sync_triggers(output, ui, design, backend, active)
                     compiled = checks.typecheck([*regression_files, *ui_files])
                     if compiled["returncode"]:
                         raise ValueError(compiled["output"])
                     return {"typecheck": compiled}
 
                 agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
-                    creation_gate, max_turns, console, label + f" / Create {new_event}",
+                    creation_gate, max_turns, console, label + f" / Create {new_trigger}",
                     feedback_filter=lambda value: selection.feedback(workspace, value))
                 total_turns += agent["turns"]
 
@@ -281,8 +275,8 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
             except ValueError as error:
                 console.show(label + " | Requirement repair", str(error))
                 task = {**model_context(context),
-                    "implementation_paths": {eid: selected_path(output, "event", eid) for eid in sorted(targets)}}
-                workspace = selection.workspace(events=context_eids, references=[relative])
+                    "implementation_paths": {tid: selected_path(output, "trigger", tid) for tid in sorted(targets)}}
+                workspace = selection.workspace(triggers=context_tids, references=[relative])
                 agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
                     implementation_gate, max_turns, console, label + " / Interaction Implementation",
                     feedback=getattr(error, "feedback", {"error": str(error)}),
@@ -290,14 +284,14 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
                 total_turns += agent["turns"]
             agent["turns"] = total_turns
         accepted.append(rid)
-        reused = eids & implemented
+        reused = tids & implemented
         implemented.update(targets)
         result = agent["checks"]["e2e"]
         report["requirements"][rid].update({"status": "GREEN", "implementation_turns": agent["turns"],
-            "steps": list(steps), "passed": result["passed"], "reused_events": sorted(reused)})
+            "steps": list(steps), "passed": result["passed"], "reused_triggers": sorted(reused)})
         save_json(arc_dir / "frontend_e2e.json", report)
         console.show(label + " | GREEN", result["output"])
-    sync_interactions(output, ui, interactions, backend, implemented)
+    sync_triggers(output, ui, design, backend, implemented)
     console.show("Final frontend verification", "Run every generated E2E scenario and UI existence suite, then build the full application.")
     final = checks.tests([test_path(rid, output) for rid in accepted]) if accepted else None
     if final is not None:
@@ -307,7 +301,7 @@ def run_interaction_tdd(arc_dir, tree, schema, backend, ui, interactions, images
     built = checks.build()
     if built["returncode"]:
         raise ValueError(built["output"])
-    report.update({"status": "GREEN", "summary": {"requirements": len(accepted), "events": len(implemented),
+    report.update({"status": "GREEN", "summary": {"requirements": len(accepted), "triggers": len(implemented),
         "e2e_tests": final["passed"] if final else 0, "ui_tests": presence["passed"], "failed": 0}})
     save_json(arc_dir / "frontend_e2e.json", report)
     return report

@@ -1,8 +1,8 @@
-"""Step 12 lowering: bind DOM triggers to model-selected event functions.
+"""Step 12 lowering: bind each DOM trigger to its implementation.
 
 Compiler-owned TypeScript strings provide UI state, guarded API calls, navigation,
-and event registration. The model implements each event's business logic; the
-compiler activates only the events accepted or currently being implemented."""
+and event registration. The model implements each trigger's business logic; the
+compiler activates only the triggers accepted or currently being implemented."""
 
 import json
 
@@ -10,7 +10,7 @@ from infrastructure.stages.frontend.ui.runtime import UI_RUNTIME
 from infrastructure.shared.project.entrypoints import import_path, implementation_entrypoint
 from infrastructure.utils.files import save_text
 
-EVENT_REGISTRY = "frontend/src/ui-events.ts"
+TRIGGER_REGISTRY = "frontend/src/ui-triggers.ts"
 API_CLIENT = "frontend/src/ui-api.ts"
 
 CLIENT_SOURCE = '''
@@ -63,11 +63,11 @@ export function App() {
     window.history.pushState({}, "", page.route);
     setNavigation(value => value + 1);
   };
-  const invoke = async (trigger: Trigger, input: UiEventContext["input"]) => {
-    const handler = handlers[trigger.action];
+  const invoke = async (trigger: Trigger, input: UiTriggerContext["input"]) => {
+    const handler = handlers[trigger.id];
     if (!handler) return;
     let started = epoch.current;
-    const context: UiEventContext = {
+    const context: UiTriggerContext = {
       get data() { return live.current; }, input,
       trigger: { id: trigger.id, source: trigger.source, event: trigger.event },
       update: patch => {
@@ -84,6 +84,7 @@ export function App() {
   };
   const report = (error: unknown) => { setTimeout(() => { throw error; }, 0); };
   const capture = (kind: string, event: SyntheticEvent) => {
+    if (!fixture && (kind === "input" || kind === "change")) syncInput(event.target, inputBindings, update);
     if (kind === "submit") event.preventDefault();
     if (fixture) return;
     let target = event.target instanceof Element ? event.target : null;
@@ -97,11 +98,8 @@ export function App() {
     if (matches.length && ["click", "submit", "keydown"].includes(kind)) event.preventDefault();
     const control = event.target as HTMLInputElement;
     const input = { value: control.value, checked: control.checked, key: (event as KeyboardEvent).key };
-    const called = new Set<string>();
     void (async () => {
       for (const trigger of matches) {
-        if (called.has(trigger.action)) continue;
-        called.add(trigger.action);
         await invoke(trigger, input);
       }
     })().catch(report);
@@ -130,27 +128,27 @@ export function App() {
 '''
 
 
-def sync_interactions(output, ui, interactions, backend, active_events):
+def sync_triggers(output, ui, design, backend, active_triggers):
     """Import fixed handle exports directly; placeholders never touch their source."""
-    active = set(active_events)
-    active.intersection_update(interactions["events"])
+    active = set(active_triggers)
+    active.intersection_update(design["triggers"])
     save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
     client = 'import type { UiApiRequest, UiApiResponse } from "./ui-runtime";\n'
     client += "const catalog: Record<string, { method: string; path: string }> = " + json.dumps({aid: {"method": api["signature"]["method"], "path": api["signature"]["path"]} for aid, api in backend["apis"].items()}) + ";\n"
     save_text(output / API_CLIENT, client + CLIENT_SOURCE)
-    imports = ['import type { UiEventHandler } from "./ui-runtime";']
+    imports = ['import type { UiTriggerHandler } from "./ui-runtime";']
     registrations = []
-    for number, eid in enumerate(sorted(active)):
-        entry = implementation_entrypoint(output, "event", eid)
+    for number, tid in enumerate(sorted(active)):
+        entry = implementation_entrypoint(output, "trigger", tid)
         if entry:
-            imported = import_path(EVENT_REGISTRY, entry["path"], extension="")
-            imports.append(f'import {{ {entry["export"]} as event{number} }} from {json.dumps(imported)};')
-            registrations.append(f"  {json.dumps(eid)}: event{number},")
-    save_text(output / EVENT_REGISTRY, "\n".join([*imports, "", "export const handlers: Record<string, UiEventHandler> = {", *registrations, "};", ""]))
+            imported = import_path(TRIGGER_REGISTRY, entry["path"], extension="")
+            imports.append(f'import {{ {entry["export"]} as trigger{number} }} from {json.dumps(imported)};')
+            registrations.append(f"  {json.dumps(tid)}: trigger{number},")
+    save_text(output / TRIGGER_REGISTRY, "\n".join([*imports, "", "export const handlers: Record<string, UiTriggerHandler> = {", *registrations, "};", ""]))
     imports = ['import { useEffect, useRef, useState } from "react";',
         'import type { ComponentType, SyntheticEvent, KeyboardEvent } from "react";',
-        'import type { UiPageProps, UiEventContext } from "./ui-runtime";',
-        'import { initialPageData } from "./ui-runtime";', 'import { callApi } from "./ui-api";', 'import { handlers } from "./ui-events";']
+        'import type { UiPageProps, UiTriggerContext } from "./ui-runtime";',
+        'import { initialPageData, syncInput } from "./ui-runtime";', 'import { callApi } from "./ui-api";', 'import { handlers } from "./ui-triggers";']
     pages, components = [], []
     for number, (pid, page) in enumerate(ui["pages"].items()):
         entry = implementation_entrypoint(output, "page", pid)
@@ -159,11 +157,12 @@ def sync_interactions(output, ui, interactions, backend, active_events):
         imports.append(f'import {{ {entry["export"]} as Page{number} }} from {json.dumps(import_path("frontend/src/App.tsx", entry["path"], extension=""))};')
         pages.append({"id": pid, "route": page["route"], "root": page["root"]})
         components.append(f"{json.dumps(pid)}: Page{number}")
-    triggers = [{"id": tid, **{key: trigger[key] for key in ("source", "event", "action")}}
-        for tid, trigger in interactions["triggers"].items() if trigger["action"] in active]
+    triggers = [{"id": tid, "source": trigger["source"], "event": trigger["event"]}
+        for tid, trigger in design["triggers"].items() if tid in active]
     source = "// Compiler-owned interaction state and trigger registration.\n" + "\n".join(imports) + "\n"
-    source += "type Trigger = { id: string; source: string; event: string; action: string };\n"
+    source += "type Trigger = { id: string; source: string; event: string };\n"
     source += "const defaults: Record<string, unknown> = " + json.dumps({var: binding["initial"] for var, binding in ui["bindings"].items()}) + ";\n"
+    source += "const inputBindings: Record<string, string[]> = " + json.dumps({uid: node["data"] for uid, node in ui["elements"].items() if "user_write" in node.get("mode", []) and node.get("data")}) + ";\n"
     source += "const pages = " + json.dumps(pages) + ";\nconst components: Record<string, ComponentType<UiPageProps>> = {" + ", ".join(components) + "};\n"
     source += "const triggers: Trigger[] = " + json.dumps(triggers) + ";\n"
     save_text(output / "frontend/src/App.tsx", source + APP_SOURCE)

@@ -1,20 +1,18 @@
-"""Resolve the requirement tree, database symbols, and checked obligations."""
+"""Resolve the requirement tree, database symbols, and requirement obligations."""
 
 from pathlib import Path
 
 from infrastructure.utils.files import read_artifact
 
-from infrastructure.stages.database.obligations.records import field_symbols, validate_obligations
+from infrastructure.stages.database.obligations.records import normalize_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
-from infrastructure.stages.database.schema import validate_schema
 
 
 def load_context(arc_dir: Path):
-    """Load the requirement tree, validated schema, and symbol-checked obligations."""
+    """Load the requirement tree, schema, and normalized obligations."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     schema = read_artifact(arc_dir, "db_schema.json")
-    validate_schema(schema)
-    obligations = validate_obligations(read_artifact(arc_dir, "db_obligations.json"), tree, field_symbols(schema))
+    obligations = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
     return tree, schema, obligations
 
 

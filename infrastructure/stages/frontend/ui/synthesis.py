@@ -1,12 +1,12 @@
-"""Step 09 orchestration: retrieve pages, propose UI/data, validate, and publish.
+"""Step 09 orchestration: retrieve pages, propose UI/data, parse, and publish.
 
 All leaf requirements are designed before step 10 implements any UI. Reuse is
 page-first: retrieval returns the corresponding UI/data subtree, not disconnected
-components. Prompts and structural validation live in ui/design.py."""
+components. Prompts and design records live in ui/design.py."""
 
 import json
 
-from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, validate_design
+from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, normalize_design
 from infrastructure.stages.frontend.ui.proposals import INSTRUCTIONS as EXAMPLE_INSTRUCTIONS
 from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
@@ -40,11 +40,11 @@ def bind_requirement_image_pages(design, requirement, rid):
     design["requirements"][rid] = owned
 
 
-def synthesize_ui(arc_dir, tree, schema, contracts, images, contexts, model, console, top_k=3, max_fixtures=3):
+def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_fixtures=3):
     """Design UI/data for all leaf requirements using page-first retrieval.
 
     Show existing/retrieved pages, ask for an incremental proposal, and feed
-    validation errors back for bounded retries. Save accepted ui_design.json
+    JSON parse errors back for bounded retries. Save accepted ui_design.json
     updates; implementation and browser tests belong to step 10."""
     design, retriever = empty_design(), PageRetriever()
     for rid in tree.requirements:
@@ -63,8 +63,7 @@ def synthesize_ui(arc_dir, tree, schema, contracts, images, contexts, model, con
         request = {
             "requirement": requirement, "retrieved_pages": retrieved["pages"],
             "all_pages": {pid: {key: page[key] for key in ("name", "route", "root", "images")}
-                for pid, page in design["pages"].items()}, "schema": schema["entities"],
-            "direct_apis": {aid: contracts["apis"][aid] for aid in contracts["requirements"][rid]},
+                for pid, page in design["pages"].items()},
             "max_fixtures": max_fixtures,
         }
         for attempt in range(1, 4):
@@ -72,10 +71,10 @@ def synthesize_ui(arc_dir, tree, schema, contracts, images, contexts, model, con
             try:
                 response = model.generate_json(INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS, request)
                 proposal = response
-                updated = apply_proposal(design, proposal, rid, tree, images, retrieved["pages"], max_fixtures)
+                updated = apply_proposal(design, proposal, rid, tree)
                 bind_requirement_image_pages(updated, requirement, rid)
                 break
-            except ValueError as error:
+            except json.JSONDecodeError as error:
                 correction = {"error": str(error), "previous_response": response}
                 message = str(error)
                 if isinstance(error, json.JSONDecodeError):
@@ -88,10 +87,10 @@ def synthesize_ui(arc_dir, tree, schema, contracts, images, contexts, model, con
                 if attempt == 3:
                     raise ValueError(f"UI/data design failed for {rid} after 3 proposals: {error}") from error
                 request["correction"] = correction
-        console.show(label + " | 4. Validated incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
+        console.show(label + " | 4. Incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
         design = updated
         console.artifact("ui_design", design, label + " | Accepted UI")
-    validate_design(design, tree, images, max_fixtures, complete=True)
+    normalize_design(design, tree)
     save_json(arc_dir / "ui_design.json", design)
     console.show("UI/data design complete for ALL requirements", f"Saved {arc_dir / 'ui_design.json'}\nRun 10_implement_ui.py for existence tests and UI implementation. Interactions belong to step 11.")
     return design
