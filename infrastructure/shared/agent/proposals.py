@@ -25,7 +25,7 @@ def response_feedback(error, response):
     return feedback
 
 
-def propose_json(model, instructions, request, accept, console, label, max_attempts=5):
+def propose_json(model, instructions, request, accept, console, label, max_attempts=10):
     """Generate and repair a proposal within a finite total model-call budget."""
     if max_attempts < 1:
         raise ValueError("--max-attempts must be positive")
@@ -36,6 +36,11 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
         response = None
         try:
             prompt = instructions if "correction" not in request else instructions + "\n\n" + REPAIR_INSTRUCTIONS
+            if "correction" in request:
+                correction = request["correction"]
+                prompt += "\nActual failure: " + correction["error"]
+                if correction.get("details"):
+                    prompt += "\nRepair details:\n" + json.dumps(correction["details"], ensure_ascii=False, indent=2)
             response = model.generate_json(prompt, request)
             return accept(response), response
         except RESPONSE_ERRORS as error:

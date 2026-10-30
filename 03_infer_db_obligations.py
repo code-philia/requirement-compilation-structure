@@ -44,7 +44,7 @@ For credentials, distinguish submitted passwords from stored hashes.
 """
 
 
-def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 5) -> dict:
+def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10) -> dict:
     for filename, previous in (("requirements.json", "01_explore_requirement.py"), ("db_schema.json", "02_build_db_schema.py")):
         if not (arc_dir / filename).is_file():
             raise ValueError(f"Run {previous} first to create .arc/{filename}")
@@ -108,7 +108,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
 def main() -> None:
     parser = create_parser("Step 03: Infer DB Obligations")
     parser.add_argument("--top-k", type=int, default=6, help="Number of BM25 entity/field hits (default: 6)")
-    parser.add_argument("--max-attempts", type=int, default=5, help="Maximum proposals per requirement; including the first proposal (default: 5)")
+    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per requirement; including the first proposal (default: 10)")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:

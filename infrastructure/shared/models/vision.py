@@ -57,13 +57,13 @@ class VisualModel:
         base_url = os.getenv("VISUAL_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
         if not self.name or not api_key:
             raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env; the model must accept images")
-        self.reasoning = os.getenv("VISUAL_REASONING", os.getenv("MODEL_REASONING", "auto")).lower()
+        self.reasoning = os.getenv("VISUAL_REASONING", os.getenv("MODEL_REASONING", "low")).lower()
         if self.reasoning not in {"auto", "provider", "none", "low", "high", "max"}:
             raise ValueError("VISUAL_REASONING must be auto, provider, none, low, high or max")
         self._reasoning_supported = True
         self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=600, max_retries=2, http_client=http_client())
 
-    def analyze(self, image: Path, max_attempts: int = 5) -> dict:
+    def analyze(self, image: Path, max_attempts: int = 10) -> dict:
         """Send one supported reference image and parse the returned layout, elements, and style evidence."""
         mime = mimetypes.guess_type(image.name)[0]
         if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
@@ -81,9 +81,7 @@ class VisualModel:
         text = instructions.rstrip() + "\n" + JSON_OUTPUT_RULE
         if "correction" in payload:
             text += "\n" + VISUAL_REPAIR_PREFIX + json.dumps(payload["correction"], ensure_ascii=False)
-        mode = getattr(self, "reasoning", "auto")
-        if mode == "auto":
-            mode = "none" if self.name.lower().startswith("deepseek") else "provider"
+        mode = getattr(self, "reasoning", "low")
         arguments = {
                 "model": self.name,
                 "messages": [{"role": "user", "content": [

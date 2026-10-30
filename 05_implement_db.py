@@ -40,7 +40,7 @@ SQL files in a transaction. Preserve existing data through IF NOT EXISTS.
 """
 
 
-def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 5) -> dict:
+def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10) -> dict:
     source = arc_dir / "db_schema.json"
     if not source.is_file():
         raise ValueError("Run 02_build_db_schema.py first to create .arc/db_schema.json")
@@ -113,7 +113,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 5) -> d
 
 def main() -> None:
     parser = create_parser("Step 05: Implement DB Tables")
-    parser.add_argument("--max-attempts", type=int, default=5, help="Maximum proposals per table; including the first proposal (default: 5)")
+    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per table; including the first proposal (default: 10)")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:

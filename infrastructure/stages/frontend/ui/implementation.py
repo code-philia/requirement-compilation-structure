@@ -42,7 +42,7 @@ and accepted page display tests, then a build. Implement the design without modi
 tests or compiler wiring to bypass failures.
 """
 
-def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 5,
+def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 10,
         images: dict | None = None, requirement_contexts: dict | None = None) -> dict:
     """Implement the complete saved UI/data design through component-existence TDD.
 

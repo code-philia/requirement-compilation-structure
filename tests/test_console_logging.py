@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 from openai import OpenAI
 
-from infrastructure.shared.models.text import TextModel, task_reasoning
+from infrastructure.shared.models.text import TextModel, reasoning_arguments
 from infrastructure.shared.models.vision import VisualModel
 from infrastructure.utils.presentation.console import DemoConsole, preview, show_panel, display_width, WaitingStatus
 from infrastructure.utils.presentation.logging import console_log
@@ -150,23 +150,15 @@ class ConsoleLogging(unittest.TestCase):
         self.assertIn("max_tokens", requests[2])
         self.assertEqual([record["status_code"] for record in records if record["event"] == "http_response"], [500, 400, 200])
 
-    def test_reasoning_policy_and_actual_wire_controls(self):
-        cases = [({}, "low"), ({"entity_name": "Note"}, "none"),
-            ({"entity_name": "Note", "correction": {"error": "Invalid SQL response"}}, "low"),
-            ({"task": {"test_path": None}}, "low"),
-            ({"task": {"test_path": "backend/tests/save.test.ts"},
-                "feedback": [{"error": "Fix test compilation"}]}, "low"),
-            ({"task": {"test_path": "frontend/tests/e2e/save.spec.ts"},
-                "feedback": [{"error": "Fix test assertions"}]}, "low"),
-            ({"task": {}}, "none"),
-            ({"task": {"api_id": "API-SAVE"}, "feedback": [{"error": "Compilation failed"}]}, "none"),
-            ({"task": {"page": {"id": "home"}}, "feedback": [{"typecheck": {"returncode": 1}}]}, "none"),
-            ({"task": {"triggers": {}}, "feedback": [{"e2e": {"returncode": 1}}]}, "none")]
-        for payload, expected in cases:
-            with self.subTest(payload=payload):
-                self.assertEqual(task_reasoning("deepseek-flash", "auto", payload), expected)
-                self.assertEqual(task_reasoning("other-model", "auto", payload), "provider")
-                self.assertEqual(task_reasoning("deepseek-flash", "high", payload), "high")
+    def test_all_task_types_use_low_reasoning_on_the_wire(self):
+        payloads = [{}, {"entity_name": "Note"},
+            {"entity_name": "Note", "correction": {"error": "Invalid SQL"}},
+            {"task": {"test_path": None}},
+            {"task": {"api_id": "API-SAVE"}},
+            {"task": {"page": {"id": "home"}}},
+            {"task": {"triggers": {}}},
+            {"task": {"test_path": "test.ts"}, "feedback": [{"error": "Fix test compilation"}]},
+            {"task": {}, "feedback": [{"error": "Fix implementation"}]}]
         attempts = []
         def handler(request):
             attempts.append(json.loads(request.content))
@@ -174,24 +166,14 @@ class ConsoleLogging(unittest.TestCase):
         model = self.model(handler)
         model.name = "deepseek-flash"
         with redirect_stdout(StringIO()):
-            model.generate_json("Implement", {"task": {}})
-            model.generate_json("Design", {})
-            model.generate_json("Generate tests", {"task": {"test_path": None}})
-            model.generate_json("Repair tests", {"task": {"test_path": "test.ts"},
-                "feedback": [{"error": "Fix test compilation"}]})
-            for task in ({"api_id": "API-SAVE"}, {"page": {"id": "home"}}, {"triggers": {}}):
-                model.generate_json("Repair implementation", {"task": task,
-                    "feedback": [{"error": "Fix failed acceptance checks"}]})
-        self.assertEqual(attempts[0]["thinking"], {"type": "disabled"})
-        self.assertNotIn("reasoning_effort", attempts[0])
-        self.assertEqual(attempts[1]["thinking"], {"type": "enabled"})
-        self.assertEqual(attempts[1]["reasoning_effort"], "low")
-        for request in attempts[2:4]:
+            for payload in payloads:
+                model.generate_json("Complete this task", payload)
+            model.reasoning = "auto"
+            model.generate_json("Use the default reasoning mode", {})
+        for request in attempts:
             self.assertEqual(request["thinking"], {"type": "enabled"})
             self.assertEqual(request["reasoning_effort"], "low")
-        for request in attempts[4:]:
-            self.assertEqual(request["thinking"], {"type": "disabled"})
-            self.assertNotIn("reasoning_effort", request)
+        self.assertEqual(reasoning_arguments("other-model", "auto"), {"reasoning_effort": "low"})
 
     def test_unsupported_reasoning_falls_back_once_for_text_and_vision(self):
         for visual in (False, True):
@@ -213,6 +195,8 @@ class ConsoleLogging(unittest.TestCase):
                 self.assertEqual(model.generate_json("Describe", payload), {"ok": True})
                 self.assertEqual(model.generate_json("Describe", payload), {"ok": True})
                 self.assertEqual(len(attempts), 3)
+                self.assertEqual(attempts[0]["thinking"], {"type": "enabled"})
+                self.assertEqual(attempts[0]["reasoning_effort"], "low")
                 self.assertNotIn("thinking", attempts[-1])
                 self.assertNotIn("reasoning_effort", attempts[-1])
 
@@ -225,6 +209,22 @@ class ConsoleLogging(unittest.TestCase):
                     model.generate_json("Generate.", {})
                 records = [json.loads(line) for line in (root / "model_calls.jsonl").read_text().splitlines()]
                 self.assertEqual(records[-1]["response"]["choices"][0]["message"]["content"], content)
+
+    def test_plain_transport_preserves_complete_ui_json_and_still_requires_parseable_json(self):
+        from infrastructure.stages.frontend.ui.proposals import EXAMPLE
+        attempts = []
+        def handler(request):
+            attempts.append(json.loads(request.content))
+            content = json.dumps(EXAMPLE) if len(attempts) == 1 else '```json\n{}\n```'
+            return httpx.Response(200, json=self.response(content))
+        model = self.model(handler)
+        model.json_mode = False
+        with redirect_stdout(StringIO()):
+            self.assertEqual(model.generate_json("Design complete UI", {}), EXAMPLE)
+            with self.assertRaises(json.JSONDecodeError):
+                model.generate_json("Design complete UI", {})
+        self.assertNotIn("response_format", attempts[0])
+        self.assertIn("Return exactly one JSON object without Markdown", attempts[0]["messages"][0]["content"])
 
     def test_image_data_is_full_in_logs_and_absent_from_terminal(self):
         model = self.model(lambda request: httpx.Response(200, json=self.response('{"layout":"visible"}')))

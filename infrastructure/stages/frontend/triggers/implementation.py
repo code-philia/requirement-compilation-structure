@@ -127,7 +127,7 @@ without weakening tests or hardcoding fixture values.
 
 
 def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts,
-        model, console, report, max_turns=5, max_tests=5):
+        model, console, report, max_turns=10, max_tests=5):
     """Implement design one requirement at a time through real-app E2E TDD.
 
     Prepare dependencies/runtime, generate and freeze key scenario tests, then

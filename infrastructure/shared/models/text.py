@@ -22,6 +22,8 @@ def reasoning_rejected(error):
 
 def reasoning_arguments(name, mode):
     """Translate configured reasoning to the provider's documented request fields."""
+    if mode == "auto":
+        mode = "low"
     if mode == "provider":
         return {}
     if name.lower().startswith("deepseek"):
@@ -31,24 +33,9 @@ def reasoning_arguments(name, mode):
     return {"reasoning_effort": mode}
 
 
-def task_reasoning(name, configured, payload):
-    """Use low reasoning for design/tests; disable thinking for code implementation and repair."""
-    if configured != "auto":
-        return configured
-    if not name.lower().startswith("deepseek"):
-        return "provider"
-    task = payload.get("task")
-    if isinstance(task, dict):
-        return "low" if "test_path" in task else "none"
-    if "correction" in payload:
-        return "low"
-    if "entity_name" in payload:
-        return "none"
-    return "low"
-
 class TextModel:
     """Transport for structured stage proposals and file-edit responses."""
-    def __init__(self) -> None:
+    def __init__(self, *, json_mode: bool = True) -> None:
         """Read compiler/.env and configure the text model client; reject missing credentials or model name."""
         load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
         self.name = os.getenv("MODEL")
@@ -61,10 +48,11 @@ class TextModel:
             raise ValueError("MAX_OUTPUT_TOKENS must be a positive integer") from error
         if self.max_output_tokens < 1:
             raise ValueError("MAX_OUTPUT_TOKENS must be a positive integer")
-        self.reasoning = os.getenv("MODEL_REASONING", "auto").lower()
+        self.reasoning = os.getenv("MODEL_REASONING", "low").lower()
         if self.reasoning not in {"auto", "provider", "none", "low", "high", "max"}:
             raise ValueError("MODEL_REASONING must be auto, provider, none, low, high or max")
         self._reasoning_supported = True
+        self.json_mode = json_mode
         self._token_parameter = "max_completion_tokens"
         self.client = OpenAI(
             api_key=api_key,
@@ -97,7 +85,7 @@ class TextModel:
 
     def generate_json(self, instructions: str, payload: dict) -> dict:
         """Request JSON using the stage prompt and serialized task data."""
-        mode = task_reasoning(self.name, getattr(self, "reasoning", "auto"), payload)
+        mode = getattr(self, "reasoning", "low")
         try:
             response = self._request(
                 model=self.name,
@@ -105,7 +93,7 @@ class TextModel:
                     {"role": "system", "content": instructions.rstrip() + "\n" + JSON_OUTPUT_RULE},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
-                response_format={"type": "json_object"},
+                **({"response_format": {"type": "json_object"}} if getattr(self, "json_mode", True) else {}),
                 **reasoning_arguments(self.name, mode),
             )
         except OpenAIError as error:

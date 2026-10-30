@@ -82,7 +82,7 @@ failures without weakening assertions or detecting tests to fake business behavi
 """
 
 
-def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 5, max_tests: int = 5) -> dict:
+def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 10, max_tests: int = 5) -> dict:
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
     if max_tests < 1:
@@ -257,7 +257,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 5
 
 def main() -> None:
     parser = create_parser("Step 08: TDD-driven API Implementation (P / Q / Dataflow Obligations)")
-    parser.add_argument("--max-turns", type=int, default=5, help="Maximum edit rounds per test/implementation agent")
+    parser.add_argument("--max-turns", type=int, default=10, help="Maximum edit rounds per test/implementation agent")
     parser.add_argument("--max-tests", type=int, default=5, help="Maximum key contract tests per API (default: 5)")
     args = parser.parse_args()
     with ExitStack() as stack:

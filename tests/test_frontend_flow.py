@@ -365,6 +365,9 @@ class FrontendFlow(unittest.TestCase):
                 return {"pages": {pid: self.ui["pages"][pid]}}
             if len(requests) == 2:
                 details = payload["correction"]["details"]
+                self.assertIn("Actual failure: Cannot read UI/data response", instructions)
+                self.assertIn('"missing_sections"', instructions)
+                self.assertIn("FINAL JSON", instructions)
                 self.assertEqual(set(details["missing_sections"]),
                     {"elements", "bindings", "requirement_ui", "step_ui"})
                 self.assertEqual(set(details["response_template"]),
@@ -383,6 +386,17 @@ class FrontendFlow(unittest.TestCase):
             Mock(generate_json=generate), Mock())
         self.assertEqual(result, self.ui)
         self.assertEqual(len(requests), 4)
+
+    def test_complete_ui_prompt_example_produces_page_context_and_display_tests(self):
+        from infrastructure.stages.frontend.ui.proposals import EXAMPLE
+        from infrastructure.stages.frontend.ui.testing import existence_suite
+        design = apply_proposal(empty_design(), EXAMPLE, "REQ-A", self.tree)
+        context = page_context(design, "example-home")
+        self.assertEqual(set(context["elements"]), set(EXAMPLE["elements"]))
+        self.assertEqual(set(context["bindings"]), set(EXAMPLE["bindings"]))
+        suite = existence_suite(design, "example-home")
+        self.assertIn("UI-example-username", suite)
+        self.assertIn("ExampleUser", suite)
 
     def test_presentation_loader_has_no_report_policy(self):
         save_json(self.arc / "requirements.json", self.raw)

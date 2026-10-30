@@ -13,7 +13,7 @@ from infrastructure.utils.files import save_json
 
 
 def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = False,
-        max_turns: int = 5, max_tests: int = 5) -> dict:
+        max_turns: int = 10, max_tests: int = 5) -> dict:
     if min(max_turns, max_tests) < 1:
         raise ValueError("--max-turns and --max-tests must be positive")
     tree, schema, backend, ui, interactions, images, contexts = load_e2e_context(arc_dir, input_dir)
@@ -41,7 +41,7 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
 
 def main() -> None:
     parser = create_parser("Step 12: Frontend Trigger Implementation through Playwright E2E TDD")
-    parser.add_argument("--max-turns", type=int, default=5, help="Maximum edit rounds per requirement's test/implementation agent")
+    parser.add_argument("--max-turns", type=int, default=10, help="Maximum edit rounds per requirement's test/implementation agent")
     parser.add_argument("--max-tests", type=int, default=5, help="Maximum key E2E cases per requirement")
     args = parser.parse_args()
     with ExitStack() as stack:

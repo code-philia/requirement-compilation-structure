@@ -4,50 +4,67 @@ from copy import deepcopy
 
 
 
-INSTRUCTIONS = """Design UI and frontend data for the supplied leaf requirement, using scenarios,
-visual references and retrieved page subtrees. Return one JSON object with all five
-top-level sections: {"pages":{},"elements":{},"bindings":{},"requirement_ui":[],"step_ui":{}}.
-Return complete new or changed records INSIDE these sections. For an unchanged map,
-return {} rather than omitting its section. requirement_ui still lists reused element
-IDs. Updates replace records, so retain unrelated content on shared pages.
-pages contains page metadata only; it does not define the page's controls or data.
-A new page also needs its root and controls in elements, and its variables in
-bindings. A page listed in all_pages is only a catalogue entry; reuse complete
-records from retrieved_pages when supplied.
+INSTRUCTIONS = """Design a complete UI and its frontend data for the current requirement.
+The result is consumed by a component generator: page metadata alone cannot produce
+any controls. Design the actual element tree and variables, not just pages or fixtures.
+Use requirement scenarios and visual references as evidence; reuse retrieved UI records
+where appropriate. This is design only: return no code, tests, triggers or API definitions.
 
-pages maps PAGE IDs to {name, route, root, images, fixtures}. route is a URL path;
-root is an ELEMENT ID; images lists supplied image IDs. These IDs have different roles.
-fixtures maps display-state names to frontend variable overrides. Include default={}
-and representative states within the supplied max_fixtures named-state target.
-Fixtures supply display-test values; initial variables supply application defaults.
+OUTPUT CONTRACT
+Return exactly one complete JSON object, with these FIVE SIBLING root keys in this order:
+1. bindings: frontend variable definitions.
+2. elements: the actual page roots, containers, controls and displayed content.
+3. pages: route, root element, image references and display fixture metadata.
+4. requirement_ui: element IDs used by the current requirement.
+5. step_ui: current scenario step IDs mapped to element IDs.
+Write every section in the final JSON content. Mentioning a section in reasoning does
+not return it. Do not stop after a page record. Do not nest elements or bindings inside
+pages. For a new page, write its root and controls in elements and all variables they
+use in bindings. Fixture variables do not create bindings or elements automatically.
+
+RECORD DEFINITIONS
+bindings maps VARIABLE NAMES to {dtype, constraints, initial, source}. dtype is a JSON
+type name: string, integer, number, boolean, array, object or null. constraints is an
+array of descriptions, initial is the application default, and source describes the
+origin. Include input, selection, result, loading or error data needed by this UI.
 
 elements maps ELEMENT IDs to {type, parent, mode, data, prop}. A page root has type
-"page" and parent=null; other elements reference a parent element ID. Use ordinary
-UI types such as container, form, input, checkbox, select, button, text, heading, link,
-list, item, image, alert or table. mode is an array whose entries are "user_read" or
-"user_write", such as [], ["user_write"] or ["user_read","user_write"]. data is an
-array of frontend VARIABLE NAMES, for example ["form.username"], not variable objects.
-prop holds static text, label, placeholder, input_type, options, style, href, alt or
-heading level. Optional prop.visible is a boolean or {var:VARIABLE_NAME, equals:VALUE}.
-Business decisions are expressed by triggers later, not expression strings in prop.
+"page" and parent=null. Other elements have a parent ELEMENT ID. Use ordinary UI types:
+container, form, input, checkbox, select, button, text, heading, link, list, item, image,
+alert or table. mode is an array containing user_read and/or user_write, or [].
+data is an array of VARIABLE NAMES, not variable objects. prop contains static text,
+label, placeholder, input_type, options, style, href, alt or heading level. Optional
+prop.visible is a boolean or {var:VARIABLE_NAME, equals:VALUE}. Express business
+behavior through triggers later, not expression strings embedded in props.
 
-bindings defines variables once, keyed by name, as {dtype, constraints, initial, source}.
-dtype is a string naming a JSON type: "string", "integer", "number", "boolean",
-"array", "object" or "null".
-constraints is an array of descriptions; initial is the default value; source describes
-the origin. Include input, result, selection, loading or error state required by the UI.
-Native editable values are synchronized by the host. UI has no DB obligations or DB
-field-mapping model. Do not make fixture data into invented production responses.
+pages maps PAGE IDs to {name, route, root, images, fixtures}. route is a URL path, root
+is an ELEMENT ID, images lists supplied image IDs. fixtures maps display-state names
+to variable overrides; include default={} plus representative states within max_fixtures.
+Bindings define defaults; fixtures only override them for display tests. Fixture state
+must not become an invented production API response. Preserve explicit image.page hints.
 
-requirement_ui lists elements used by this requirement. step_ui maps its scenario
-step IDs to element lists, with [] for steps without UI. Non-UI requirements can
-return empty records and lists. Preserve visible text in its original language;
-images provide layout/style evidence, not hidden business rules. Use supplied image.page
-hints for page IDs. Do not return triggers, handlers, code or tests.
+requirement_ui is an array of ELEMENT IDs. step_ui maps this requirement's actual step
+IDs to arrays of ELEMENT IDs; use [] for a step without UI.
+
+UPDATES AND REUSE
+Return complete records for new or changed items. Each supplied record replaces its
+previous definition, so preserve unrelated content on shared pages. Unchanged records
+can be omitted FROM their maps, but never omit any of the five root keys. Use {} for
+an unchanged map, and list reused element IDs in requirement_ui/step_ui. all_pages is
+only a page catalogue; retrieved_pages supplies reusable element and variable records.
+A requirement without UI returns all five sections with empty maps/lists.
+
+NATIVE INPUT AND SCOPE
+The host synchronizes native input/change values for user_write bindings. UI has no
+DB obligations or DB field-mapping model. Preserve visible labels in their original
+language. Images describe layout and style, not hidden business logic.
+
+The complete example below demonstrates the final response, not an intermediate page
+summary. Replace its IDs, labels and state with the current requirement's evidence.
 """
 
 
-OUTPUT_TEMPLATE = {"pages": {}, "elements": {}, "bindings": {}, "requirement_ui": [], "step_ui": {}}
+OUTPUT_TEMPLATE = {"bindings": {}, "elements": {}, "pages": {}, "requirement_ui": [], "step_ui": {}}
 
 
 class UIResponseError(ValueError):
@@ -56,7 +73,7 @@ class UIResponseError(ValueError):
         super().__init__(f"Cannot read UI/data response: {error}")
         self.feedback = {"response_template": OUTPUT_TEMPLATE,
             "missing_sections": [key for key in OUTPUT_TEMPLATE if not isinstance(proposal, dict) or key not in proposal],
-            "repair": "Return the complete five-section UI response. pages alone is incomplete. Define new page roots and controls in elements, variables in bindings, and requirement/step associations in requirement_ui and step_ui. Existing records may be reused by ID; missing new records must be written. Do not repeat the rejected pages-only response."}
+            "repair": "Write the missing variable and element records in the FINAL JSON, not just in reasoning. Return bindings and elements FIRST, then pages, requirement_ui and step_ui as five sibling root keys. A new page needs its root and controls, their variable definitions and actual scenario associations. Do not repeat the rejected pages-only answer or merely add empty maps for a new page."}
 
 
 def empty_design() -> dict:
