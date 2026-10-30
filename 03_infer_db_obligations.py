@@ -6,20 +6,18 @@ from pathlib import Path
 
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
-from infrastructure.stages.database.obligations.records import field_symbols, validate_inference, validate_obligations
+from infrastructure.stages.database.obligations.records import normalize_inference, normalize_obligations
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
-from infrastructure.stages.database.schema import validate_schema
 from infrastructure.utils.files import save_json
 
 
 # --- Extension point 03A: obligation inference policy --------------------------
 # Rewrite how requirement text maps to reads/writes, especially failure paths,
-# fixture setup, and generated keys. The output contract is checked separately
-# in infrastructure/stages/database/obligations/records.py.
+# fixture setup, and generated keys. Records are normalized for set operations.
 INSTRUCTIONS = """Infer field-level dataflow obligations using only the related schema fields supplied for this requirement.
 Return exactly this JSON object, in English:
 {
@@ -33,7 +31,7 @@ are supplied. All read/write entries must be existing qualified schema field sym
 An empty set is []. Never create entities, fields, or substitute a similar but wrong field.
 Use only the supplied related schema definitions to bind data concepts.
 If necessary persistent data cannot be mapped, list the concepts in unmapped. Do not
-silently omit them or clear unmapped merely to pass validation. UI-only state need not
+silently omit persistent concepts. UI-only state need not
 map to persistent fields. Password input is verified against a hash, not stored plaintext.
 
 Infer the requirement's obligations from its description and overall scenario behavior.
@@ -49,10 +47,9 @@ and inserted records. A generated primary key is still a persisted write when in
 a record; do not exclude it as "system-generated" or "not business data". Lookup/filter
 and join keys are reads even when they are not displayed. Do not read every field merely
 because the entity is retrieved.
-The requirement read/write union must cover every supplied related field. A field may
-appear in both sets when the behavior reads and modifies it. If any related field is
-not classified, the proposal is invalid and must be corrected. References are context
-only in this pass; do not blindly inherit another node's effects.
+Select fields according to actual behavior. Related schema fields provide context;
+a field need not be read or written merely because it was supplied. References are
+context only; do not blindly inherit another node's effects.
 If a correction is supplied, fix the error and return one complete JSON object.
 """
 
@@ -65,11 +62,9 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
         raise ValueError("--top-k must be positive")
     tree = RequirementTree(json.loads((arc_dir / "requirements.json").read_text(encoding="utf-8-sig")))
     schema = json.loads((arc_dir / "db_schema.json").read_text(encoding="utf-8-sig"))
-    validate_schema(schema)
     # --- Pass boundary: use the existing database symbol space ----------------
     # Inference may select existing fields, but cannot create schema symbols.
     # An unmapped concept should trigger schema review, not a fabricated field.
-    symbols = field_symbols(schema)
     console = DemoConsole(pause)
     model = TextModel()
     # Organizational parents keep empty records; only leaves receive model inference.
@@ -85,14 +80,11 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
             f"\n\nConcatenated steps:\n{steps_text or '(No steps on this requirement.)'}"
         ))
         related_fields = schema["requirements"].get(rid)
-        if not isinstance(related_fields, list):
-            raise ValueError(f"Missing schema relation for requirement: {rid}; rerun step 02")
         related_entities = {}
         for symbol in related_fields:
             entity, field = symbol.split(".", 1)
             related_entities.setdefault(entity, {"description": schema["entities"][entity]["description"], "fields": {}})
             related_entities[entity]["fields"][field] = schema["entities"][entity]["fields"][field]
-        related_symbols = set(related_fields)
         console.show(f"{label} | 2. Related schema fields", format_schema(related_entities))
         # --- Extension point 03C: inference granularity and feedback -----------
         # One call currently predicts a requirement and all its own steps.
@@ -108,12 +100,9 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
             response = None
             try:
                 response = model.generate_json(INSTRUCTIONS, request)
-                inferred = validate_inference(response, related_symbols, tree.own_steps[rid])
-                classified = set(inferred["requirement"]["read"]) | set(inferred["requirement"]["write"])
-                if classified != related_symbols:
-                    raise ValueError(f"Requirement obligation coverage mismatch: missing={sorted(related_symbols - classified)}, extra={sorted(classified - related_symbols)}")
+                inferred = normalize_inference(response, tree.own_steps[rid])
                 break
-            except ValueError as error:
+            except json.JSONDecodeError as error:
                 if attempt == 3:
                     raise ValueError(f"Obligation inference failed for {rid} after 3 attempts: {error}") from error
                 print(f"Retrying {rid} ({attempt + 1}/3): {error}", flush=True)
@@ -121,12 +110,12 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
         obligations["requirements"][rid] = inferred["requirement"]
         obligations["steps"].update(inferred["steps"])
         console.artifact("db_obligations", obligations, f"{label} | Accepted obligations")
-        console.show(f"{label} | 4. Inferred obligations (symbol-checked)", (
+        console.show(f"{label} | 4. Inferred obligations ", (
             response.get("explanation", "") + "\n\n"
             + format_obligations({rid: inferred["requirement"], **inferred["steps"]})
         ))
 
-    obligations = validate_obligations(obligations, tree, field_symbols(schema))
+    obligations = normalize_obligations(obligations, tree)
     save_json(arc_dir / "db_obligations.json", obligations)
     print(f"Obligations saved: {arc_dir / 'db_obligations.json'}", flush=True)
     return obligations

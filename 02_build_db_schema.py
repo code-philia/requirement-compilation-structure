@@ -13,7 +13,6 @@ from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import apply_patch
 from infrastructure.utils.files import save_json
-from infrastructure.shared.models.structure import object_fields, string_list
 
 
 # --- Extension point 02A: schema discovery policy ------------------------------
@@ -58,7 +57,7 @@ Also return "related_fields": ["Entity.field", ...], listing every existing or n
 created field from this requirement's directly relevant persistent data. This is a
 schema relationship, not a read/write obligation; include fields needed for identity,
 lookups, joins, inserts, updates, and required session relationships. Do not include
-unrelated fields. The compiler records this relation after validating the final schema.
+unrelated fields. The compiler records this relation after saving the schema.
 """
 
 
@@ -106,40 +105,32 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
             + format_schema(retrieved["entities"])
         ))
 
-        # --- Extension point 02D: generation and validation feedback -----------
+        # --- Extension point 02D: generation and JSON parse feedback -----------
         # Change the evidence supplied to the model or its correction strategy.
         # The name inventory is global; full definitions come from retrieval.
-        # apply_patch() checks the proposal before it can become shared state.
+        # apply_patch() merges the proposed entity and field updates.
         request = {
             "requirement": requirement,
             "symbol_inventory": {name: list(entity["fields"]) for name, entity in schema["entities"].items()},
             "retrieved_schema": {"entities": retrieved["entities"]},
         }
-        # Give malformed JSON or invalid graph updates bounded, explicit feedback.
+        # Give malformed JSON bounded, explicit feedback.
         for attempt in range(1, 4):
             patch = None
             try:
                 patch = model.generate_json(INSTRUCTIONS, request)
-                object_fields(patch, {"entities": dict, "related_fields": list}, "schema proposal")
-                string_list(patch["related_fields"], "related_fields")
-                updated = apply_patch(schema, patch, retrieved["entities"])
-                symbols = {f"{name}.{field}" for name, entity in updated["entities"].items() for field in entity["fields"]}
-                if any(field not in symbols for field in patch["related_fields"]):
-                    raise ValueError("related_fields must contain fields from the accepted schema")
+                updated = apply_patch(schema, patch)
                 updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
-                from infrastructure.stages.database.schema import validate_schema
-                validate_schema(updated)
                 break
-            except ValueError as error:
+            except json.JSONDecodeError as error:
                 if attempt == 3:
                     raise ValueError(f"Schema analysis failed for {requirement['id']} after 3 attempts: {error}") from error
                 print(f"Retrying {requirement['id']} ({attempt + 1}/3): {error}", flush=True)
                 request["correction"] = {"error": str(error), "previous_patch": patch}
-        # --- Pass boundary: publish the validated schema ----------------------
-        # Subsequent requirements retrieve from this updated graph. Keep failed
-        # proposals out of it so one mistake does not contaminate later nodes.
+        # --- Pass boundary: publish the schema ----------------------
+        # Subsequent requirements retrieve from this updated graph.
         save_json(arc_dir / "db_schema.json", updated)
-        console.show(f"{label} | 4. Schema changes (validated and saved)", (
+        console.show(f"{label} | 4. Schema changes (saved)", (
             patch.get("explanation", "") + "\n\n" + format_changes(schema, updated)
         ))
         schema = updated

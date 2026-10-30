@@ -4,7 +4,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.utils.cli import create_parser, resolve_directories
-from infrastructure.stages.frontend.context import load_frontend_context
+from infrastructure.stages.frontend.context import load_ui_context
 from infrastructure.stages.frontend.ui.synthesis import synthesize_ui
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
@@ -15,9 +15,9 @@ def design_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False, top_
         max_fixtures: int = 3) -> dict:
     if min(top_k, max_fixtures) < 1:
         raise ValueError("--top-k and --max-fixtures must be positive")
-    tree, schema, _, contracts, images, contexts = load_frontend_context(arc_dir, input_dir)
+    tree, images, contexts = load_ui_context(arc_dir, input_dir)
     console, model = DemoConsole(pause), TextModel()
-    design = synthesize_ui(arc_dir, tree, schema, contracts, images, contexts,
+    design = synthesize_ui(arc_dir, tree, images, contexts,
         model, console, top_k, max_fixtures)
     print(f"UI/data design saved: {arc_dir / 'ui_design.json'}\nRun 10_implement_ui.py to generate existence tests and implement the pages.", flush=True)
     return design

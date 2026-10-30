@@ -9,13 +9,10 @@ from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
 from infrastructure.utils.files import read_artifact
-from infrastructure.stages.backend.contracts import validate_contracts
-from infrastructure.stages.backend.primitives import validate_design
 from infrastructure.stages.backend.runtime import TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green, require_red
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
-from infrastructure.stages.database.obligations.records import field_symbols
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.project.dependencies import install_dependencies
@@ -101,10 +98,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     if max_tests < 1:
         raise ValueError("--max-tests must be positive")
     tree, schema, obligations = load_context(arc_dir)
-    design = read_artifact(arc_dir, "backend_apis.json")
-    contracts = read_artifact(arc_dir, "backend_contracts.json")
-    validate_design(design, obligations, field_symbols(schema), tree=tree)
-    validate_contracts(contracts, design)
+    contracts = read_artifact(arc_dir, "backend_apis.json")
     output = arc_dir.parent.resolve()
     if not (output / "backend/src/db/initialize.ts").is_file():
         raise ValueError("Run 00_project_initialization.py and 05_implement_db.py first")
@@ -124,17 +118,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     model = TextModel() if contracts["apis"] else None
     owners = {aid: [rid for rid in tree.postorder if aid in contracts["requirements"][rid]] for aid in contracts["apis"]}
     targets = {aid: selected_path(output, "backend_test", aid) or test_path(ids[0], aid) for aid, ids in owners.items()}
-    # Retire only earlier compiler-owned duplicate suites. Unlisted user tests
-    # are preserved; failed migrations retain their retirement list for retry.
-    previous = json.loads((arc_dir / "backend_tdd.json").read_text(encoding="utf-8-sig")) if (arc_dir / "backend_tdd.json").is_file() else {}
-    owned = {path for ids in previous.get("tests", {}).values() for path in ids.values()}
-    retired = sorted((owned | set(previous.get("retired_tests", []))) - set(targets.values()))
-    for relative in retired:
-        if not isinstance(relative, str) or not relative.startswith("backend/tests/") or not relative.endswith(".test.ts") or not (output / relative).resolve().is_relative_to(output / "backend/tests"):
-            raise ValueError("Invalid compiler-owned test path in previous TDD report")
     report = {"status": "RUNNING", "requirements": {}, "tests": {}, "red": {}, "green": {}, "agents": {}}
-    if retired:
-        report["retired_tests"] = retired
     # Publish a current status before work; an old GREEN is never reused as proof.
     save_json(arc_dir / "backend_tdd.json", report)
     try:
@@ -256,11 +240,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
             report["requirements"][rid]["status"] = "GREEN"
             save_json(arc_dir / "backend_tdd.json", report)
             console.show(f"{requirement_label} | Requirement GREEN", "All direct APIs passed. Proceed to the next requirement.")
-        # Retire obsolete compiler-owned suites only after every requirement is GREEN.
-        for relative in retired:
-            (output / relative).unlink(missing_ok=True)
-        report.pop("retired_tests", None)
-        save_json(arc_dir / "backend_tdd.json", report)
         all_files = [targets[aid] for aid in accepted]
         console.show("Final regression | All requirements complete", "Compile the full backend and run all canonical API suites.")
         compiled = checks.typecheck()

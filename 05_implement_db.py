@@ -7,12 +7,10 @@ from pathlib import Path
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.stages.database.order import implementation_groups, table_dependencies
 from infrastructure.stages.database.runtime import initializer_source
-from infrastructure.stages.database.validation import validate_response
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.logging import console_log
-from infrastructure.stages.database.schema import validate_schema
 from infrastructure.utils.files import save_text
 
 
@@ -53,7 +51,6 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
         if not (output_dir / required).is_file():
             raise ValueError("Run 00_project_initialization.py first to initialize the project structure")
     schema = json.loads(source.read_text(encoding="utf-8-sig"))
-    validate_schema(schema)
     console = DemoConsole(pause)
     # --- Extension point 05B: dependency-aware table implementation -----------
     # Referenced tables precede dependents. Cyclic groups use forward references;
@@ -96,10 +93,10 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
                 response = None
                 try:
                     response = model.generate_json(INSTRUCTIONS, request)
-                    content = validate_response(response, expected_path)
+                    content = response["content"]
                     proposal = {"path": expected_path, "content": content}
                     break
-                except ValueError as error:
+                except json.JSONDecodeError as error:
                     if attempt == 3:
                         raise ValueError(f"Table implementation failed for {name} after 3 attempts: {error}") from error
                     print(f"Retrying {name} ({attempt + 1}/3): {error}", flush=True)

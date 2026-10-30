@@ -50,11 +50,11 @@ uv run 04_check_db_obligations.py --pause --output output/demo
 # Step 5: Implement DB
 uv run 05_implement_db.py --pause --output output/demo
 
-# Step 6: Decompose Backend API
-uv run 06_decompose_backend_apis.py --pause --output output/demo
+# Step 6: Design complete Backend APIs (I/O, R/W, P/Q)
+uv run 06_design_backend_apis.py --pause --output output/demo
 
-# Step 7: Contract Inference
-uv run 07_infer_api_contracts.py --pause --output output/demo
+# Step 7: Display Backend APIs (read-only)
+uv run 07_check_backend_apis.py --pause --output output/demo
 
 # Step 8: Implement Backend
 uv run 08_implement_backend_tdd.py --pause --output output/demo
@@ -65,10 +65,10 @@ uv run 09_design_ui.py --pause --output output/demo
 # Step 10: Implement UI
 uv run 10_implement_ui.py --pause --output output/demo
 
-# Step 11: Interaction Design
-uv run 11_design_ui_interactions.py --pause --output output/demo
+# Step 11: Trigger Design
+uv run 11_design_frontend_triggers.py --pause --output output/demo
 
-# Step 12: E2E TDD
+# Step 12: Trigger E2E TDD
 uv run 12_implement_frontend_tdd.py --pause --output output/demo
 ```
 
