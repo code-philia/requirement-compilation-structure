@@ -12,16 +12,17 @@ import httpx
 from openai import OpenAI
 
 from infrastructure.shared.models.text import TextModel
+from infrastructure.shared.models.vision import VisualModel
 from infrastructure.utils.presentation.console import DemoConsole, preview, show_panel, display_width, WaitingStatus
 from infrastructure.utils.presentation.logging import console_log
-from infrastructure.utils.presentation.model_io import _http_request, _http_response, invoke
+from infrastructure.utils.presentation.model_io import _http_request, _http_response, _input_summary, _usage_summary, invoke
 
 
 class ConsoleLogging(unittest.TestCase):
     """Run SDK serialization and retry handling without remote model requests."""
 
     def model(self, handler):
-        client = httpx.Client(transport=httpx.MockTransport(handler),
+        client = httpx.Client(transport=httpx.MockTransport(handler), trust_env=False,
             event_hooks={"request": [_http_request], "response": [_http_response]})
         self.addCleanup(client.close)
         model = TextModel.__new__(TextModel)
@@ -37,6 +38,26 @@ class ConsoleLogging(unittest.TestCase):
             "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": finish}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}
 
+    def test_text_and_visual_clients_ignore_environment_proxies_and_keep_audit_hooks(self):
+        with patch.dict("os.environ", {
+            "OPENAI_API_KEY": "test-key", "MODEL": "test-model", "OPENAI_BASE_URL": "https://model.test/v1",
+            "VISUAL_API_KEY": "test-key", "VISUAL_MODEL": "test-model", "VISUAL_BASE_URL": "https://model.test/v1",
+            "HTTP_PROXY": "invalid-proxy", "HTTPS_PROXY": "invalid-proxy", "ALL_PROXY": "invalid-proxy",
+            "http_proxy": "invalid-proxy", "https_proxy": "invalid-proxy", "all_proxy": "invalid-proxy",
+        }):
+            for model_type in (TextModel, VisualModel):
+                with self.subTest(model=model_type.__name__):
+                    model = model_type()
+                    try:
+                        transport = model.client._client
+                        self.assertFalse(transport.trust_env)
+                        self.assertEqual(transport.event_hooks["request"], [_http_request])
+                        self.assertEqual(transport.event_hooks["response"], [_http_response])
+                        self.assertEqual(model.client.timeout, 120)
+                        self.assertEqual(model.client.max_retries, 2)
+                    finally:
+                        model.client.close()
+
     def test_console_is_bounded_but_panels_and_model_io_are_complete(self):
         source = "export const answer = 42;\n" * 1000 + "END-OF-SOURCE"
         raw_content = json.dumps({"edits": [{"path": "frontend/src/page.tsx", "content": source}]})
@@ -44,11 +65,12 @@ class ConsoleLogging(unittest.TestCase):
         terminal = StringIO()
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with patch("sys.argv", ["10_implement_ui.py"]), redirect_stdout(terminal), redirect_stderr(terminal), console_log(root):
+            with patch("sys.argv", ["10_implement_ui.py"]), patch("infrastructure.utils.presentation.model_io.monotonic", side_effect=[10, 20, 25.125]), redirect_stdout(terminal), redirect_stderr(terminal), console_log(root):
                 DemoConsole().show("PAGE-home | Input context", "INPUT-DETAIL\n" * 1000 + "END-OF-PANEL")
                 result = model.generate_json("Implement UI.", {"files": {"page.tsx": {"content": source, "writable": True}}})
             records = [json.loads(line) for line in (root / "model_calls.jsonl").read_text().splitlines()]
             compiler_log = (root / "compiler.log").read_text()
+            self.assertFalse((root / ".arc" / "model_logs").exists())
         self.assertEqual(result["edits"][0]["content"], source)
         self.assertNotIn("END-OF-PANEL", terminal.getvalue())
         self.assertNotIn("END-OF-SOURCE", terminal.getvalue())
@@ -58,6 +80,11 @@ class ConsoleLogging(unittest.TestCase):
         self.assertIn("frontend/src/page.tsx", terminal.getvalue())
         self.assertIn("export const answer = 42", terminal.getvalue())
         self.assertIn("truncated", terminal.getvalue())
+        self.assertIn("Reported tokens | input: 10 | cached input: unavailable | output: 20 | total: 30", terminal.getvalue())
+        self.assertIn("Round-trip latency: 5.12 s", terminal.getvalue())
+        self.assertIn("Round-trip latency: 5.12 s", compiler_log)
+        self.assertEqual(records[3]["elapsed_seconds"], 5.125)
+        self.assertNotIn("characters", terminal.getvalue())
         self.assertEqual([item["event"] for item in records], ["request", "http_request", "http_response", "response"])
         wire_request = json.loads(records[1]["body"])
         self.assertEqual(wire_request, records[0]["arguments"])
@@ -80,9 +107,25 @@ class ConsoleLogging(unittest.TestCase):
         model = self.model(handler)
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with redirect_stdout(StringIO()), console_log(root):
-                self.assertEqual(model.generate_json("Generate.", {}), {"ok": True})
+            with patch("sys.argv", ["07_infer_api_contracts.py"]), redirect_stdout(StringIO()), console_log(root, debug_model_io=True):
+                self.assertEqual(model.generate_json("Generate.\nKeep line breaks.", {}), {"ok": True})
             records = [json.loads(line) for line in (root / "model_calls.jsonl").read_text().splitlines()]
+            directory = root / ".arc" / "model_logs"
+            inputs = list(directory.glob("*.model.input"))
+            self.assertEqual(len(inputs), 3)
+            self.assertEqual(len(list(directory.glob("*.model.ouput"))), 3)
+            request_records = [record for record in records if record["event"] == "http_request"]
+            response_records = [record for record in records if record["event"] == "http_response"]
+            for index, (request_record, response_record) in enumerate(zip(request_records, response_records)):
+                call_id = request_record["call_id"]
+                attempt = 1 + sum(record["call_id"] == call_id for record in request_records[:index])
+                input_file = next(directory.glob(f"07.*.{call_id[:8]}.{attempt}.model.input"))
+                output_file = input_file.with_name(input_file.name.removesuffix(".input") + ".ouput")
+                self.assertEqual(input_file.read_text(), "Generate.\nKeep line breaks.\nReturn exactly one JSON object without Markdown.\n\n{}")
+                body = json.loads(response_record["body"])
+                expected = body["error"]["message"] if "error" in body else body["choices"][0]["message"]["content"]
+                self.assertEqual(output_file.read_text(), expected)
+                self.assertNotIn("test-secret", input_file.read_text())
         requests = [json.loads(record["body"]) for record in records if record["event"] == "http_request"]
         self.assertEqual(requests, attempts)
         self.assertEqual(len(requests), 3)
@@ -115,6 +158,35 @@ class ConsoleLogging(unittest.TestCase):
             records = [json.loads(line) for line in (root / "model_calls.jsonl").read_text().splitlines()]
         self.assertNotIn("QUJD", terminal.getvalue())
         self.assertEqual(json.loads(records[1]["body"]), arguments)
+
+    def test_missing_usage_has_no_local_estimate(self):
+        summary = _usage_summary({})
+        self.assertIn("input: unavailable", summary)
+        self.assertIn("output: unavailable", summary)
+        self.assertNotIn("~", summary)
+        self.assertNotIn("estimate", summary)
+        self.assertEqual(_usage_summary({"input_tokens": 1200, "output_tokens": 0, "total_tokens": 1200}),
+            "Reported tokens | input: 1,200 | cached input: unavailable | output: 0 | total: 1,200")
+        self.assertNotIn("tokens", _input_summary({"model": "test", "messages": [{"role": "user", "content": "Hello"}]}))
+
+    def test_usage_cache_counts_survive_sdk_parsing_and_reach_logs(self):
+        for extra, expected in [
+            ({"prompt_tokens_details": {"cached_tokens": 0}}, "0"),
+            ({"prompt_tokens_details": {"cached_tokens": 8}}, "8"),
+            ({"prompt_cache_hit_tokens": 7}, "7"),
+            ({"input_tokens_details": {"cached_tokens": 6}}, "6"),
+        ]:
+            with self.subTest(extra=extra), TemporaryDirectory() as temporary:
+                body = self.response('{"ok":true}')
+                body["usage"].update(extra)
+                model = self.model(lambda request: httpx.Response(200, json=body))
+                terminal = StringIO()
+                root = Path(temporary)
+                with redirect_stdout(terminal), console_log(root):
+                    model.generate_json("Generate.", {})
+                expected_line = f"Reported tokens | input: 10 | cached input: {expected} | output: 20 | total: 30"
+                self.assertIn(expected_line, terminal.getvalue())
+                self.assertIn(expected_line, (root / "compiler.log").read_text())
 
     def test_preview_limits_single_line_and_many_short_lines(self):
         self.assertLess(len(preview("x" * 1000000)), 6000)
