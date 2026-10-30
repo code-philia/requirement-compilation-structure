@@ -1,18 +1,22 @@
-// requirement: REQ-2 — Login; the two teaching scenarios.
+// requirement: REQ-2 — Register; the two teaching scenarios.
 import { expect, test } from '@playwright/test';
-import { EXISTING_ACCOUNT, entry, expectSignedIn, expectSignedOut, signIn } from './helpers';
+import { EXISTING_ACCOUNT, button, entry, expectSignedIn, expectSignedOut,
+  fillRegistration, newAccount, openRegistration, registerAccount } from './helpers';
 
-test('SCN-REQ-2-01: Log in with the correct password and remain signed in after refresh', async ({ page }) => {
+test('SCN-REQ-2-01: Register with a new username and remain signed in after refresh', async ({ page }) => {
   await entry(page);
-  await signIn(page, EXISTING_ACCOUNT.username, EXISTING_ACCOUNT.password);
-  await expectSignedIn(page, EXISTING_ACCOUNT);
+  const account = newAccount();
+  await registerAccount(page, account);
   await page.reload();
-  await expectSignedIn(page, EXISTING_ACCOUNT);
+  await expectSignedIn(page, account);
 });
 
-test('SCN-REQ-2-02: Reject an incorrect password without creating a session', async ({ page }) => {
+test('SCN-REQ-2-02: Reject an existing username without creating a session', async ({ page }) => {
+  const account = { ...newAccount(), username: EXISTING_ACCOUNT.username };
   await entry(page);
-  await signIn(page, EXISTING_ACCOUNT.username, 'WrongSmoke!2026');
+  await openRegistration(page);
+  await fillRegistration(page, account);
+  await button(page, 'Next step').click();
   await expect(page.getByRole('alert')).toBeVisible();
   await page.goto('/');
   await page.reload();

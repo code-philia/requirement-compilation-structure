@@ -39,18 +39,20 @@ export async function expectSignedIn(page: Page, account: { username: string }) 
   await expect(page.getByText(account.username, { exact: true })).toBeVisible();
   await expect(link(page, 'Register')).toHaveCount(0);
   await expect(link(page, 'Login')).toHaveCount(0);
+  await expect(button(page, 'Logout')).toBeVisible();
 }
 export async function expectSignedOut(page: Page) {
   await expect(link(page, 'Register')).toBeVisible();
   await expect(link(page, 'Login')).toBeVisible();
+  await expect(button(page, 'Logout')).toHaveCount(0);
 }
 export async function fillRegistration(page: Page, account: Account) {
   const nationality = page.getByRole('combobox', { name: 'Nationality', exact: true });
   try {
-    await nationality.selectOption({ label: 'Vietnam' }, { timeout: 1_000 });
+    await nationality.selectOption({ label: 'China' }, { timeout: 1_000 });
   } catch {
     await nationality.click();
-    await page.getByRole('option', { name: 'Vietnam', exact: true }).click();
+    await page.getByRole('option', { name: 'China', exact: true }).click();
   }
   await textbox(page, 'Name').fill(account.name);
   await textbox(page, 'Passport number').fill(account.passport);
@@ -75,4 +77,11 @@ export async function signIn(page: Page, identifier: string, password: string) {
   await textbox(page, 'Email/Username/Mobile number').fill(identifier);
   await passwordField(page, 'Password').fill(password);
   await button(page, 'LOGIN').click();
+}
+
+export async function signOut(page: Page, account: { username: string }) {
+  await button(page, 'Logout').click();
+  await expect(page).toHaveURL(/\/$/);
+  await expectSignedOut(page);
+  await expect(page.getByText(account.username, { exact: true })).toHaveCount(0);
 }

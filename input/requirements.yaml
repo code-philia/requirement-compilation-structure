@@ -1,7 +1,7 @@
 id: ROOT
 name: User authentication module
 description:
-  text: Provide a homepage, username-based registration, and login for the user authentication module.
+  text: Provide a homepage, username-based registration, login, and logout for the user authentication module.
 scenarios: []
 children:
   - id: REQ-1
@@ -10,7 +10,7 @@ children:
       text: |-
         The home page / owns the authentication entry links and the current user's display. When signed out, show a Register link whose href is /register and a Login link whose href is /login. These routes are navigation targets; this requirement does not define or create their page contents.
         On entering or refreshing the home page, resolve the current user from the existing session credential. A valid existing session displays the exact username and hides Register and Login. A missing or unrecognized session leaves the visitor signed out, with both links visible and no authenticated username. Do not briefly display a previously cached username while session identity is unresolved. A failed session lookup must not leave a stale authenticated display.
-        Homepage session resolution is read-only: it must not create accounts or sessions, change account details or credentials, or verify a password. Do not display passwords, password hashes, or session credentials. Registration forms, personal-detail fields, registration submission and account/session creation belong to REQ-2; login forms, credential submission and new-session creation belong to REQ-3. Homepage only reads and displays the authentication outcome produced by those requirements.
+        Homepage session resolution is read-only: it must not create accounts or sessions, change account details or credentials, or verify a password. Do not display passwords, password hashes, or session credentials. Registration forms, personal-detail fields, registration submission and account/session creation belong to REQ-2; login forms, credential submission and new-session creation belong to REQ-3. Session termination belongs to REQ-4. Homepage only reads and displays the authentication outcome produced by those requirements.
         The reference image supplies the homepage layout, header and surrounding visual style. Search, booking, travel guides, language switching, carousel behavior and unrelated links are outside this requirement's functional scope. Surrounding reference content may be presented visually, but must not introduce new backend entities, APIs or interactive business behavior.
       image:
         - id: IMG-HOMEPAGE
@@ -66,7 +66,7 @@ children:
     name: Register
     description:
       text: |-
-        The registration page /register contains Nationality, Name, Passport number, Passport expiration date, Date of birth, Gender, Username, Password, Confirm Password, and Email address fields. Labels match the reference image. Nationality includes Vietnam; Gender offers Male and Female. Password fields conceal typed characters.
+        The registration page /register contains Nationality, Name, Passport number, Passport expiration date, Date of birth, Gender, Username, Password, Confirm Password, and Email address fields. Labels match the reference image. Nationality defaults to China and includes China; Gender offers Male and Female. Password fields conceal typed characters.
         The agreement checkbox is labeled "I have read and agree to abide by Terms of Service and Privacy Policy of 12306.cn." The submit button is labeled "Next step".
         Submitting complete details, matching passwords, and agreement consent saves the account and signs the user in automatically if the username is unused. If the username already exists, display an error with role=alert and create neither an account nor a session. Compare usernames by exact value. Store passwords as hashes; do not store Confirm Password.
       image:
@@ -122,4 +122,28 @@ children:
             Then: Display an invalid-credentials error with role=alert. Create no session and leave existing accounts unchanged. Register and Login remain visible after refreshing the home page.
             references:
               - \ref[image](IMG-LOGIN)
+    children: []
+  - id: REQ-4
+    name: Logout
+    description:
+      text: |-
+        On the signed-in home page /, display a button with accessible name "Logout" alongside the current username. Hide this button when signed out.
+        Clicking Logout invalidates the current session on the server and clears its browser credential. Stay on or return to the home page /, remove the authenticated username, hide Logout, and display Register and Login. Refreshing the home page must preserve the signed-out state.
+        Logout preserves the account, its traveler details, agreement consent, and password hash. The same username and password can be used to log in again and create a new session.
+        Use the homepage reference for the surrounding layout; the signed-out reference does not show the authenticated Logout button. Do not add a separate logout page.
+      image:
+        - id: IMG-LOGOUT
+          reference: reference/homepage.png
+          page: home
+    scenarios:
+      - id: SCN-REQ-4-01
+        name: Log out and remain signed out after refresh
+        steps:
+          - id: STEP-REQ-4-01-01
+            Given: The visitor registered an account through REQ-2 and is signed in on the home page.
+            When: Click Logout and refresh the home page.
+            Then: Display Register and Login, show neither the authenticated username nor Logout, and keep the visitor signed out because the current session has been invalidated.
+            references:
+              - \ref[requirement](REQ-2)
+              - \ref[image](IMG-LOGOUT)
     children: []
