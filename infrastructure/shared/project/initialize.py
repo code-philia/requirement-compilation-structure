@@ -31,12 +31,14 @@ def enable_import_case_checks(output_dir: Path, workspace: str) -> str:
     return relative
 
 
-def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK) -> list[str]:
+def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK, port: int = 3000) -> list[str]:
     # Templates contain infrastructure only. Existing application sources and
     # data are preserved; dependencies are installed separately by the TDD step.
     """Copy missing files from the chosen stack template and return their workspace-relative paths; preserve existing files."""
     if stack not in STACKS:
         raise ValueError(f"Unknown technology stack: {stack}. Available: {', '.join(STACKS)}")
+    if not 1 <= port <= 65535:
+        raise ValueError("Backend port must be between 1 and 65535")
     configuration = STACKS[stack]
     output_dir = output_dir.resolve()
     templates = configuration["templates"]
@@ -47,13 +49,18 @@ def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK) -> list[str
         if not source.is_file():
             continue
         relative = source.relative_to(templates)
+        content = source.read_text(encoding="utf-8-sig")
+        if relative.as_posix() == "backend/src/server.ts":
+            content = content.replace('process.env.PORT ?? "3000"', f'process.env.PORT ?? "{port}"')
+        elif relative.as_posix() == "frontend/vite.config.ts":
+            content = content.replace("http://127.0.0.1:3000", f"http://127.0.0.1:{port}")
         target = output_dir / relative
         if not target.resolve().is_relative_to(output_dir):
             raise ValueError(f"Project path escapes the output directory: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             with target.open("x", encoding="utf-8", newline="\n") as stream:
-                stream.write(source.read_text(encoding="utf-8-sig"))
+                stream.write(content)
         except FileExistsError:
             if not target.is_file():
                 raise ValueError(f"Expected a project file: {target}")

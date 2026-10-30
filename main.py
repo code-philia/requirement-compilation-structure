@@ -10,16 +10,20 @@ from infrastructure.utils.presentation.logging import configure_console
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Read the three public options and validate input/output locations before compilation."""
+    """Read public options and validate paths and the backend port before compilation."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=COMPILER_DIR / "input",
         help="Requirement directory containing requirements.yaml and reference assets (default: compiler/input)")
-    parser.add_argument("--output", "--output-dir", dest="output", type=Path, required=True,
+    parser.add_argument("--output", "--output-dir", "-o", dest="output", type=Path, required=True,
         help="Directory for the generated application and .arc artifacts")
     parser.add_argument("--model-log", "--debug-model-io", dest="model_log", action="store_true",
         help="Show detailed model I/O and save per-call prompt/response logs; usage and timing are always shown")
+    parser.add_argument("--port", type=int, default=3000,
+        help="Default generated backend port and frontend API proxy target (default: 3000)")
     args = parser.parse_args(argv)
     try:
+        if not 1 <= args.port <= 65535:
+            raise ValueError("--port must be between 1 and 65535")
         args.input, args.output = resolve_directories(args)
         if not args.input.is_dir():
             raise ValueError(f"Input directory does not exist: {args.input}")
@@ -35,7 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     configure_console()
     args = parse_args(argv)
-    compiler = Compiler(args.input, args.output, model_log=args.model_log)
+    compiler = Compiler(args.input, args.output, model_log=args.model_log, port=args.port)
     try:
         compiler.compile()
     except KeyboardInterrupt:

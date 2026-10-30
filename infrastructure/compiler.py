@@ -10,20 +10,23 @@ from infrastructure.utils.presentation.logging import console_log
 class Compiler:
     """Own shared paths, configuration, and results for one compilation."""
 
-    def __init__(self, input_dir: Path, output_dir: Path, model_log: bool = False) -> None:
+    def __init__(self, input_dir: Path, output_dir: Path, model_log: bool = False, port: int = 3000) -> None:
+        if not 1 <= port <= 65535:
+            raise ValueError("Backend port must be between 1 and 65535")
         self.input_dir = Path(input_dir).expanduser().resolve()
         self.output_dir = Path(output_dir).expanduser().resolve()
         self.arc_dir = self.output_dir / ".arc"
         self.model_log = model_log
+        self.port = port
         self.artifacts: dict[str, object] = {}
         self.current_stage: str | None = None
 
-    def _run(self, module: str, function: str, *arguments):
+    def _run(self, module: str, function: str, *arguments, **options):
         """Call a pass directly, preserving its stage identity and error traceback."""
         self.current_stage = module + ".py"
         with console_log(self.output_dir, stage=self.current_stage,
                 model_log=self.model_log, debug_model_io=self.model_log):
-            return getattr(import_module(module), function)(*arguments)
+            return getattr(import_module(module), function)(*arguments, **options)
 
     def compile(self) -> Path:
         """Execute the 13 compilation passes in order and return the generated application directory."""
@@ -31,7 +34,7 @@ class Compiler:
         show_panel("Requirement compiler | Pipeline",
             f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: 13\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
         self.artifacts["project_files"] = self._run(
-            "00_project_initialization", "project_initialization", self.output_dir)
+            "00_project_initialization", "project_initialization", self.output_dir, port=self.port)
         self.artifacts["requirements"] = self._run(
             "01_explore_requirement", "explore_requirement", self.input_dir, self.arc_dir)
         self.artifacts["db_schema"] = self._run(

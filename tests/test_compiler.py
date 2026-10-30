@@ -38,16 +38,17 @@ class CompilerPipeline(unittest.TestCase):
         original_argv = sys.argv[:]
         with TemporaryDirectory(prefix="compiler 中文 ") as temporary:
             root = Path(temporary)
-            compiler = Compiler(root / "input", root / "application with spaces", model_log=True)
+            compiler = Compiler(root / "input", root / "application with spaces", model_log=True, port=33042)
 
             def load(module):
                 function = next(function for name, function in PASSES if name == module)
-                def execute(*arguments):
+                def execute(*arguments, **options):
                     session = session_info()
                     self.assertTrue(session['model_log'])
                     self.assertTrue(session['debug_model_io'])
                     self.assertTrue(session['stage'].startswith('Stage ' + module[:2]))
                     calls.append((module, arguments))
+                    self.assertEqual(options, {"port": 33042} if module.startswith("00") else {})
                     return {"pass": module}
                 return SimpleNamespace(**{function: execute})
 
@@ -69,7 +70,7 @@ class CompilerPipeline(unittest.TestCase):
     def test_failure_stops_later_passes_and_preserves_completed_results(self):
         def load(module):
             if module == '00_project_initialization':
-                return SimpleNamespace(project_initialization=lambda output: ['package.json'])
+                return SimpleNamespace(project_initialization=lambda output, port: ['package.json'])
             raise ValueError('Invalid requirement JSON')
         with TemporaryDirectory() as temporary:
             compiler = Compiler(Path(temporary) / 'input', Path(temporary) / 'output')
@@ -146,12 +147,23 @@ class CompilerCLI(unittest.TestCase):
             output = root / 'output'
             with patch.object(main, 'Compiler') as cls:
                 main.main(['--input', str(source), '--output', str(output), '--model-log'])
-            cls.assert_called_once_with(source.resolve(), output.resolve(), model_log=True)
+            cls.assert_called_once_with(source.resolve(), output.resolve(), model_log=True, port=3000)
             cls.return_value.compile.assert_called_once_with()
             self.assertFalse(output.exists())
             args = main.parse_args(['--input', str(source), '--output', str(output)])
             self.assertFalse(args.model_log)
             self.assertTrue(main.parse_args(['--input', str(source), '--output', str(output), '--debug-model-io']).model_log)
+
+    def test_port_and_short_output_option_reach_the_compiler(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.source(root)
+            with patch.object(main, 'Compiler') as cls:
+                main.main(['--input', str(source), '-o', str(root / 'output'), '--port', '33042'])
+            self.assertEqual(cls.call_args.kwargs['port'], 33042)
+            for port in ('0', '-1', '65536'):
+                with self.subTest(port=port), redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                    main.parse_args(['--input', str(source), '-o', str(root / 'output'), '--port', port])
 
     def test_invalid_locations_fail_before_creating_compiler_or_output(self):
         with TemporaryDirectory() as temporary:
