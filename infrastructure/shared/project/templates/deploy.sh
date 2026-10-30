@@ -3,9 +3,6 @@ set -euo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-# Git does not retain the empty SQL directory in a fresh template checkout.
-mkdir -p backend/src/db/tables
-
 echo "[deploy] Installing frontend and backend workspace dependencies"
 npm install --include=dev --include=optional --no-audit --no-fund
 

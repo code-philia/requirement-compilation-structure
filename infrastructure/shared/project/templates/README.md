@@ -27,8 +27,8 @@ Run from the application root:
 bash deploy.sh
 ```
 
-The script creates the SQL table directory if needed, installs dependencies for
-both workspaces, builds the frontend and backend, and starts the server in the
+The script installs dependencies for both workspaces, builds the frontend and
+backend, and starts the server in the
 foreground. It does not run tests. Startup errors stop the script.
 
 The server initializes the database, serves the built frontend and `/api/`
