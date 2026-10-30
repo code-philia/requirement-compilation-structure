@@ -10,7 +10,12 @@ from contextvars import ContextVar
 import httpx
 
 from infrastructure.utils.presentation.console import current_activity, preview, show_panel, WaitingStatus
-from infrastructure.utils.presentation.logging import session_info
+from infrastructure.utils.presentation.logging import session_info, full_detail
+from rich.console import Group
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
+from infrastructure.utils.presentation.artifacts import proposal_kind, render_artifact, table, text
 
 
 _call = ContextVar("compiler_model_call", default=None)
@@ -20,7 +25,7 @@ def _record(event: str, **data) -> None:
     """Append untruncated values; never record authentication headers."""
     call = _call.get()
     session = session_info()
-    if not session:
+    if not session or not session.get("model_log", True):
         return
     record = {"timestamp": datetime.now(timezone.utc).isoformat(),
         "stage": session["stage"], "call_id": call["id"] if call else None,
@@ -111,42 +116,127 @@ def _input_summary(arguments: dict) -> str:
     return "\n".join(lines)
 
 
-def _output_preview(content: str) -> str:
-    """Show readable JSON or source excerpts, including the affected file paths."""
+def _usage_summary(usage: dict) -> str:
+    """Keep a compact plain-text usage line in the persistent log."""
+    return "Reported tokens | " + " | ".join(
+        f"{name.lower()}: {value:,}" if value is not None else f"{name.lower()}: unavailable"
+        for name, value in _usage_counts(usage).items())
+
+
+def _input_view(arguments):
+    """Show bounded literal prompts and a file access inventory, excluding image data."""
+    views = [Text(_input_summary(arguments))]
+    for message in arguments.get("messages", [])[:6]:
+        prompt = _message_text(message)
+        views.append(Panel(Text(preview(prompt, max_lines=10, max_chars=1000)),
+            title=Text(str(message.get("role", "message"))), border_style="dim blue"))
+        if message.get("role") == "user":
+            try:
+                payload = json.loads(prompt)
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and isinstance(payload.get("files"), dict):
+                files = table("File", "Access")
+                for path, record in list(payload["files"].items())[:16]:
+                    files.add_row(text(path), text("edit" if isinstance(record, dict) and record.get("writable") else "read"))
+                views.append(files)
+    return Group(*views)
+
+
+def _usage_counts(usage):
+    """Normalize provider aliases, retaining unknown values and reported zeroes."""
+    def first(*values):
+        return next((value for value in values if type(value) is int), None)
+    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+    return {"Input": first(usage.get("prompt_tokens"), usage.get("input_tokens")),
+        "Cached input": first(details.get("cached_tokens"), usage.get("prompt_cache_hit_tokens")),
+        "Output": first(usage.get("completion_tokens"), usage.get("output_tokens")),
+        "Total": first(usage.get("total_tokens"))}
+
+
+def _output_view(content, usage, elapsed):
+    """Rendering an incomplete proposal must not change the model call outcome."""
+    try:
+        return _structured_output_view(content, usage, elapsed)
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+        return Group(Text(_usage_summary(usage)), Text(f"Round-trip latency: {elapsed:.2f} s"), Text(preview(content)))
+
+
+def _usage_view(usage, elapsed):
+    """Usage and timing remain visible even when detailed model logging is off."""
+    metrics = table("Usage / timing", "Reported value")
+    for name, value in _usage_counts(usage).items():
+        metrics.add_row(text(name), text(f"{value:,}" if value is not None else "unavailable"))
+    metrics.add_row(text("Round-trip latency"), Text(f"{elapsed:.2f} s", style="bold cyan"))
+    return metrics
+
+
+def _structured_output_view(content, usage, elapsed):
+    views = [_usage_view(usage, elapsed), Text("Model proposal · acceptance belongs to the current compiler pass", style="dim")]
     try:
         value = json.loads(content)
     except ValueError:
-        return preview(content)
+        value = None
     if isinstance(value, dict) and isinstance(value.get("edits"), list):
-        edits = value["edits"]
-        lines = [f"File edits: {len(edits)}"]
-        for edit in edits[:8]:
+        edits = table("File edits", "Source lines")
+        for edit in value["edits"][:16]:
             if isinstance(edit, dict):
-                lines.append(str(edit.get("path", "(unknown path)")))
-        if len(edits) > 8:
-            lines.append(f"... {len(edits) - 8} more file edits")
-        for edit in edits[:3]:
-            if isinstance(edit, dict) and isinstance(edit.get("content"), str):
-                lines.extend([f"\n--- {edit.get('path')} ---", preview(edit["content"], max_lines=12, max_chars=1400)])
-        return "\n".join(lines)
-    return preview(json.dumps(value, ensure_ascii=False, indent=2), max_lines=40, max_chars=6000)
+                edits.add_row(text(edit.get("path", "?")), text(len(str(edit.get("content", "")).splitlines())))
+        views.append(edits)
+        for edit in value["edits"][:2]:
+            if not isinstance(edit, dict) or not isinstance(edit.get("content"), str):
+                continue
+            path = str(edit.get("path", ""))
+            extension = path.rsplit(".", 1)[-1]
+            lexer = {"ts": "typescript", "tsx": "tsx", "js": "javascript", "py": "python", "sql": "sql", "json": "json"}.get(extension, "text")
+            views.append(Panel(Syntax(preview(edit["content"], max_lines=10, max_chars=1200), lexer,
+                theme="ansi_dark", word_wrap=True, background_color="default"), title=text(path), border_style="dim"))
+    elif isinstance(value, dict) and isinstance(value.get("content"), str):
+        path = str(value.get("path", "SQL proposal"))
+        views.append(Panel(Syntax(preview(value["content"], max_lines=16, max_chars=1800), "sql",
+            theme="ansi_dark", word_wrap=True, background_color="default"), title=text(path), border_style="dim"))
+    elif isinstance(value, dict) and isinstance(value.get("contract"), dict):
+        contract = table("Condition", "Description")
+        for key in ("precondition", "postcondition"):
+            for item in value["contract"].get(key, [])[:12]:
+                contract.add_row(text(key), text(item.get("description", item) if isinstance(item, dict) else item, 600))
+        views.append(contract)
+    elif isinstance(value, dict):
+        try:
+            views.append(render_artifact(proposal_kind(value), value, context=(session_info() or {}).get("artifacts", {})))
+        except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+            views.append(Text(preview(content)))
+    else:
+        views.append(Text(preview(content)))
+    return Group(*views)
 
 
-def _usage_summary(usage: dict) -> str:
-    """Show reported usage, preserving zero counts and distinguishing absent values."""
-    def first_count(*values):
-        return next((value for value in values if type(value) is int), None)
+def _count_call(usage, elapsed, failed=False):
+    session = session_info()
+    if session is None:
+        return
+    stats = session.setdefault("model_stats", {})
+    stats["calls"] = stats.get("calls", 0) + 1
+    stats["failed"] = stats.get("failed", 0) + int(failed)
+    stats["seconds"] = stats.get("seconds", 0) + elapsed
+    for key, value in _usage_counts(usage).items():
+        if value is not None:
+            stats[key] = stats.get(key, 0) + value
+            stats[key + " reports"] = stats.get(key + " reports", 0) + 1
 
-    input_tokens = first_count(usage.get("prompt_tokens"), usage.get("input_tokens"))
-    output_tokens = first_count(usage.get("completion_tokens"), usage.get("output_tokens"))
-    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
-    cached_tokens = first_count(details.get("cached_tokens"), usage.get("prompt_cache_hit_tokens"))
-    counts = [("input", input_tokens), ("cached input", cached_tokens),
-        ("output", output_tokens), ("total", first_count(usage.get("total_tokens")))]
-    lines = ["Reported tokens | " + " | ".join(
-        f"{name}: {value:,}" if value is not None else f"{name}: unavailable"
-        for name, value in counts)]
-    return "\n".join(lines)
+
+def show_call_totals():
+    """Summarize this stage's SDK calls; cached input is a subset of input."""
+    stats = (session_info() or {}).get("model_stats", {})
+    if not stats:
+        return
+    view = table("Stage model calls", "Value", "Usage availability")
+    view.add_row(text("Calls / failed"), text(f"{stats['calls']} / {stats['failed']}"), text("SDK calls; time includes retries"))
+    view.add_row(text("Total round-trip time"), text(f"{stats['seconds']:.2f} s"), text("sum of calls"))
+    for key in ("Input", "Cached input", "Output", "Total"):
+        view.add_row(text(key), text(f"{stats[key]:,}" if key in stats else "unavailable"),
+            text(f"reported in {stats.get(key + ' reports', 0)}/{stats['calls']} calls"))
+    show_panel("Stage model usage | reported counts only", view, tone="output")
 
 
 def invoke(client, arguments: dict):
@@ -156,7 +246,12 @@ def invoke(client, arguments: dict):
     session = session_info()
     label = f"{session['stage']} | {activity}" if session else activity
     token = _call.set({"id": call_id, "activity": activity})
-    show_panel(f"[MODEL INPUT] {label} | call {call_id[:8]}", _input_summary(arguments), tone="input", max_lines=12, max_chars=1600)
+    verbose = session is None or session.get("model_log", True)
+    if verbose:
+        full_detail(f"[MODEL INPUT] {label}", "\n\n".join(_message_text(message) for message in arguments.get("messages", [])))
+        show_panel(f"[MODEL INPUT] {label} | call {call_id[:8]}", _input_view(arguments), tone="input")
+    else:
+        show_panel(f"[MODEL CALL] {label} | call {call_id[:8]}", f"Model: {arguments.get('model')}", tone="input")
     waiting = WaitingStatus()
     started = monotonic()
 
@@ -170,12 +265,15 @@ def invoke(client, arguments: dict):
         _record("response", elapsed_seconds=elapsed, response=raw)
         waiting.close()
         content = "\n".join(choice.message.content or "" for choice in response.choices)
-        summary = _usage_summary(raw.get("usage") or {})
+        usage = raw.get("usage") or {}
+        _count_call(usage, elapsed)
+        full_detail(f"[MODEL OUTPUT] {label}", _usage_summary(usage) + f"\nRound-trip latency: {elapsed:.2f} s" + ("\n" + content if verbose else ""))
         show_panel(f"[MODEL OUTPUT] {label} | {elapsed:.2f}s",
-            summary + f"\nRound-trip latency: {elapsed:.2f} s\n" + _output_preview(content or json.dumps(raw, ensure_ascii=False)), tone="output", max_lines=60, max_chars=8500)
+            _output_view(content, usage, elapsed) if verbose else _usage_view(usage, elapsed), tone="output")
         return response
     except BaseException as error:
         elapsed = monotonic() - started
+        _count_call({}, elapsed, failed=True)
         waiting.close()
         _record("error", elapsed_seconds=elapsed,
             error_type=type(error).__name__, message=str(error))

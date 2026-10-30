@@ -56,6 +56,7 @@ def synthesize_interactions(arc_dir, ui, tree, schema, obligations, backend, con
             lambda value: apply_decomposition(result, value, rid, ui, tree, schema, obligations, backend, analyzed),
             console, label, max_attempts)
         analyzed.append(rid)
+        console.artifact("ui_interactions", result, label + " | Accepted interactions")
         console.show(label + " | Accepted", json.dumps(response, ensure_ascii=False, indent=2))
     validate_interactions(result, ui, tree, schema, obligations, backend, analyzed, complete=True)
     for eid, event in result["events"].items():
@@ -74,5 +75,6 @@ def synthesize_interactions(arc_dir, ui, tree, schema, obligations, backend, con
 
         result["contracts"][eid], _ = propose(model, CONTRACT, request, accept, console,
             f"Event P/Q {eid}", max_attempts)
+    console.artifact("ui_interactions", result, "Accepted event contracts")
     save_json(arc_dir / "ui_interactions.json", result)
     return result

@@ -4,6 +4,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
+import json
 import re
 from threading import RLock
 import traceback
@@ -63,9 +64,10 @@ def configure_console() -> None:
 
 
 @contextmanager
-def console_log(output_dir: Path, *, debug_model_io: bool = False):
-    """Append a timestamped step session to compiler.log while mirroring stdout/stderr and recording uncaught failures."""
-    from infrastructure.utils.presentation.console import show_panel
+def console_log(output_dir: Path, *, debug_model_io: bool = False, model_log: bool = True, stage: str | None = None):
+    """Mirror a pass to compiler.log; explicit stage names support in-process compilation."""
+    from infrastructure.utils.presentation.console import show_panel, show_dashboard
+    from infrastructure.utils.presentation.artifacts import ARTIFACTS
     output_dir.mkdir(parents=True, exist_ok=True)
     configure_console()
     with (output_dir / "compiler.log").open("a", encoding="utf-8", newline="\n") as log:
@@ -74,11 +76,21 @@ def console_log(output_dir: Path, *, debug_model_io: bool = False):
         stderr = TeeStream(sys.stderr, log, lock)
         with redirect_stdout(stdout), redirect_stderr(stderr):
             timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            script = Path(sys.argv[0]).name
+            script = stage or Path(sys.argv[0]).name
+            artifacts = {}
+            for kind in ARTIFACTS:
+                try:
+                    value = json.loads((output_dir / ".arc" / (kind + ".json")).read_text(encoding="utf-8-sig"))
+                    if isinstance(value, dict):
+                        artifacts[kind] = value
+                except (OSError, ValueError):
+                    continue
             token = _session.set({"output": output_dir, "stage": stage_label(script), "lock": lock, "log": log,
-                "debug_model_io": debug_model_io})
+                "debug_model_io": debug_model_io, "model_log": model_log, "artifacts": artifacts, "model_stats": {}})
             started = monotonic()
-            show_panel(f"[START] {stage_label(script)}", f"{timestamp}\nScript: {script}\nLogs: {output_dir / 'compiler.log'}\nFull model I/O: {output_dir / 'model_calls.jsonl'}")
+            model_logs = f"Full model I/O: {output_dir / 'model_calls.jsonl'}" if model_log else "Detailed model I/O logs: disabled"
+            show_panel(f"[START] {stage_label(script)}", f"{timestamp}\nScript: {script}\nLogs: {output_dir / 'compiler.log'}\n{model_logs}")
+            show_dashboard(stage_label(script), artifacts)
             try:
                 yield
             except BaseException as error:
@@ -89,6 +101,8 @@ def console_log(output_dir: Path, *, debug_model_io: bool = False):
             else:
                 show_panel(f"[DONE] {stage_label(script)}", f"Completed in {monotonic() - started:.1f}s", tone="success")
             finally:
+                from infrastructure.utils.presentation.model_io import show_call_totals
+                show_call_totals()
                 stdout.flush()
                 stderr.flush()
                 _session.reset(token)

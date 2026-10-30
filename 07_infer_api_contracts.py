@@ -78,6 +78,7 @@ def infer_api_contracts(arc_dir: Path, pause: bool = False) -> dict:
                 print(f"Retrying {aid} ({attempt + 1}/3): {error}", flush=True)
                 request["correction"] = {"error": str(error), "previous_response": response}
         result["apis"][aid] = api
+        console.artifact("backend_contracts", result, f"{aid} | Accepted P/Q")
         console.show(f"{aid} | 2. Accepted precondition (P) / postcondition (Q)",
             json.dumps({key: api[key] for key in ("precondition", "postcondition")}, ensure_ascii=False, indent=2))
     validate_contracts(result, design)

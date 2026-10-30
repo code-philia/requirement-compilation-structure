@@ -53,7 +53,7 @@ class ConsoleLogging(unittest.TestCase):
                         self.assertFalse(transport.trust_env)
                         self.assertEqual(transport.event_hooks["request"], [_http_request])
                         self.assertEqual(transport.event_hooks["response"], [_http_response])
-                        self.assertEqual(model.client.timeout, 120)
+                        self.assertEqual(model.client.timeout, 600)
                         self.assertEqual(model.client.max_retries, 2)
                     finally:
                         model.client.close()
@@ -80,8 +80,10 @@ class ConsoleLogging(unittest.TestCase):
         self.assertIn("frontend/src/page.tsx", terminal.getvalue())
         self.assertIn("export const answer = 42", terminal.getvalue())
         self.assertIn("truncated", terminal.getvalue())
-        self.assertIn("Reported tokens | input: 10 | cached input: unavailable | output: 20 | total: 30", terminal.getvalue())
-        self.assertIn("Round-trip latency: 5.12 s", terminal.getvalue())
+        self.assertRegex(terminal.getvalue(), r"Input\s+│ 10")
+        self.assertRegex(terminal.getvalue(), r"Cached input\s+│ unavailable")
+        self.assertRegex(terminal.getvalue(), r"Output\s+│ 20")
+        self.assertRegex(terminal.getvalue(), r"Round-trip latency\s+│ 5.12 s")
         self.assertIn("Round-trip latency: 5.12 s", compiler_log)
         self.assertEqual(records[3]["elapsed_seconds"], 5.125)
         self.assertNotIn("characters", terminal.getvalue())
@@ -159,6 +161,24 @@ class ConsoleLogging(unittest.TestCase):
         self.assertNotIn("QUJD", terminal.getvalue())
         self.assertEqual(json.loads(records[1]["body"]), arguments)
 
+    def test_disabled_model_logging_keeps_usage_without_dumping_prompts_or_responses(self):
+        marker = "PRIVATE-MODEL-OUTPUT"
+        model = self.model(lambda request: httpx.Response(200, json=self.response(json.dumps({"secret": marker}))))
+        terminal = StringIO()
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with redirect_stdout(terminal), console_log(root, model_log=False, stage="07_infer_api_contracts.py"):
+                result = model.generate_json("PRIVATE-MODEL-PROMPT", {"task": "private"})
+            self.assertEqual(result, {"secret": marker})
+            logged = (root / "compiler.log").read_text()
+            self.assertNotIn(marker, terminal.getvalue() + logged)
+            self.assertNotIn("PRIVATE-MODEL-PROMPT", terminal.getvalue() + logged)
+            self.assertFalse((root / "model_calls.jsonl").exists())
+            self.assertFalse((root / ".arc" / "model_logs").exists())
+        self.assertRegex(terminal.getvalue(), r"Input\s+│ 10")
+        self.assertIn("Round-trip latency", terminal.getvalue())
+        self.assertIn("Stage 07", terminal.getvalue())
+
     def test_missing_usage_has_no_local_estimate(self):
         summary = _usage_summary({})
         self.assertIn("input: unavailable", summary)
@@ -185,7 +205,7 @@ class ConsoleLogging(unittest.TestCase):
                 with redirect_stdout(terminal), console_log(root):
                     model.generate_json("Generate.", {})
                 expected_line = f"Reported tokens | input: 10 | cached input: {expected} | output: 20 | total: 30"
-                self.assertIn(expected_line, terminal.getvalue())
+                self.assertRegex(terminal.getvalue(), rf"Cached input\s+│ {expected}\s")
                 self.assertIn(expected_line, (root / "compiler.log").read_text())
 
     def test_preview_limits_single_line_and_many_short_lines(self):
@@ -202,7 +222,7 @@ class ConsoleLogging(unittest.TestCase):
         self.assertTrue(rows[0].startswith("┌"))
         self.assertTrue(rows[-1].startswith("└"))
         self.assertEqual({display_width(row) for row in rows}, {45})
-        self.assertIn("Interaction design", "".join(rows).replace(" ││ ", ""))
+        self.assertIn("Interaction design", " ".join(" ".join(row.strip("│ ").split()) for row in rows))
 
     def test_colors_stay_out_of_logs_and_respect_no_color(self):
         terminal = StringIO()
@@ -227,7 +247,7 @@ class ConsoleLogging(unittest.TestCase):
         self.assertEqual(terminal.getvalue().count("[WAITING]"), 1)
         self.assertNotIn("\r", terminal.getvalue())
 
-    def test_interactive_waiting_is_static_and_keeps_log_plain(self):
+    def test_interactive_waiting_closes_idempotently_and_keeps_log_plain(self):
         terminal = StringIO()
         terminal.isatty = lambda: True
         with TemporaryDirectory() as temporary:
@@ -243,7 +263,7 @@ class ConsoleLogging(unittest.TestCase):
                 self.assertEqual(terminal.getvalue(), cleared)
             logged = (root / "compiler.log").read_bytes()
         redraws = [item for item in terminal.getvalue().split("\r") if "[WAITING]" in item]
-        self.assertEqual(len(redraws), 1)
+        self.assertGreaterEqual(len(redraws), 1)
         self.assertEqual(logged.count(b"[WAITING]"), 1)
         self.assertNotIn(b"\r", logged)
         self.assertNotIn(b"\x1b[", logged)

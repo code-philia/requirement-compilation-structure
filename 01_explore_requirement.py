@@ -269,7 +269,7 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
         text = json.dumps(requirements, ensure_ascii=False, indent=2, allow_nan=False)
     except (TypeError, ValueError) as error:
         raise ValueError(f"Cannot convert requirement fields to JSON: {error}") from error
-    console.show("1. Requirement tree", text)
+    console.artifact("requirements", requirements, "1. Requirement tree")
 
     # --- Extension point 01B: reference discovery ------------------------------
     # collect_images() defines which references count as visual evidence.

@@ -90,6 +90,7 @@ def synthesize_ui(arc_dir, tree, schema, contracts, images, contexts, model, con
                 request["correction"] = correction
         console.show(label + " | 4. Validated incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
         design = updated
+        console.artifact("ui_design", design, label + " | Accepted UI")
     validate_design(design, tree, images, max_fixtures, complete=True)
     save_json(arc_dir / "ui_design.json", design)
     console.show("UI/data design complete for ALL requirements", f"Saved {arc_dir / 'ui_design.json'}\nRun 10_implement_ui.py for existence tests and UI implementation. Interactions belong to step 11.")

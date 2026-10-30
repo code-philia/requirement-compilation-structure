@@ -6,13 +6,21 @@ import shutil
 import sys
 from threading import RLock
 import unicodedata
+import json
+from copy import deepcopy
+
+from rich import box
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.rule import Rule
+from rich.text import Text
 
 from infrastructure.utils.presentation.logging import full_detail, session_info
 
 
 _activity = ContextVar("compiler_activity", default="Model request")
 _render_lock = RLock()
-_COLORS = {"info": "36", "input": "34", "output": "35", "success": "32", "waiting": "33", "error": "31"}
+_COLORS = {"info": "cyan", "input": "blue", "output": "magenta", "success": "green", "waiting": "yellow", "error": "red"}
 
 
 def current_activity() -> str:
@@ -20,11 +28,12 @@ def current_activity() -> str:
     return _activity.get()
 
 
-def highlight(text: str, tone: str = "info") -> str:
-    """Use color only for interactive terminals that have not disabled it."""
-    if sys.stdout.isatty() and "NO_COLOR" not in os.environ:
-        return f"\033[1;{_COLORS[tone]}m{text}\033[0m"
-    return text
+def rich_console() -> Console:
+    """Bind to the current stream so redirection and plain log mirroring still work."""
+    interactive = sys.stdout.isatty()
+    return Console(file=sys.stdout, width=_width() + 4, force_terminal=interactive,
+        color_system="standard" if interactive and "NO_COLOR" not in os.environ else None,
+        highlight=False, markup=False)
 
 
 def display_width(text: str) -> int:
@@ -63,20 +72,15 @@ def preview(body: str, max_lines: int = 30, max_chars: int = 4200) -> str:
     return visible or "(empty)"
 
 
-def show_panel(title: str, body: str, tone: str = "info", max_lines: int = 30, max_chars: int = 4200) -> None:
-    """Print one framed block atomically so waiting messages cannot split its rows."""
-    width = _width()
-    def row(text):
-        return "│ " + text + " " * (width - display_width(text)) + " │"
-    # Titles wrap rather than hiding the requirement or API at the end.
-    rows = [highlight("┌" + "─" * (width + 2) + "┐", tone)]
-    rows.extend(highlight(row(line), tone) for line in _wrap(title, width))
-    rows.append(highlight("├" + "─" * (width + 2) + "┤", tone))
-    for line in preview(body, max_lines=max_lines, max_chars=max_chars).splitlines():
-        rows.extend(row(part) for part in _wrap(line, width))
-    rows.append(highlight("└" + "─" * (width + 2) + "┘", tone))
+def show_panel(title: str, body, tone: str = "info", max_lines: int = 30, max_chars: int = 4200) -> None:
+    """Print literal text or a Rich view atomically, retaining scrollback."""
+    if isinstance(body, str):
+        body = Text(preview(body, max_lines=max_lines, max_chars=max_chars))
+    style = _COLORS.get(tone, "cyan")
+    panel = Panel(Group(Text(title, style="bold " + style), Rule(style=style), body),
+        border_style=style, box=box.SQUARE, padding=(0, 1), expand=True)
     with _render_lock:
-        print("\n" + "\n".join(rows), flush=True)
+        rich_console().print(panel)
 
 
 def _tone(title: str) -> str:
@@ -91,27 +95,27 @@ def _tone(title: str) -> str:
 
 
 class WaitingStatus:
-    """Show one static waiting line and clear it before displaying the result."""
+    """Animate waiting on terminals, keeping cursor controls out of compiler.log."""
 
     def __init__(self) -> None:
-        stream = sys.stdout
-        self.terminal = getattr(stream, "terminal", stream)
-        self.interactive = stream.isatty()
-        self.columns = 0
+        from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
         self.closed = False
+        self.progress = None
         message = "[WAITING] Waiting for model response..."
-        session = session_info()
-        if self.interactive:
-            # Bypass the tee for terminal controls; keep one plain log entry.
+        terminal = getattr(sys.stdout, "terminal", sys.stdout)
+        if sys.stdout.isatty():
+            session = session_info()
             if session:
                 with session["lock"]:
                     session["log"].write(message + "\n")
                     session["log"].flush()
-            message = _wrap(message, _width())[0]
-            with _render_lock:
-                self.terminal.write(highlight(message, "waiting"))
-                self.terminal.flush()
-                self.columns = display_width(message)
+            console = Console(file=terminal, width=_width() + 4, force_terminal=True,
+                color_system="standard" if "NO_COLOR" not in os.environ else None, markup=False)
+            self.progress = Progress(SpinnerColumn(style="cyan"), TextColumn("{task.description}"),
+                TimeElapsedColumn(), console=console, transient=True, refresh_per_second=4,
+                redirect_stdout=False, redirect_stderr=False)
+            self.progress.add_task(Text(message), total=None)
+            self.progress.start()
         else:
             print(message, flush=True)
 
@@ -120,9 +124,8 @@ class WaitingStatus:
             if self.closed:
                 return
             self.closed = True
-            if self.interactive:
-                self.terminal.write("\r" + " " * self.columns + "\r")
-                self.terminal.flush()
+            if self.progress is not None:
+                self.progress.stop()
 
 
 class DemoConsole:
@@ -130,15 +133,71 @@ class DemoConsole:
 
     def __init__(self, pause: bool = False) -> None:
         self.pause = pause
+        self.artifacts = {}
 
     def show(self, title: str, body: str) -> None:
         _activity.set(title)
         session = session_info()
         label = f"{session['stage']} | {title}" if session else title
         full_detail(label, body)
+        try:
+            value = json.loads(body)
+        except (ValueError, TypeError):
+            value = None
+        if isinstance(value, dict):
+            from infrastructure.utils.presentation.artifacts import proposal_kind, render_artifact
+            kind = proposal_kind(value)
+            if kind:
+                try:
+                    body = render_artifact(kind, value)
+                except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+                    pass
         show_panel(label, body, tone=_tone(title))
+        self._wait()
+
+    def _wait(self) -> None:
+        """Apply the same teaching pause to text and artifact panels."""
         if self.pause:
             try:
                 input("Press Enter to continue...")
             except EOFError as error:
                 raise ValueError("--pause requires an interactive input stream") from error
+
+    def artifact(self, kind: str, data: dict, title: str = "Accepted artifact") -> None:
+        """Observe accepted state without changing stage validation or persistence."""
+        from infrastructure.utils.presentation.artifacts import render_artifact
+        session = session_info()
+        context = session.setdefault("artifacts", {}) if session else self.artifacts
+        previous = context.get(kind)
+        full_detail(title + " | " + kind, json.dumps(data, ensure_ascii=False, indent=2))
+        try:
+            view = render_artifact(kind, data, previous, context)
+            show_panel(title + " | " + kind, view, tone="success")
+            context[kind] = deepcopy(data)
+        except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as error:
+            show_panel(title, "Artifact preview unavailable: " + str(error), tone="waiting")
+        self._wait()
+
+
+def show_dashboard(stage: str, artifacts: dict) -> None:
+    """Show the current pass and saved/in-memory artifact inventory, without inferring success."""
+    from infrastructure.utils.presentation.artifacts import ARTIFACTS, inventory, table, text
+    number = stage.removeprefix("Stage ").split(" | ", 1)[0]
+    passes = Text()
+    names = {"00": "Init", "01": "Requirements", "02": "Schema", "03": "R/W", "04": "Review*",
+        "05": "SQL", "06": "APIs", "07": "P/Q", "08": "Backend TDD", "09": "UI",
+        "10": "UI TDD", "11": "Triggers", "12": "E2E"}
+    for index, (key, name) in enumerate(names.items()):
+        if index:
+            passes.append(" → ", style="dim")
+        passes.append(key + " " + name, style="bold cyan" if key == number else "dim")
+    counts = table("Intermediate artifact", "Records", "Availability")
+    for kind, label in ARTIFACTS.items():
+        value = artifacts.get(kind)
+        try:
+            count = len(inventory(kind, value)) if value is not None else "—"
+        except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+            count = "—"
+        counts.add_row(text(label), text(count),
+            Text("available" if value is not None else "pending", style="green" if value is not None else "dim"))
+    show_panel("Requirement compiler | " + stage, Group(passes, counts))

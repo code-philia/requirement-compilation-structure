@@ -120,6 +120,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
                 request["correction"] = {"error": str(error), "previous_response": response}
         obligations["requirements"][rid] = inferred["requirement"]
         obligations["steps"].update(inferred["steps"])
+        console.artifact("db_obligations", obligations, f"{label} | Accepted obligations")
         console.show(f"{label} | 4. Inferred obligations (symbol-checked)", (
             response.get("explanation", "") + "\n\n"
             + format_obligations({rid: inferred["requirement"], **inferred["steps"]})

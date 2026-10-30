@@ -143,6 +143,7 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
             patch.get("explanation", "") + "\n\n" + format_changes(schema, updated)
         ))
         schema = updated
+        console.artifact("db_schema", schema, f"{label} | Accepted schema")
     print(f"Schema saved: {arc_dir / 'db_schema.json'}", flush=True)
     return schema
 

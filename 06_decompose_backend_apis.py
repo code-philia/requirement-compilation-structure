@@ -132,6 +132,7 @@ def decompose_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6) -
             + "\nAPI obligation coverage passed."
         ))
         design = updated
+        console.artifact("backend_apis", design, f"{label} | Accepted APIs")
     # --- Extension point 06B: API -> DB Access Primitive decomposition ---------
     # Intentionally absent: an API directly accesses the database in step 08.
     validate_design(design, obligations, field_symbols(schema), tree=tree)
