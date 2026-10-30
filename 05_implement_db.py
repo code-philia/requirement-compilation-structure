@@ -11,38 +11,36 @@ from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.logging import console_log
+from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.utils.files import save_text
 
 
 # --- Extension point 05A: SQL lowering policy ---------------------------------
-# The model writes concrete DDL; Python enforces file ownership and validates the
-# resulting table against the existing IR before publishing application code.
-INSTRUCTIONS = """Implement the current schema entity as one SQLite table.
-Return exactly {"path": "the supplied output_path", "content": "SQL file contents"}.
-Use the supplied output_path exactly. Return plain SQL content, not Markdown.
-The file must contain exactly one CREATE TABLE IF NOT EXISTS statement for the
-current entity, preserving entity and field names exactly and quoting identifiers
-with double quotes. No extra tables, triggers, indexes, PRAGMAs, DML, or transactions.
-Use TEXT for string/uuid/date/datetime/json, INTEGER for integer/boolean, REAL for number.
-Write explicit NOT NULL whenever nullable=false, including primary keys. Preserve
-primary keys, uniqueness, and every references edge. An INTEGER PRIMARY KEY need not
-use AUTOINCREMENT. No defaults: UUIDs and other generated values are supplied by the
-application. Do not introduce cascading deletes/updates or extra uniqueness rules.
-Translate SQLite-enforceable value constraints into CHECK constraints, including
-boolean values 0/1 and explicit enumerations. Preserve exact comparison semantics;
-do not add trimming, normalization, or extra business rules. Rules requiring application
-logic (e.g. cryptographic password hashing) should be documented as SQL comments,
-not replaced with an ineffective or invented CHECK. Do not invent new schema fields.
-Referenced table implementations are authoritative examples for naming, types, and
-key constraints. Within a cycle or self-reference an implementation may be null:
-use the supplied target schema, retain the FK, and rely on SQLite forward references.
-The runtime enables foreign_keys and executes these files in one transaction. It
-preserves existing tables and data. If correction is supplied, fix the reported error
-and return one complete JSON object with path and content.
+# The model writes DDL; Python publishes it at the supplied table path.
+# Executable behavior is exercised by later application tests.
+INSTRUCTIONS = """Implement entity as SQLite DDL for the compiler-selected output_path.
+Return {"content": "complete SQL file contents"}. The compiler writes output_path.
+The content string contains SQL text without Markdown fences.
+
+Create the current entity with CREATE TABLE IF NOT EXISTS, preserving its entity and
+field names and quoting identifiers with double quotes. Implement the supplied keys,
+nullability, uniqueness, references and SQLite-enforceable value constraints.
+Map string/uuid/date/datetime/json to TEXT, integer/boolean to INTEGER, number to REAL.
+Use explicit NOT NULL when nullable=false. SQLite INTEGER PRIMARY KEY can generate
+its value; application code supplies other generated values unless schema evidence
+specifies otherwise. Do not invent defaults, normalization, cascades or uniqueness.
+
+Use CHECK for enforceable constraints such as boolean 0/1 or enumerations. Describe
+application-only rules such as password hashing in comments instead of inventing SQL
+checks. This task creates one table, without extra tables, data mutations or application startup code.
+referenced_tables provides target definitions and available SQL. A null implementation
+means the target has not been generated yet; SQLite forward references can express
+self-references and cycles. The initializer enables foreign keys and runs the ordered
+SQL files in a transaction. Preserve existing data through IF NOT EXISTS.
 """
 
 
-def implement_db(arc_dir: Path, pause: bool = False) -> dict:
+def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 0) -> dict:
     source = arc_dir / "db_schema.json"
     if not source.is_file():
         raise ValueError("Run 02_build_db_schema.py first to create .arc/db_schema.json")
@@ -89,23 +87,15 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
                 "entity_name": name, "entity": entity, "output_path": expected_path,
                 "referenced_tables": referenced,
             }
-            for attempt in range(1, 4):
-                response = None
-                try:
-                    response = model.generate_json(INSTRUCTIONS, request)
-                    content = response["content"]
-                    proposal = {"path": expected_path, "content": content}
-                    break
-                except json.JSONDecodeError as error:
-                    if attempt == 3:
-                        raise ValueError(f"Table implementation failed for {name} after 3 attempts: {error}") from error
-                    print(f"Retrying {name} ({attempt + 1}/3): {error}", flush=True)
-                    request["correction"] = {"error": str(error), "previous_response": response}
-            console.show(f"{label} | 3. Model file proposal (validated)", expected_path + "\n\n" + content)
+            content, _ = propose_json(model, INSTRUCTIONS, request,
+                lambda response: response["content"].rstrip() + "\n", console,
+                f"SQL implementation {name}", max_attempts)
+            proposal = {"path": expected_path, "content": content}
+            console.show(f"{label} | 3. Model file proposal", expected_path + "\n\n" + content)
             target = output_dir / expected_path
             if not target.resolve().is_relative_to(output_dir):
                 raise ValueError(f"Implementation path escapes the output directory: {expected_path}")
-            save_text(target, content.rstrip() + "\n")
+            save_text(target, content)
             implementations[name] = proposal
             console.show(f"{label} | 4. Table implementation saved", (
                 f"{target}\n\nSQL proposal saved. Executable behavior is checked by application tests."
@@ -123,12 +113,13 @@ def implement_db(arc_dir: Path, pause: bool = False) -> dict:
 
 def main() -> None:
     parser = create_parser("Step 05: Implement DB Tables")
+    parser.add_argument("--max-attempts", type=int, default=0, help="Maximum proposals per table; 0 retries until interrupted")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:
             _, output_dir = resolve_directories(args)
             stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            implement_db(output_dir / ".arc", args.pause)
+            implement_db(output_dir / ".arc", args.pause, args.max_attempts)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")
 

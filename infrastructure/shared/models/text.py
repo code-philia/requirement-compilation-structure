@@ -9,6 +9,8 @@ from openai import OpenAI, OpenAIError
 from infrastructure.utils.presentation.model_io import http_client, invoke
 
 
+JSON_OUTPUT_RULE = "Return exactly one JSON object without Markdown."
+
 class TextModel:
     """Transport for structured stage proposals and file-edit responses."""
     def __init__(self) -> None:
@@ -48,12 +50,12 @@ class TextModel:
         return response
 
     def generate_json(self, instructions: str, payload: dict) -> dict:
-        """Request one ordinary JSON object; stage code owns examples and structural/semantic validation."""
+        """Request JSON using the stage prompt and serialized task data."""
         try:
             response = self._request(
                 model=self.name,
                 messages=[
-                    {"role": "system", "content": instructions.rstrip() + "\nReturn exactly one JSON object without Markdown."},
+                    {"role": "system", "content": instructions.rstrip() + "\n" + JSON_OUTPUT_RULE},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
                 response_format={"type": "json_object"},

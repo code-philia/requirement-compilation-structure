@@ -19,76 +19,62 @@ from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
 
 
-TEST_INSTRUCTIONS = """Generate contract tests BEFORE implementing the API.
-Generate ONE canonical suite for the API, shared by all_requirement_uses.
-db_schema maps entity names to their full definitions; use it and the supplied SQL.
-Keep at most the supplied max_tests cases. Prefer one meaningful success case,
-one representative invalid-input case, and the key business rejection cases. Combine
-related contract assertions in a case. Do not generate one test per missing/empty field
-or expand table-driven input variations. Rewrite an oversized current file rather
-than copying it. Cover response branches and critical P/Q/R/W using these few cases.
-Choose a .test.ts filename under task.new_file.directory when creating the suite;
-otherwise edit the supplied test_path. Use node:test with a named import { test } and
-node:assert/strict (default import assert), with literal test("title", async (t)=>...) cases.
-The API named function is async (request: ApiRequest, connection) => ApiResponse.
-ApiRequest contains params/query/body/headers; ApiResponse contains status/body/optional
-headers. It does NOT return an Express Response. Compute relative .js imports from
-your chosen test path to api_module and support_module.
-Use createTestDatabase(t), request(partial), and fixturePasswordHash(password) from the
-read-only support context. Every test gets a fresh real SQLite database and real tables.
-Prepare Given fixtures with SQL inserts (provide all NOT NULL columns); do not call a
-different API to fabricate Given state. Credential fixture format is scrypt$saltHex$hashHex
-where hash=scryptSync(password, Buffer.from(saltHex,'hex'),64). No account is preseeded.
-Bind SQLite booleans as integers 0/1, not JavaScript boolean values.
-Derive assertions from canonical precondition/request and postcondition/response, DB
-effects, and supplied scenarios. Cover every P and Q; include required invalid inputs,
-failure-without-writes, meaningful successes and persistence. Never test 501 as success.
-Use readable scenario titles. Verify P/Q behavior through assertions.
-Database R/W effects are verified by assertions, not field labels in titles. Assert
-status, returned fields/headers and actual DB state, not implementation source code.
-Assert the exact session/cookie transport identity specified by the current contract.
-Do not invent other APIs or their contracts; cross-API user workflows are verified in
-step 12. All supplied requirement uses share this one suite.
-Use casts for response.body when needed (its transport type is unknown). Do not assume
-generated UUIDs, timestamps, random hashes, exact error wording, or fields not in the
-contract. Tests may not be skipped, focused, mocked, or weaken the contract. No external
-libraries beyond the installed stack and Node standard library. You may repair any
-supplied writable backend source when compilation or existing behavior is broken.
-Write the tests first; limit source repairs here to restoring existing behavior and
-compilability rather than implementing the new API before its tests. Do not edit SQL,
-compiler-owned wiring, test support or other test files. The gate executes TypeScript
-compilation and already accepted API tests;
-the explicit RED phase happens once the current requirement's tests are generated.
-Reference paths and current contents are supplied in files; select a new suite's path
-using task.new_file. Return edits containing complete file contents.
-A passing gate accepts the proposal.
+TEST_INSTRUCTIONS = """Write one canonical test suite for task.api, shared by all_requirement_uses, before
+implementing the API. Base expected outcomes on the requirement scenarios, API I/O,
+preconditions, postconditions and DB effects. Use db_schema and supplied SQL for fixtures.
+
+Create a .test.ts file using task.new_file, or update test_path. Use node:test with
+{test}, node:assert/strict as assert, and async test callbacks. Import the function
+named api.signature.name from api_module; the compiler maps it to the API implementation.
+Its signature is (request: ApiRequest, connection) => Promise<ApiResponse>.
+Requests have params, query, body and headers; responses have status, body and optional
+headers. They are plain transport objects, not Express request/response objects.
+Compute relative .js imports to api_module and support_module from the chosen test path.
+
+Use createTestDatabase(t) and request(partial) from support_module. Each test receives
+a fresh real SQLite database. Seed Given state directly with parameterized SQL, supplying
+required columns; do not invoke another API to manufacture fixtures. Bind booleans as 0/1.
+For credential fixtures, use fixturePasswordHash(password); no account is preseeded.
+
+Within max_tests, prioritize meaningful success and requirement-defined rejection
+branches. Combine related assertions rather than generating a separate case for each
+condition or input variation. Assert response status, required fields/headers, persisted
+results and forbidden writes. Verify DB outcomes with SQL, not source-code scans or
+test-title labels. Treat R/W as possible effects; rejection need not perform them all.
+Do not assert random IDs/hashes/timestamps or exact wording absent from the contract.
+Cast response.body from unknown as needed. HTTP 501 is not a successful business result.
+
+Use real API functions and SQLite, without mocks, skipped/focused tests or extra libraries.
+Cross-API browser workflows belong to frontend E2E tests. The current test is writable;
+other tests and infrastructure follow the files map. During test generation, repair
+supplied writable sources only to restore existing behavior or compilation, not to
+implement the new operation. The compiler compiles generated tests and runs accepted
+API regressions, then establishes assertion RED against a 501 stub before implementation.
 """
 
-IMPLEMENT_INSTRUCTIONS = """Implement the selected Backend API Primitive against its
-canonical contract, all_requirement_uses and the frozen tests.
-db_schema maps entity names to their full definitions. Preserve its signature: an async exported named
-function (request: ApiRequest, connection: Database.Database): Promise<ApiResponse>.
-Implement request validation, precondition failures, postconditions, database reads and
-writes, using parameterized better-sqlite3 SQL and transactions for related writes.
-An API directly accesses the database; DB Access Primitive decomposition is an extension.
-Return status/body/optional headers, not Express Response objects. Never create a server,
-open another database, alter schema, seed production data, or modify test files.
-Choose your source path under task.new_file.directory for a new API, or edit the
-existing implementation_path. Export the async function handle.
-Other supplied writable backend sources may also be repaired when needed; preserve
-their contracts and already accepted behavior.
-The compiler supplies all current backend sources and frozen tests in files.
-Import ApiRequest and ApiResponse from backend/src/api/types.ts using the correct
-relative .js ESM path. Routing and test bindings are maintained by Python.
-Use node:crypto for UUIDs and credential handling; no new dependencies. For credential
-APIs verify existing scrypt$saltHex$hashHex fixtures with scryptSync(...,64). Store salted
-hashes, never plaintext. Keep exact username comparison and shared cookie conventions
-from the current contract. Errors must not leave partial account/session writes. Do not change
-contracts, R/W declarations, assertions, SQL tables, routing infrastructure or test gates.
-Automatic checks run TypeScript and the current and already accepted APIs' frozen suites.
-Return complete files in edits and repair feedback until GREEN. Do not import
-test modules or detect tests to fake behavior. API core behavior must also work through
-the deterministic Express adapter used by the application's server.
+IMPLEMENT_INSTRUCTIONS = """Implement task.api for all_requirement_uses against its generated tests.
+Create the task.new_file target or update implementation_path. Export:
+export async function handle(request: ApiRequest, connection: Database.Database): Promise<ApiResponse>.
+The export is always handle; api.signature.name is the compiler-provided business alias
+used by test bindings. Import ApiRequest and ApiResponse from backend/src/api/types.ts
+using a relative .js ESM import. Return status/body/optional headers, not Express objects.
+
+Implement request validation, API preconditions, success/rejection responses and DB
+effects according to the contract and scenarios. Use the supplied connection, parameterized
+better-sqlite3 SQL, and transactions for related writes. Respect schema-generated integer
+keys and use node:crypto for UUIDs or hashing when the schema/contract requires them.
+Credential APIs must verify existing fixturePasswordHash records, encoded as
+scrypt$saltHex$hashHex with a 64-byte scrypt digest. Production storage must satisfy the
+contract and keep plaintext passwords out of persistent data; do not assert random hashes.
+Preserve required comparison rules and shared credential/header conventions.
+
+Do not start a server, open another database, change schema or seed production data.
+Use installed dependencies and Node standard modules. Implement the operation directly;
+no DB-access primitive layer is generated. Routing and test aliases are compiler-owned.
+Preserve unrelated behavior when repairing other supplied writable backend sources.
+Tests, SQL, designs and compiler infrastructure are references according to files.
+The compiler runs TypeScript and current/accepted API tests. Repair implementation
+failures without weakening assertions or detecting tests to fake business behavior.
 """
 
 

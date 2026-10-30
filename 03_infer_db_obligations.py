@@ -13,48 +13,38 @@ from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.utils.files import save_json
+from infrastructure.shared.agent.proposals import propose_json
 
 
 # --- Extension point 03A: obligation inference policy --------------------------
 # Rewrite how requirement text maps to reads/writes, especially failure paths,
 # fixture setup, and generated keys. Records are normalized for set operations.
-INSTRUCTIONS = """Infer field-level dataflow obligations using only the related schema fields supplied for this requirement.
-Return exactly this JSON object, in English:
+INSTRUCTIONS = """Infer this requirement's database reads and writes over the supplied related_schema.
+Return:
 {
   "requirement": {"read": ["Entity.field"], "write": ["Entity.field"]},
-  "steps": {"STEP-ID": {"read": ["Entity.field"], "write": ["Entity.field"]}},
-  "explanation": "Evidence for the requirement and each step's read/write choices.",
-  "unmapped": []
+  "steps": {"STEP-ID": {"read": ["Entity.field"], "write": ["Entity.field"]}}
 }
-Return every supplied step ID exactly once, and no other IDs; use steps={} when none
-are supplied. All read/write entries must be existing qualified schema field symbols.
-An empty set is []. Never create entities, fields, or substitute a similar but wrong field.
-Use only the supplied related schema definitions to bind data concepts.
-If necessary persistent data cannot be mapped, list the concepts in unmapped. Do not
-silently omit persistent concepts. UI-only state need not
-map to persistent fields. Password input is verified against a hash, not stored plaintext.
+"read" and "write" are separate fields containing arrays of qualified DB field names.
+Use [] when a set is empty. Include the supplied step IDs; use steps={} when there
+are no steps. Select existing schema symbols; do not create schema definitions.
 
-Infer the requirement's obligations from its description and overall scenario behavior.
-Independently infer each step's actual reads/writes using its Given, When, Then and
-the owning requirement's context. Requirement and step obligations are independent;
-do not force containment equality or propagate effects between nodes. Never copy
-the requirement's writes into every step.
-Given fixtures describe existing state, not writes performed by the current behavior.
-An instruction to leave data unchanged is not a write. Rejection/failure steps that
-create no account or session have no such writes. A field can appear in both sets if
-the behavior reads and modifies it. Include necessary keys for lookups, relationships,
-and inserted records. A generated primary key is still a persisted write when inserting
-a record; do not exclude it as "system-generated" or "not business data". Lookup/filter
-and join keys are reads even when they are not displayed. Do not read every field merely
-because the entity is retrieved.
-Select fields according to actual behavior. Related schema fields provide context;
-a field need not be read or written merely because it was supplied. References are
-context only; do not blindly inherit another node's effects.
-If a correction is supplied, fix the error and return one complete JSON object.
+Infer requirement effects from its description and complete scenarios. Infer each
+step's effects from its own Given/When/Then and requirement context. Keep these
+records independent: do not copy the requirement's writes into every step or force
+parent/step containment equality. References provide context, not inherited effects.
+
+Given fixtures describe existing state, not writes performed by the behavior under
+test. Rejection and instructions to leave data unchanged do not imply writes.
+Include lookup, filter and join keys in reads, and persisted generated keys in writes.
+A field can occur in both arrays. Read/write sets describe possible behavior across
+branches, not effects required on every invocation. Related fields are candidates;
+there is no need to classify every supplied field. UI-only state has no DB effect.
+For credentials, distinguish submitted passwords from stored hashes.
 """
 
 
-def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
+def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 0) -> dict:
     for filename, previous in (("requirements.json", "01_explore_requirement.py"), ("db_schema.json", "02_build_db_schema.py")):
         if not (arc_dir / filename).is_file():
             raise ValueError(f"Run {previous} first to create .arc/{filename}")
@@ -96,24 +86,18 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
             "related_fields": sorted(related_fields),
             "related_schema": {"entities": related_entities},
         }
-        for attempt in range(1, 4):
-            response = None
-            try:
-                response = model.generate_json(INSTRUCTIONS, request)
-                inferred = normalize_inference(response, tree.own_steps[rid])
-                break
-            except json.JSONDecodeError as error:
-                if attempt == 3:
-                    raise ValueError(f"Obligation inference failed for {rid} after 3 attempts: {error}") from error
-                print(f"Retrying {rid} ({attempt + 1}/3): {error}", flush=True)
-                request["correction"] = {"error": str(error), "previous_response": response}
+        def accept(response):
+            inferred = normalize_inference(response, tree.own_steps[rid])
+            summary = format_obligations({rid: inferred["requirement"], **inferred["steps"]})
+            return inferred, summary
+
+        (inferred, summary), _ = propose_json(model, INSTRUCTIONS, request, accept,
+            console, f"Obligation inference {rid}", max_attempts)
         obligations["requirements"][rid] = inferred["requirement"]
         obligations["steps"].update(inferred["steps"])
+        save_json(arc_dir / "db_obligations.json", obligations)
         console.artifact("db_obligations", obligations, f"{label} | Accepted obligations")
-        console.show(f"{label} | 4. Inferred obligations ", (
-            response.get("explanation", "") + "\n\n"
-            + format_obligations({rid: inferred["requirement"], **inferred["steps"]})
-        ))
+        console.show(f"{label} | 4. Inferred obligations", summary)
 
     obligations = normalize_obligations(obligations, tree)
     save_json(arc_dir / "db_obligations.json", obligations)
@@ -124,12 +108,13 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6) -> 
 def main() -> None:
     parser = create_parser("Step 03: Infer DB Obligations")
     parser.add_argument("--top-k", type=int, default=6, help="Number of BM25 entity/field hits (default: 6)")
+    parser.add_argument("--max-attempts", type=int, default=0, help="Maximum proposals per requirement; 0 retries until interrupted")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:
             _, output_dir = resolve_directories(args)
             stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            infer_db_obligations(output_dir / ".arc", args.pause, args.top_k)
+            infer_db_obligations(output_dir / ".arc", args.pause, args.top_k, args.max_attempts)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")
 

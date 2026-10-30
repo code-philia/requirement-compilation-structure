@@ -3,11 +3,12 @@
 import json
 
 from infrastructure.stages.frontend.triggers.prompts import INSTRUCTIONS
-from infrastructure.stages.frontend.triggers.design import apply_decomposition, empty_triggers, relevant_pages
+from infrastructure.stages.frontend.triggers.design import apply_decomposition, empty_triggers, relevant_pages, trigger_obligations
 from infrastructure.utils.files import save_json
+from infrastructure.shared.agent.proposals import propose_json
 
 
-def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, max_attempts=3):
+def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, max_attempts=0):
     result = empty_triggers(tree)
     for rid in tree.leaves:
         label = f"Trigger design {rid}"
@@ -15,18 +16,14 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
             continue
         request = {"requirement": contexts[rid], "ui": ui,
             "existing_triggers": result["triggers"], "backend_apis": backend["apis"]}
-        attempt = 0
-        while True:
-            attempt += 1
-            console.show(label, f"Model proposal {attempt}")
-            try:
-                proposal = model.generate_json(INSTRUCTIONS, request)
-                break
-            except json.JSONDecodeError as error:
-                if max_attempts and attempt >= max_attempts:
-                    raise
-                request["correction"] = {"error": str(error), "invalid_response": error.doc}
-        result = apply_decomposition(result, proposal, rid)
+        def accept(proposal):
+            updated = apply_decomposition(result, proposal, rid)
+            derived = {tid: trigger_obligations(updated["triggers"][tid], backend)
+                for tid in updated["requirements"][rid]}
+            console.show(label + " | Derived DB effects", json.dumps(derived, ensure_ascii=False, indent=2))
+            return updated
+
+        result, _ = propose_json(model, INSTRUCTIONS, request, accept, console, label, max_attempts)
         console.artifact("frontend_triggers", result, label)
         save_json(arc_dir / "frontend_triggers.json", result)
     save_json(arc_dir / "frontend_triggers.json", result)

@@ -1,11 +1,11 @@
-"""Render the shared runtime loader from the validated table implementation order."""
+"""Render the shared runtime loader from the table implementation order."""
 
 import json
 from pathlib import Path
 
 
 def initializer_source(implementations: dict) -> str:
-    """Render the database initializer template with the validated SQL filenames in implementation order."""
+    """Render the database initializer template with the SQL filenames in implementation order."""
     template = Path(__file__).resolve().parents[2] / "shared/project/templates/backend/src/db/initialize.ts"
     source = template.read_text(encoding="utf-8-sig")
     marker = "export const tableFiles: readonly string[] = [];"

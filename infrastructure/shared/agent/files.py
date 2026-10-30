@@ -6,6 +6,8 @@ from infrastructure.utils.files import read_source, save_bytes, save_text
 from infrastructure.utils.paths import check_path_case, relative_path
 from infrastructure.shared.project.entrypoints import FILE_ROOTS, remember_path, selected_path
 
+NEW_FILE_INSTRUCTIONS = "Choose one unused path under directory. Create this target in the first edit; later edits may update supplied writable files."
+
 EXCLUDED = {"node_modules", ".git", ".arc", "dist", "build", "coverage", "__pycache__", ".venv"}
 
 
@@ -72,7 +74,7 @@ class FileWorkspace:
             return {}
         kind, identity = self.new_file
         return {"new_file": {"target": identity, "kind": kind, "directory": FILE_ROOTS[kind],
-            "instructions": "Choose the path. The first edit creates this target's file. Subsequent edits may update supplied writable files."}}
+            "instructions": NEW_FILE_INSTRUCTIONS}}
 
     def path(self, relative: str) -> Path:
         """Reject traversal, symlinks, case aliases and noncanonical source paths."""

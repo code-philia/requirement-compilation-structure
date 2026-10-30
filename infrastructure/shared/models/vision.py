@@ -11,7 +11,21 @@ from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 from PIL import Image, ImageOps
 from infrastructure.utils.presentation.model_io import http_client, invoke
+from infrastructure.utils.presentation.console import DemoConsole
+from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.models.text import JSON_OUTPUT_RULE
 
+
+VISION_INSTRUCTIONS = """Describe the supplied UI reference using visible evidence only.
+Return {"layout":"...", "elements":["..."], "style":"..."}.
+layout describes regions, alignment and relative positions; elements lists visible
+controls, labels, options and states; style describes colors, typography and spacing.
+Write descriptions in English while quoting visible labels in their original language.
+Identify illegible or uncertain details instead of inventing them. Do not infer hidden
+business behavior, APIs, database fields or interactions from appearance alone.
+"""
+
+VISUAL_REPAIR_PREFIX = "Correct the previous response:\n"
 
 def compress_image(data: bytes, mime: str) -> tuple[bytes, str]:
     """Resize static references to 2048px and encode JPEG, retaining smaller originals."""
@@ -45,7 +59,7 @@ class VisualModel:
             raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env; the model must accept images")
         self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=600, max_retries=2, http_client=http_client())
 
-    def analyze(self, image: Path) -> dict:
+    def analyze(self, image: Path, max_attempts: int = 0) -> dict:
         """Send one supported reference image and parse the returned layout, elements, and style evidence."""
         mime = mimetypes.guess_type(image.name)[0]
         if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
@@ -54,33 +68,26 @@ class VisualModel:
         compressed, mime = compress_image(original, mime)
         print(f"Image compression: {image.name} | {len(original) / 1024:.1f} -> {len(compressed) / 1024:.1f} KiB", flush=True)
         encoded = base64.b64encode(compressed).decode("ascii")
-        # --- Extension point: visual evidence extraction ----------------------
-        # Compare prompts or structured visual representations here. Keep the
-        # {layout, elements, style} contract aligned with validation below.
-        prompt = (
-            "Analyze this UI reference image using visible evidence only. "
-            "Do not infer business rules or hidden interactions. "
-            "Return a JSON object in English with exactly these fields: "
-            "layout (string: regions, alignment, and relative positions), "
-            "elements (array of strings: visible controls, original labels, options, and states), "
-            "style (string: colors, typography, borders, spacing, and other visual details). "
-            "Preserve visible labels in their original language. "
-            "Explicitly identify anything illegible; do not invent details."
-        )
+        result, _ = propose_json(self, VISION_INSTRUCTIONS, {"image_url": f"data:{mime};base64,{encoded}"},
+            lambda value: value, DemoConsole(), f"Visual analysis {image.name}", max_attempts)
+        return result
+
+    def generate_json(self, instructions: str, payload: dict) -> dict:
+        """Request visual JSON and include prior response errors when repairing it."""
+        text = instructions.rstrip() + "\n" + JSON_OUTPUT_RULE
+        if "correction" in payload:
+            text += "\n" + VISUAL_REPAIR_PREFIX + json.dumps(payload["correction"], ensure_ascii=False)
         try:
             response = invoke(self.client, {
                 "model": self.name,
                 "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:{mime};base64,{encoded}", "detail": "high",
-                    }},
+                    {"type": "text", "text": text},
+                    {"type": "image_url", "image_url": {"url": payload["image_url"], "detail": "high"}},
                 ]}],
                 "response_format": {"type": "json_object"},
             })
         except OpenAIError as error:
-            raise RuntimeError(f"Visual model request failed ({image.name}): {error}") from error
+            raise RuntimeError(f"Visual model request failed: {error}") from error
         if not response.choices or not response.choices[0].message.content:
-            raise ValueError(f"Visual model returned empty content: {image.name}")
-        result = json.loads(response.choices[0].message.content)
-        return result
+            raise ValueError("Visual model returned empty content")
+        return json.loads(response.choices[0].message.content)

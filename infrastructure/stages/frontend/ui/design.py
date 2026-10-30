@@ -4,30 +4,41 @@ from copy import deepcopy
 
 
 
-INSTRUCTIONS = """Design UI and frontend data for the current leaf requirement.
-Use requirement scenarios, supplied reference images and existing page subtrees.
-Return {pages:{}, elements:{}, bindings:{}, requirement_ui:[], step_ui:{}}.
-Return complete new or changed records keyed by ID; existing records may be reused
-by reference. Updates replace records. Keep existing behavior when sharing a page.
+INSTRUCTIONS = """Design UI and frontend data for the supplied leaf requirement, using scenarios,
+visual references and retrieved page subtrees. Return:
+{pages:{}, elements:{}, bindings:{}, requirement_ui:[], step_ui:{}}.
+Return COMPLETE new or changed records keyed by ID; unchanged records may be reused
+by reference. Updates replace records, so retain unrelated content on shared pages.
 
-Pages contain name, route, root (UI ID), images (image IDs), fixtures.
-Fixtures describe display states: default={} plus useful variable overrides.
-Elements contain type, parent (UI ID or null), mode, data, prop.
-A page root is a UI element of type page. Other types describe ordinary HTML/UI
-controls. mode is a list of user_read/user_write; data lists frontend variable names.
-prop contains static labels/text/options/layout/style and optional visible conditions.
+pages maps PAGE IDs to {name, route, root, images, fixtures}. route is a URL path;
+root is an ELEMENT ID; images lists supplied image IDs. These IDs have different roles.
+fixtures maps display-state names to frontend variable overrides. Include default={}
+and representative states within the supplied max_fixtures named-state target.
+Fixtures supply display-test values; initial variables supply application defaults.
 
-Bindings define frontend variables once, keyed by variable name, with dtype,
-constraints (descriptions), initial and source (origin description).
-Include input values, results, selections, loading and error state as needed.
-Native editable values are synchronized by the UI host. Business behavior belongs
-to triggers, designed later. UI does not declare database obligations or DB mappings.
-Use data bindings to display API results later, without inventing production data.
+elements maps ELEMENT IDs to {type, parent, mode, data, prop}. A page root has type
+"page" and parent=null; other elements reference a parent element ID. Use ordinary
+UI types such as container, form, input, checkbox, select, button, text, heading, link,
+list, item, image, alert or table. mode is an array whose entries are "user_read" or
+"user_write", such as [], ["user_write"] or ["user_read","user_write"]. data is an
+array of frontend VARIABLE NAMES, for example ["form.username"], not variable objects.
+prop holds static text, label, placeholder, input_type, options, style, href, alt or
+heading level. Optional prop.visible is a boolean or {var:VARIABLE_NAME, equals:VALUE}.
+Business decisions are expressed by triggers later, not expression strings in prop.
 
-requirement_ui lists the UI elements used by this requirement; step_ui associates
-scenario steps with UI IDs. Non-UI requirements may return empty records and lists.
-Images provide visual evidence; use image.page hints when supplied.
-Do not return triggers, handlers, code or tests in this design response.
+bindings defines variables once, keyed by name, as {dtype, constraints, initial, source}.
+dtype is a string naming a JSON type: "string", "integer", "number", "boolean",
+"array", "object" or "null".
+constraints is an array of descriptions; initial is the default value; source describes
+the origin. Include input, result, selection, loading or error state required by the UI.
+Native editable values are synchronized by the host. UI has no DB obligations or DB
+field-mapping model. Do not make fixture data into invented production responses.
+
+requirement_ui lists elements used by this requirement. step_ui maps its scenario
+step IDs to element lists, with [] for steps without UI. Non-UI requirements can
+return empty records and lists. Preserve visible text in its original language;
+images provide layout/style evidence, not hidden business rules. Use supplied image.page
+hints for page IDs. Do not return triggers, handlers, code or tests.
 """
 
 

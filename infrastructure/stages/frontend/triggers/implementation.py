@@ -50,93 +50,73 @@ def test_run_status(result):
     return "RED_CONFIRMED"
 
 
-TEST_INSTRUCTIONS = '''Write a few real Playwright E2E tests BEFORE implementation of the current requirement.
-For a new suite, choose a .spec.ts path under task.new_file.directory; otherwise edit test_path.
-Import {test,expect,fixturePasswordHash} from frontend/tests/e2e/support/context.ts,
-using the correct relative .js import from your chosen file path.
-Use literal test("title",async ({page,database})=>{...}) calls, at most max_tests total.
-The support fixture automatically resets an isolated real SQLite DB before every case.
-Seed Given records with parameterized SQL and supplied real table definitions; fixture
-passwords use fixturePasswordHash. database is a better-sqlite3 connection, not a mock.
-Do not call another API to fabricate Given state. Bind booleans as 0/1. SQL writes are
-for Given setup only; after the When action, inspect DB state independently with SELECT.
-All When actions go through page.goto/getByTestId/getByRole/fill/check/selectOption/click.
-Use real browser requests; do not use page.request, fetch, mocks, route interception,
-UI fixture injection, arbitrary filesystem/process code, test skips/only/fail, or exits.
-The fixture reports actual browser runtime and network errors.
-Assert visible UI outcomes AND required persistence/forbidden writes. Include success,
-meaningful rejection, cross-page navigation, and reload persistence when required.
-For dynamic text, use awaited Playwright assertions such as toHaveText, toContainText,
-toHaveValue, or toHaveURL. Do not read textContent() and assert its length immediately
-after toBeVisible(); elements may exist before React has rendered their updated text.
-For alerts, assert the declared message with toHaveText/toContainText rather than only
-asserting that an always-mounted alert element is visible.
-Do not assume UUIDs, hashes, timestamps or exact wording not specified by contracts.
-Use expect assertions on UI results before inspecting network observations. Missing
-design must fail by assertion, not by an unbounded waitForResponse or a test timeout.
-Use Playwright's retrying assertions for every asynchronous UI result: toHaveText,
-toContainText, toHaveValue, toBeChecked, toHaveURL, and locator state assertions.
-Never use textContent(), innerHTML(), waitForTimeout(), or a synchronous length check
-after toBeVisible(). An alert may be permanently mounted with an empty placeholder;
-assert its declared message with toHaveText/toContainText.
-Observe network through page.on('response') or expect.poll when needed, not direct API calls.
-Use readable scenario titles and cover requirement behavior through UI and database
-assertions. Keep a few meaningful workflows rather than a separate case for every input.
-Use actual UI IDs, exact API fields and database schema. Remember response.body is unknown
-in helper APIs; use appropriate casts for SQL rows and captured response objects.
-The current test and supplied writable frontend sources are editable. Failed checks
-automatically supply the affected source files and their local dependencies. If compilation
-or execution fails in an existing page or handler, repair that source directly rather
-than repeatedly rewriting an unrelated test. Write tests first; do not implement new
-trigger implementations before their tests. Preserve existing behavior, UI IDs, contracts and
-already accepted scenarios. Read-only source files and other tests remain references.
-Do not redeclare compiler-owned runtime types inside page or test modules.
-The compiler owns fixtures, app startup,
-database reset and test commands. The generation gate checks TypeScript,
-and executable scenarios against the current application. Assertion RED is accepted;
-invalid locators, fixture/runtime errors, and timeouts need test repair, not skipped tests.
-'''
+TEST_INSTRUCTIONS = """Write Playwright E2E tests for the current requirement before implementing its triggers.
+Requirements define expected business outcomes; use the API contracts, UI definitions
+and scenarios for concrete fields, selectors and branches. Trigger descriptions and
+derived DB obligations are context, not the sole test oracle or unconditional effects.
 
-IMPLEMENT_INSTRUCTIONS = '''Implement the current requirement's designed UI design against E2E tests.
-Use the supplied requirement, UI/data, trigger guards, frontend read/write sets and ordered actions, plus canonical backend APIs.
-During creation, the context describes one trigger. During requirement repair it describes
-all required triggers, including destination-page lifecycle behavior. Preserve other handlers' behavior.
-Use supplied implementation_paths and page IDs. When task.new_file is supplied,
-choose a source path for that target and create it in the first edit. Other missing
-handlers are implemented in subsequent calls; do not create their files in this call.
-The compiler captures DOM click/change/input/submit/keyboard events and page mount, owns
-central frontend data, and imports each trigger's fixed handle export.
-Export handle with signature (context: UiTriggerContext) => void | Promise<void>,
-importing its type from ui-runtime. Use one source file per trigger.
-The compiler owns App.tsx, ui-runtime.ts, ui-triggers.ts, ui-api.ts and routing.
-Return complete file contents in edits; the compiler remembers the selected path and registers it.
-UiTriggerContext provides:
-- data: latest readonly frontend variable values, keyed by the designed var strings;
-- input: native value (string), checked (boolean), key (string) as appropriate;
-- trigger: id/source/event, so shared handlers can implement their enabling rules;
-- update({var:value,...}): update only the trigger's frontend data;
-- api(apiId,{params,query,body,headers,credentials}): real canonical HTTP call returning
-  {status,body:unknown,headers}. Follow action descriptions and fixed API schemas; use same-origin/include
-  credentials; browser cookies are automatic, never manually read or stored;
-- navigate(pageId): navigate to the target page.
-Implement the guard, ordered actions, value transformations, status/error branches
-and navigation. UI input values are synchronized before business triggers run.
-The derived DB obligations describe API effects; connect UI data to API requests
-and API responses to UI data in ordinary code. Convert number inputs explicitly. Do not normalize exact-match usernames.
-Do not store plaintext credentials or session tokens outside transient designed data.
-All API access must use context.api, not alternate endpoints, direct DB access or fake
-responses. Preserve failure-without-writes and existing state. Do not swallow errors or
-hardcode fixture credentials. Handler modules must have no top-level business effects.
-The compiler automatically suppresses business events for step 10 display fixtures;
-never detect tests or inspect fixture globals in your implementation. Page components
-should remain presentation-only. Any supplied writable frontend source may be repaired; preserve
-UI IDs, semantics and Tailwind styles, but do not attach duplicate event handlers/hooks.
-Frozen backend, SQL, designs, fixtures, tests and compiler infrastructure cannot change.
-Creation checks compilation; a separate requirement repair phase runs all behavior checks.
-Failed checks automatically supply affected sources and their local imports for repair.
-Inspect automatic browser/DB check feedback and iterate until current AND previously
-accepted requirements and all UI existence tests pass. 
-'''
+Create a .spec.ts target using task.new_file or update test_path. Import test and expect
+from frontend/tests/e2e/support/context.ts using a relative .js import; import
+fixturePasswordHash there when password fixtures are needed. Tests use async ({page,database}) callbacks. The fixture resets a real isolated
+SQLite database before each case; seed Given rows with parameterized SQL and supplied
+schema definitions. Bind booleans as 0/1 and use fixturePasswordHash for password fixtures.
+Do not call another API to manufacture Given state.
+
+Within max_tests, cover meaningful success, required rejection/unchanged data, navigation
+and reload persistence when specified. Drive When behavior through the browser UI, not
+direct HTTP calls, mocks or injected UI state. Assert visible results with Playwright's
+retrying locator assertions, then independently query DB outcomes. For asynchronous
+text and alerts, assert the expected content instead of only element presence; avoid
+fixed sleeps or waiting for a network call that an unimplemented trigger never makes.
+Passive network observations can supplement UI assertions when needed.
+Do not assume random identifiers, hashes, timestamps or exact wording absent from the
+requirement/API contract. Use real assertions without skipped/focused/expected-failure tests.
+
+The current suite is writable; other files follow the supplied permissions. Failed
+checks can expose existing frontend sources for repair. Fix invalid test code or fixtures
+in this phase; repair existing writable application code when it causes runtime failures,
+without implementing new triggers before their tests. Assertion RED for missing behavior
+is valid. Application errors are not a reason to weaken assertions or rewrite expected
+business outcomes. Compiler-owned fixtures, runtime types, startup and DB isolation are
+provided. TypeScript and real browser execution determine whether tests are usable;
+implementation and regression acceptance follow separately.
+"""
+
+IMPLEMENT_INSTRUCTIONS = """Implement the selected frontend triggers against the requirement and E2E tests.
+A creation task supplies one trigger and task.new_file; a requirement-repair task supplies
+all needed triggers, including destination-page lifecycle behavior. Use implementation_paths
+for existing files. Export handle(context: UiTriggerContext): void | Promise<void> from
+one source file per trigger, importing UiTriggerContext from frontend/src/ui-runtime.ts.
+Ordinary helper functions may be shared through supplied writable sources.
+
+The compiler captures native events, synchronizes UI input, registers handlers, owns
+central frontend data and provides routing/API access. UiTriggerContext contains:
+- data: current frontend variable values, exposed as a readonly record.
+- input: optional value (string), checked (boolean) and key (string) for the native event.
+- trigger: {id, source, event}.
+- update(patch): merge frontend variable values into shared state.
+- api(apiId, {params, query, body, headers, credentials}): perform the canonical HTTP call
+  and return {status, body:unknown, headers}.
+- navigate(pageId): navigate using a PAGE ID from page_subtrees, not its root ELEMENT ID.
+  Resolve a navigation action's target root to its owning page through page_subtrees.
+
+Implement the guard, ordered action conditions, request construction, response handling,
+value conversion, UI updates and navigation in ordinary code. read and write describe frontend
+data dependencies; obligations describes DB effects derived from API calls, not another
+field mapping to implement literally. Native checkbox values are booleans and other input
+values are strings; convert numbers explicitly when the API requires them.
+Use context.api for business requests. For cookie-based contracts, the browser handles
+cookies automatically; do not manually set Cookie or read HttpOnly credentials. Preserve
+specified comparisons and failure-without-writes. Handle expected failures visibly and
+surface unexpected errors rather than fabricating successful responses.
+
+Pages remain presentational; avoid duplicate handlers or test detection. Repair any
+supplied writable frontend source needed for actual behavior, preserving existing UI IDs,
+styles and accepted workflows. Files permissions define editable sources; tests, backend,
+SQL, designs and compiler wiring remain references. Creation compiles the handler;
+requirement repair runs real E2E and UI regressions. Use their feedback to repair code
+without weakening tests or hardcoding fixture values.
+"""
 
 
 def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts,

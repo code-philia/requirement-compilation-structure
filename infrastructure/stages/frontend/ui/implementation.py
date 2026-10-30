@@ -16,41 +16,30 @@ from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
 
-INSTRUCTIONS = """Implement the current page's UI Element (Data) Primitives.
-All requirements' UI/data have already been designed. Preserve the complete canonical
-design and previously accepted pages. Implement layout, style, labels, controls, default
-data presentation and conditional visibility using the supplied UiPageProps.data.
-Use Tailwind CSS utility classes directly in each component's className for layout,
-colors, typography and spacing. Tailwind v4 is configured through the Vite plugin.
-Use complete literal class strings, including arbitrary values when necessary; do not
-construct utility names dynamically. Do not create component CSS files, CSS modules,
-style tags or inline style objects. The global stylesheet is compiler-owned.
-For a new page, choose its source path under task.new_file.directory; otherwise edit
-implementation_path. Export Page, a named React component
-accepting UiPageProps. Current source, types and tests are supplied once in files;
-Other supplied writable frontend sources may be repaired to resolve compilation
-or presentation regressions; preserve their existing behavior and the frozen tests.
-the compiler owns routing and fixtures. Return complete file contents in edits.
-Import UiPageProps from the compiler-owned frontend/src/ui-runtime.ts, using a correct
-relative import. React/ReactDOM and Tailwind CSS are available; do not add dependencies.
-Put data-testid=<stable UI ID> on the ACTUAL element, including the page root. A test ID
-on a decorative wrapper does not substitute for the input/button/select/image itself.
-Use semantic HTML and associated labels. Use prop.input_type and exact option/label text.
-All designed UI elements must be represented, including structural containers. Static
-text and visual evidence supply layout and style; do not paste a screenshot as the UI.
-Read frontend values from data[var]; use type assertions as needed. Use defaultValue
-and defaultChecked for native editable inputs. The host captures native input/change
-events and synchronizes user_write data bindings; no business trigger is needed for this. Do not add onChange, onClick, onSubmit,
-effects, custom hooks, state transitions, validation, business navigation, API calls,
-session restoration, localStorage or cookie changes. Business triggers are intentionally
-empty. The compiler suppresses native form submissions; ordinary structural href links
-may identify the designed routes. Leave business-handler slots for the next script.
-Respect prop.visible booleans and equality predicates. Fixture states are supplied
-through data, not by detecting tests. Render list/conditional content from the supplied
-data; production defaults must not become fake backend responses. Do not alter frozen
-tests, compiler runtime/config, backend files, or .arc artifacts.
-Preserve other pages' styles. The test gate runs TypeScript, Playwright for current and previously accepted pages. Repair until
-GREEN; do not weaken tests or write an implementation that only works in tests.
+INSTRUCTIONS = """Implement the current page from its UI/data design, requirement uses and visual_references.
+Create the task.new_file target or update implementation_path. Export a named React
+component Page accepting UiPageProps, imported from frontend/src/ui-runtime.ts using
+a relative import. The compiler owns routing, initial data and display fixtures.
+
+Render layout, style, labels, controls, lists and conditional content from data[var]
+and static element props. Use the configured Tailwind utilities with complete class
+strings; use installed React/ReactDOM without new dependencies. Reproduce visual
+references through real elements, not a screenshot background in place of controls.
+Put data-testid=ELEMENT_ID on each actual designed element, including the page root.
+Use associated labels, specified input types/options, and role="alert" for alert elements.
+Respect prop.visible booleans or variable-equality rules and original visible text.
+
+Use defaultValue/defaultChecked for native editable controls. The host captures native
+input/change events for user_write bindings: checkbox values become booleans and other
+values remain strings. Do not add duplicate input handlers. This presentation task has
+no business API calls, guards, session restoration or state transitions; triggers supply
+those later. Native form submission is suppressed; structural links can use designed hrefs.
+Render fixture data through the ordinary data prop, without inspecting test globals.
+
+Repair supplied writable frontend dependencies when needed, preserving other pages
+and behavior. Use the files map for permissions. The compiler runs TypeScript, current
+and accepted page display tests, then a build. Implement the design without modifying
+tests or compiler wiring to bypass failures.
 """
 
 def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 18,

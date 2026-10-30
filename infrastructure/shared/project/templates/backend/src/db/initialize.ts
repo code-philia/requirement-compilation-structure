@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 
-// Step 05 replaces this ordered list after validating the table implementations.
+// Step 05 replaces this ordered list with the published SQL filenames.
 export const tableFiles: readonly string[] = [];
 
 export function initializeDatabase(connection: Database.Database): void {

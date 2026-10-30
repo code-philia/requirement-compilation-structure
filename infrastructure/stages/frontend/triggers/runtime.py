@@ -1,6 +1,6 @@
 """Step 12 lowering: bind each DOM trigger to its implementation.
 
-Compiler-owned TypeScript strings provide UI state, guarded API calls, navigation,
+Compiler-owned TypeScript strings provide UI state, canonical API calls, navigation,
 and event registration. The model implements each trigger's business logic; the
 compiler activates only the triggers accepted or currently being implemented."""
 

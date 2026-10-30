@@ -13,51 +13,38 @@ from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import apply_patch
 from infrastructure.utils.files import save_json
+from infrastructure.shared.agent.proposals import propose_json
 
 
 # --- Extension point 02A: schema discovery policy ------------------------------
 # Experiment with entity boundaries, reuse decisions, and constraint inference.
 # Keep the upsert response compatible with infrastructure/stages/database/schema.py.
-INSTRUCTIONS = """Build a database schema for the current requirement only.
-The schema is a graph: entities own fields, and fields reference Entity.field symbols.
-Read the description AND all concatenated scenario steps, including failure cases.
-Retrieved entities are authoritative existing definitions. Reuse them before adding
-entities. Add missing fields to existing entities; do not create synonyms or duplicate
-accounts for registration and login. Use the symbol inventory to avoid name collisions.
-An existing entity may be modified only if it was retrieved. Preserve all untouched
-entities and fields. Never rename or delete symbols or change existing field types.
-Infer only persistent data justified by this requirement. Distinguish transient UI input
-from stored data; for example, never persist password confirmation or plaintext passwords.
-Include necessary primary and foreign keys; do not invent unrelated business features.
-An unused example value in a Given clause does not by itself establish a uniqueness
-rule. Do not invent trimming, normalization, value ranges, or default policies. Preserve
-explicit comparison rules exactly. Refine earlier field constraints when the current
-requirement gives more precise evidence; keep unrelated constraints unchanged.
+INSTRUCTIONS = """Design persistent data for the supplied requirement and its scenario steps.
+Reuse the supplied retrieved entities and symbol_inventory; extend existing entities
+rather than introducing synonyms for the same concept. Preserve unrelated definitions.
+Store persistent business data, not transient UI values such as password confirmation.
+Derive constraints from requirement evidence; example fixture values alone do not
+establish uniqueness, normalization, value ranges or defaults.
 
-Return exactly {"entities": {...}, "related_fields": [...], "explanation": "..."} in English.
-entities is an incremental upsert patch keyed by entity name. Each new entity has
-exactly description (nonempty string) and fields (object keyed by field name).
-Each new field has exactly:
-  description: nonempty string
-  type: string|integer|number|boolean|date|datetime|uuid|json
-  nullable: boolean
-  primary_key: boolean
-  unique: boolean
-  references: null or "Entity.field"
-  constraints: array of nonempty strings describing required value/domain constraints
-Use identifiers matching [A-Za-z_][A-Za-z0-9_]*. Each entity must have exactly one
-non-null primary key. Foreign keys must match their target type and reference a
-primary or unique field. Represent many-to-many associations with a linking entity.
-For existing entities and fields, include only new or changed properties; omitted
-properties are preserved. Set references to null explicitly to clear an edge.
-Return entities={} if the existing schema suffices, explaining what was reused.
-Explain reuse, additions, and modifications using evidence from the current requirement.
-If a correction is supplied, fix the reported error and return one complete JSON object.
-Also return "related_fields": ["Entity.field", ...], listing every existing or newly
-created field from this requirement's directly relevant persistent data. This is a
-schema relationship, not a read/write obligation; include fields needed for identity,
-lookups, joins, inserts, updates, and required session relationships. Do not include
-unrelated fields. The compiler records this relation after saving the schema.
+Return {"entities": {...}, "related_fields": ["Entity.field"]}.
+entities is an incremental update keyed by entity name. Each new entity contains
+"description" (string) and "fields" (object keyed by field name).
+Each new field contains these separate properties:
+- description: string.
+- type: string, integer, number, boolean, date, datetime, uuid or json.
+- nullable, primary_key, unique: boolean properties.
+- references: null or a qualified "Entity.field" string.
+- constraints: array of descriptions of required value/domain constraints.
+Use SQL-compatible entity/field identifiers. Represent keys and relationships needed
+by the requirements, with compatible referenced field types. Password storage holds
+hashes rather than plaintext. Do not invent unrelated business features.
+
+For existing entities/fields, return only changed properties; omitted properties
+are preserved by the compiler. Use references=null to clear a reference. Return
+entities={} when existing definitions suffice. related_fields lists the qualified
+persistent fields relevant to this requirement, including keys and relationships.
+It is a schema association, not a read/write obligation. Use names from the resulting
+schema.
 """
 
 
@@ -68,7 +55,7 @@ def requirement_nodes(root: dict):
         yield {**tree.requirements[rid], "steps": tree.concatenated_steps(rid)}
 
 
-def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
+def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 0) -> dict:
     requirements_path = arc_dir / "requirements.json"
     if not requirements_path.is_file():
         raise ValueError("Run 01_explore_requirement.py first to create .arc/requirements.json")
@@ -114,24 +101,19 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
             "symbol_inventory": {name: list(entity["fields"]) for name, entity in schema["entities"].items()},
             "retrieved_schema": {"entities": retrieved["entities"]},
         }
-        # Give malformed JSON bounded, explicit feedback.
-        for attempt in range(1, 4):
-            patch = None
-            try:
-                patch = model.generate_json(INSTRUCTIONS, request)
-                updated = apply_patch(schema, patch)
-                updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
-                break
-            except json.JSONDecodeError as error:
-                if attempt == 3:
-                    raise ValueError(f"Schema analysis failed for {requirement['id']} after 3 attempts: {error}") from error
-                print(f"Retrying {requirement['id']} ({attempt + 1}/3): {error}", flush=True)
-                request["correction"] = {"error": str(error), "previous_patch": patch}
+        def accept(patch):
+            updated = apply_patch(schema, patch)
+            updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
+            changes = format_changes(schema, updated)
+            return updated, changes
+
+        (updated, changes), patch = propose_json(model, INSTRUCTIONS, request, accept,
+            console, f"Schema design {requirement['id']}", max_attempts)
         # --- Pass boundary: publish the schema ----------------------
         # Subsequent requirements retrieve from this updated graph.
         save_json(arc_dir / "db_schema.json", updated)
         console.show(f"{label} | 4. Schema changes (saved)", (
-            patch.get("explanation", "") + "\n\n" + format_changes(schema, updated)
+            changes
         ))
         schema = updated
         console.artifact("db_schema", schema, f"{label} | Accepted schema")
@@ -142,12 +124,13 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6) -> dict:
 def main() -> None:
     parser = create_parser("Step 02: Build DB Schema with RAG")
     parser.add_argument("--top-k", type=int, default=6, help="Number of BM25 entity/field hits (default: 6)")
+    parser.add_argument("--max-attempts", type=int, default=0, help="Maximum proposals per requirement; 0 retries until interrupted")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:
             _, output_dir = resolve_directories(args)
             stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            build_db_schema(output_dir / ".arc", args.pause, args.top_k)
+            build_db_schema(output_dir / ".arc", args.pause, args.top_k, args.max_attempts)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")
 

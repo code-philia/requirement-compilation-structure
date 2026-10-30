@@ -6,10 +6,11 @@ components. Prompts and design records live in ui/design.py."""
 
 import json
 
-from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, normalize_design
+from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, normalize_design, page_context
 from infrastructure.stages.frontend.ui.proposals import INSTRUCTIONS as EXAMPLE_INSTRUCTIONS
 from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
+from infrastructure.shared.agent.proposals import propose_json
 
 
 def bind_requirement_image_pages(design, requirement, rid):
@@ -40,11 +41,11 @@ def bind_requirement_image_pages(design, requirement, rid):
     design["requirements"][rid] = owned
 
 
-def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_fixtures=3):
+def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_fixtures=3, max_attempts=0):
     """Design UI/data for all leaf requirements using page-first retrieval.
 
     Show existing/retrieved pages, ask for an incremental proposal, and feed
-    JSON parse errors back for bounded retries. Save accepted ui_design.json
+    response-consumption errors back for repair. Save accepted ui_design.json
     updates; implementation and browser tests belong to step 10."""
     design, retriever = empty_design(), PageRetriever()
     for rid in tree.requirements:
@@ -66,29 +67,18 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
                 for pid, page in design["pages"].items()},
             "max_fixtures": max_fixtures,
         }
-        for attempt in range(1, 4):
-            response = None
-            try:
-                response = model.generate_json(INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS, request)
-                proposal = response
-                updated = apply_proposal(design, proposal, rid, tree)
-                bind_requirement_image_pages(updated, requirement, rid)
-                break
-            except json.JSONDecodeError as error:
-                correction = {"error": str(error), "previous_response": response}
-                message = str(error)
-                if isinstance(error, json.JSONDecodeError):
-                    correction["invalid_response"] = error.doc
-                    correction["instruction"] = "Follow the complete JSON examples exactly: one outer object containing pages, elements, bindings, requirement_ui, step_ui. Use ordinary objects, not patch/entries arrays. Return complete records for changed IDs; omit unchanged IDs."
-                    message += "\nInvalid JSON response (excerpt):\n" + error.doc[:3000]
-                elif response is not None:
-                    message += "\nRejected proposal (excerpt):\n" + json.dumps(response, ensure_ascii=False, indent=2)[:3000]
-                console.show(label + f" | Validation failed ({attempt}/3)", message)
-                if attempt == 3:
-                    raise ValueError(f"UI/data design failed for {rid} after 3 proposals: {error}") from error
-                request["correction"] = correction
+        def accept(proposal):
+            updated = apply_proposal(design, proposal, rid, tree)
+            bind_requirement_image_pages(updated, requirement, rid)
+            for pid in proposal["pages"]:
+                console.show(label + f" | Page context {pid}", json.dumps(page_context(updated, pid), ensure_ascii=False, indent=2))
+            return updated
+
+        updated, proposal = propose_json(model, INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS,
+            request, accept, console, label, max_attempts)
         console.show(label + " | 4. Incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
         design = updated
+        save_json(arc_dir / "ui_design.json", design)
         console.artifact("ui_design", design, label + " | Accepted UI")
     normalize_design(design, tree)
     save_json(arc_dir / "ui_design.json", design)
