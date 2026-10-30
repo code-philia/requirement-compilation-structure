@@ -6,7 +6,7 @@ components. Prompts and design records live in ui/design.py."""
 
 import json
 
-from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, normalize_design, page_context
+from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, normalize_design, page_context, UIResponseError
 from infrastructure.stages.frontend.ui.proposals import INSTRUCTIONS as EXAMPLE_INSTRUCTIONS
 from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
@@ -41,7 +41,7 @@ def bind_requirement_image_pages(design, requirement, rid):
     design["requirements"][rid] = owned
 
 
-def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_fixtures=3, max_attempts=0):
+def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_fixtures=3, max_attempts=5):
     """Design UI/data for all leaf requirements using page-first retrieval.
 
     Show existing/retrieved pages, ask for an incremental proposal, and feed
@@ -68,7 +68,10 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
             "max_fixtures": max_fixtures,
         }
         def accept(proposal):
-            updated = apply_proposal(design, proposal, rid, tree)
+            try:
+                updated = apply_proposal(design, proposal, rid, tree)
+            except (KeyError, TypeError, AttributeError) as error:
+                raise UIResponseError(error, proposal) from error
             bind_requirement_image_pages(updated, requirement, rid)
             for pid in proposal["pages"]:
                 console.show(label + f" | Page context {pid}", json.dumps(page_context(updated, pid), ensure_ascii=False, indent=2))

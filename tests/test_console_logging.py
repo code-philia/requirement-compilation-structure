@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 from openai import OpenAI
 
-from infrastructure.shared.models.text import TextModel
+from infrastructure.shared.models.text import TextModel, task_reasoning
 from infrastructure.shared.models.vision import VisualModel
 from infrastructure.utils.presentation.console import DemoConsole, preview, show_panel, display_width, WaitingStatus
 from infrastructure.utils.presentation.logging import console_log
@@ -134,6 +134,72 @@ class ConsoleLogging(unittest.TestCase):
         self.assertIn("max_completion_tokens", requests[0])
         self.assertIn("max_tokens", requests[2])
         self.assertEqual([record["status_code"] for record in records if record["event"] == "http_response"], [500, 400, 200])
+
+    def test_reasoning_policy_and_actual_wire_controls(self):
+        cases = [({}, "low"), ({"entity_name": "Note"}, "none"),
+            ({"entity_name": "Note", "correction": {"error": "Invalid SQL response"}}, "low"),
+            ({"task": {"test_path": None}}, "low"),
+            ({"task": {"test_path": "backend/tests/save.test.ts"},
+                "feedback": [{"error": "Fix test compilation"}]}, "low"),
+            ({"task": {"test_path": "frontend/tests/e2e/save.spec.ts"},
+                "feedback": [{"error": "Fix test assertions"}]}, "low"),
+            ({"task": {}}, "none"),
+            ({"task": {"api_id": "API-SAVE"}, "feedback": [{"error": "Compilation failed"}]}, "none"),
+            ({"task": {"page": {"id": "home"}}, "feedback": [{"typecheck": {"returncode": 1}}]}, "none"),
+            ({"task": {"triggers": {}}, "feedback": [{"e2e": {"returncode": 1}}]}, "none")]
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                self.assertEqual(task_reasoning("deepseek-flash", "auto", payload), expected)
+                self.assertEqual(task_reasoning("other-model", "auto", payload), "provider")
+                self.assertEqual(task_reasoning("deepseek-flash", "high", payload), "high")
+        attempts = []
+        def handler(request):
+            attempts.append(json.loads(request.content))
+            return httpx.Response(200, json=self.response('{"ok":true}'))
+        model = self.model(handler)
+        model.name = "deepseek-flash"
+        with redirect_stdout(StringIO()):
+            model.generate_json("Implement", {"task": {}})
+            model.generate_json("Design", {})
+            model.generate_json("Generate tests", {"task": {"test_path": None}})
+            model.generate_json("Repair tests", {"task": {"test_path": "test.ts"},
+                "feedback": [{"error": "Fix test compilation"}]})
+            for task in ({"api_id": "API-SAVE"}, {"page": {"id": "home"}}, {"triggers": {}}):
+                model.generate_json("Repair implementation", {"task": task,
+                    "feedback": [{"error": "Fix failed acceptance checks"}]})
+        self.assertEqual(attempts[0]["thinking"], {"type": "disabled"})
+        self.assertNotIn("reasoning_effort", attempts[0])
+        self.assertEqual(attempts[1]["thinking"], {"type": "enabled"})
+        self.assertEqual(attempts[1]["reasoning_effort"], "low")
+        for request in attempts[2:4]:
+            self.assertEqual(request["thinking"], {"type": "enabled"})
+            self.assertEqual(request["reasoning_effort"], "low")
+        for request in attempts[4:]:
+            self.assertEqual(request["thinking"], {"type": "disabled"})
+            self.assertNotIn("reasoning_effort", request)
+
+    def test_unsupported_reasoning_falls_back_once_for_text_and_vision(self):
+        for visual in (False, True):
+            attempts = []
+            def handler(request):
+                body = json.loads(request.content)
+                attempts.append(body)
+                if "thinking" in body or "reasoning_effort" in body:
+                    return httpx.Response(400, json={"error": {"message": "Unsupported parameter thinking"}})
+                return httpx.Response(200, json=self.response('{"ok":true}'))
+            model = self.model(handler)
+            if visual:
+                visual_model = VisualModel.__new__(VisualModel)
+                visual_model.client = model.client
+                model = visual_model
+            model.name = "deepseek-flash"
+            payload = {"image_url": "data:image/png;base64,QUJD"} if visual else {}
+            with self.subTest(visual=visual), redirect_stdout(StringIO()):
+                self.assertEqual(model.generate_json("Describe", payload), {"ok": True})
+                self.assertEqual(model.generate_json("Describe", payload), {"ok": True})
+                self.assertEqual(len(attempts), 3)
+                self.assertNotIn("thinking", attempts[-1])
+                self.assertNotIn("reasoning_effort", attempts[-1])
 
     def test_invalid_and_truncated_content_is_logged_before_parsing(self):
         for content, finish in [("{broken-json", "stop"), ('{"partial":', "length")]:

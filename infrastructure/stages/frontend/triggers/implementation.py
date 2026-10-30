@@ -8,14 +8,15 @@ import json
 
 from infrastructure.shared.agent.files import source_paths
 from infrastructure.shared.agent.loop import run_file_agent
+from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare_e2e
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, require_behavioral_red, test_path
-from infrastructure.stages.frontend.triggers.runtime import sync_triggers
+from infrastructure.stages.frontend.triggers.runtime import sync_triggers, prepare_trigger_paths
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
 from infrastructure.stages.frontend.triggers.design import api_ids, trigger_obligations, relevant_pages
-from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, TriggerFiles, model_context
+from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, model_context
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
@@ -56,10 +57,13 @@ and scenarios for concrete fields, selectors and branches. Trigger descriptions 
 derived DB obligations are context, not the sole test oracle or unconditional effects.
 
 Create a .spec.ts target using task.new_file or update test_path. Import test and expect
-from frontend/tests/e2e/support/context.ts using a relative .js import; import
-fixturePasswordHash there when password fixtures are needed. Tests use async ({page,database}) callbacks. The fixture resets a real isolated
+from frontend/tests/e2e/support/context.ts using a relative .js import. Read the
+supplied test utility definitions, including re-exported helpers, for their signatures
+and fixture data conventions. Construct fixtures compatible with those conventions and
+the API contract; do not guess helper arguments or substitute arbitrary encoded values.
+Tests use async ({page,database}) callbacks. The fixture resets a real isolated
 SQLite database before each case; seed Given rows with parameterized SQL and supplied
-schema definitions. Bind booleans as 0/1 and use fixturePasswordHash for password fixtures.
+schema definitions. Bind booleans as 0/1.
 Do not call another API to manufacture Given state.
 
 Within max_tests, cover meaningful success, required rejection/unchanged data, navigation
@@ -76,16 +80,19 @@ The current suite is writable; other files follow the supplied permissions. Fail
 checks can expose existing frontend sources for repair. Fix invalid test code or fixtures
 in this phase; repair existing writable application code when it causes runtime failures,
 without implementing new triggers before their tests. Assertion RED for missing behavior
-is valid. Application errors are not a reason to weaken assertions or rewrite expected
-business outcomes. Compiler-owned fixtures, runtime types, startup and DB isolation are
+is valid, including navigation before its trigger exists. If fixture/runtime errors and
+behavioral RED coexist, fix the fixture/runtime errors and retain the behavioral cases
+and assertions for implementation. Do not delete or weaken them to make test generation
+pass. Compiler-owned fixtures, runtime types, startup and DB isolation are
 provided. TypeScript and real browser execution determine whether tests are usable;
 implementation and regression acceptance follow separately.
 """
 
-IMPLEMENT_INSTRUCTIONS = """Implement the selected frontend triggers against the requirement and E2E tests.
-A creation task supplies one trigger and task.new_file; a requirement-repair task supplies
-all needed triggers, including destination-page lifecycle behavior. Use implementation_paths
-for existing files. Export handle(context: UiTriggerContext): void | Promise<void> from
+IMPLEMENT_INSTRUCTIONS = """Implement the requirement's frontend triggers together against its E2E tests.
+The task supplies all needed triggers, including destination-page lifecycle behavior.
+implementation_paths maps each trigger to its supplied writable file; null file content
+means that file must be created. Return all required implementations in one edits list.
+Export handle(context: UiTriggerContext): void | Promise<void> from
 one source file per trigger, importing UiTriggerContext from frontend/src/ui-runtime.ts.
 Ordinary helper functions may be shared through supplied writable sources.
 
@@ -113,14 +120,14 @@ surface unexpected errors rather than fabricating successful responses.
 Pages remain presentational; avoid duplicate handlers or test detection. Repair any
 supplied writable frontend source needed for actual behavior, preserving existing UI IDs,
 styles and accepted workflows. Files permissions define editable sources; tests, backend,
-SQL, designs and compiler wiring remain references. Creation compiles the handler;
-requirement repair runs real E2E and UI regressions. Use their feedback to repair code
+SQL, designs and compiler wiring remain references. Compilation and real E2E/UI
+regressions accept the complete requirement implementation. Use their feedback to repair code
 without weakening tests or hardcoding fixture values.
 """
 
 
 def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts,
-        model, console, report, max_turns=18, max_tests=5):
+        model, console, report, max_turns=5, max_tests=5):
     """Implement design one requirement at a time through real-app E2E TDD.
 
     Prepare dependencies/runtime, generate and freeze key scenario tests, then
@@ -138,7 +145,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     baseline = ui_checks.tests(ui_files)
     require_green(baseline)
     accepted, implemented = [], set()
-    selection = TriggerFiles(output, ui)
+    selection = SourceFiles(output, ui)
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "frontend_e2e.json", report)
     for number, rid in enumerate(tree.leaves, 1):
@@ -188,7 +195,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         test_context = {**model_context(context), "schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
             "max_tests": max_tests}
         test_workspace = selection.workspace(target=("e2e_test", rid), existing=relative,
-            references=[FIXTURE, *source_paths(output, "backend/src/db")])
+            references=["frontend/src/ui-runtime.ts", FIXTURE, "backend/tests/support/context.ts",
+                *source_paths(output, "backend/src/db")])
         agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
             test_workspace, test_gate, max_turns, console, label + " / Test Generation",
             feedback_filter=lambda value: selection.feedback(test_workspace, value))
@@ -207,6 +215,10 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
 
         def implementation_gate():
             """Accept current trigger implementations only after compilation and all required browser regressions pass."""
+            absent = [tid for tid in sorted(targets)
+                if not (path := selected_path(output, "trigger", tid)) or not (output / path).is_file()]
+            if absent:
+                raise ValueError("Create all supplied trigger files before acceptance: " + ", ".join(absent))
             result = implementation_checks()
             for kind in ("typecheck",):
                 if result[kind] and result[kind]["returncode"]:
@@ -218,51 +230,35 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 raise TriggerCheckFailure("Requirement behavior or UI regression failed", result) from error
             return result
 
-        current = implementation_checks()
-        report["requirements"][rid]["status"] = test_run_status(current["e2e"]) if current["e2e"] is not None else "REPAIR_REQUIRED"
-        save_json(arc_dir / "frontend_e2e.json", report)
+        generated = agent["checks"]
         missing = [tid for tid in sorted(targets)
             if not (path := selected_path(output, "trigger", tid)) or not (output / path).is_file()]
-        if not missing and current["e2e"] and current["e2e"]["returncode"] == 0 and current["ui"] and current["ui"]["returncode"] == 0:
-            require_green(current["e2e"])
-            require_green(current["ui"])
+        application_changed = any(path.startswith("frontend/src/") for path in test_workspace.changed_paths)
+        current = {"typecheck": generated["typecheck"], "e2e": generated["behavior"], "ui": baseline}
+        report["requirements"][rid]["status"] = generated["status"]
+        save_json(arc_dir / "frontend_e2e.json", report)
+        # A pure test addition does not invalidate passed application/UI checks.
+        # Any source edit or handler creation receives complete regression acceptance.
+        if not missing and not application_changed and generated["status"] == "GREEN":
             agent = {"turns": 0, "checks": current}
         else:
-            total_turns = 0
-            # Keep the complete target set, including cross-page dependencies.
-            # Each creation request sees only its own trigger and actual imports.
-            for new_trigger in missing:
-                task = {**model_context(context, {new_trigger}),
-                    "implementation_paths": {new_trigger: selected_path(output, "trigger", new_trigger)}}
-                workspace = selection.workspace(target=("trigger", new_trigger))
-
-                def creation_gate():
-                    sync_triggers(output, ui, design, backend, active)
-                    compiled = checks.typecheck([*regression_files, *ui_files])
-                    if compiled["returncode"]:
-                        raise ValueError(compiled["output"])
-                    return {"typecheck": compiled}
-
-                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
-                    creation_gate, max_turns, console, label + f" / Create {new_trigger}",
-                    feedback_filter=lambda value: selection.feedback(workspace, value))
-                total_turns += agent["turns"]
-
-            # Behavioral acceptance belongs to the whole requirement. Every
-            # target remains writable, even when it already existed on resume.
-            try:
-                agent = {"checks": implementation_gate()}
-            except ValueError as error:
-                console.show(label + " | Requirement repair", str(error))
+            needs_implementation = bool(missing) or generated["status"] != "GREEN"
+            feedback = current
+            if not needs_implementation:
+                try:
+                    agent = {"turns": 0, "checks": implementation_gate()}
+                except ValueError as error:
+                    needs_implementation = True
+                    feedback = getattr(error, "feedback", {"error": str(error)})
+            if needs_implementation:
                 task = {**model_context(context),
-                    "implementation_paths": {tid: selected_path(output, "trigger", tid) for tid in sorted(targets)}}
-                workspace = selection.workspace(triggers=context_tids, references=[relative])
+                    "implementation_paths": prepare_trigger_paths(output, context_tids)}
+                workspace = selection.workspace(triggers=context_tids, references=[relative, "frontend/src/ui-runtime.ts"])
                 agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
-                    implementation_gate, max_turns, console, label + " / Interaction Implementation",
-                    feedback=getattr(error, "feedback", {"error": str(error)}),
+                    implementation_gate, max_turns, console, label + " / Trigger Implementation",
+                    feedback=feedback,
                     feedback_filter=lambda value: selection.feedback(workspace, value))
-                total_turns += agent["turns"]
-            agent["turns"] = total_turns
+        baseline = agent["checks"]["ui"]
         accepted.append(rid)
         reused = tids & implemented
         implemented.update(targets)

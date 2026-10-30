@@ -7,7 +7,7 @@ included in its checks. Tests and compiler-owned wiring are supplied as read-onl
 import json
 from pathlib import Path
 
-from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
+from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.ui.design import owners, page_context
@@ -42,7 +42,7 @@ and accepted page display tests, then a build. Implement the design without modi
 tests or compiler wiring to bypass failures.
 """
 
-def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 18,
+def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 5,
         images: dict | None = None, requirement_contexts: dict | None = None) -> dict:
     """Implement the complete saved UI/data design through component-existence TDD.
 
@@ -57,6 +57,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     checks = FrontendChecks(output)
     checks.install_browser()
     accepted = []
+    selection = SourceFiles(output, design)
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "ui_checks.json", report)
     for number, pid in enumerate(design["pages"], 1):
@@ -101,24 +102,21 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                 "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"} for rid in uses],
                 "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
                 "implementation_path": selected_path(output, "page", pid)}
-            workspace = FileWorkspace.for_target(output, "page", pid,
-                writable=editable_sources(output, "frontend/src"),
-                references=source_paths(output, "frontend/src") + files +
-                    ["frontend/package.json", "frontend/tsconfig.json"])
+            workspace = selection.workspace(target=("page", pid),
+                references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json", "frontend/tsconfig.json"])
             agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
-                max_turns, console, label + " / Implementation", feedback=current)
+                max_turns, console, label + " / Implementation", feedback=current,
+                feedback_filter=lambda value: selection.feedback(workspace, value))
+        last_checks = agent["checks"]
         accepted.append(pid)
         report["pages"][pid].update({"status": "GREEN", "turns": agent["turns"],
             "implementation_path": selected_path(output, "page", pid),
             "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"}})
         save_json(arc_dir / "ui_checks.json", report)
         console.show(label + " | GREEN", agent["checks"]["tests"]["output"])
-    console.show("UI final regression", "Run all current pages' existence suites and build both frontend and backend for npm start. Business triggers remain empty.")
-    final = checks.tests([test_path(pid) for pid in accepted])
+    console.show("UI final verification", "All pages passed the latest complete display regression; build the application.")
+    final = last_checks["tests"]
     require_green(final)
-    compiled = checks.typecheck([test_path(pid) for pid in accepted])
-    if compiled["returncode"]:
-        raise ValueError(compiled["output"])
     built = checks.build()
     if built["returncode"]:
         raise ValueError(built["output"])

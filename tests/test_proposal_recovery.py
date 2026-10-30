@@ -19,7 +19,7 @@ class ProposalRecovery(unittest.TestCase):
 
         request = {"task": "Read the first name"}
         result, accepted = propose_json(Mock(generate_json=generate), "Design", request,
-            lambda value: value["read"][0].upper(), Mock(), "Example")
+            lambda value: value["read"][0].upper(), Mock(), "Example", 6)
         self.assertEqual(result, "NOTE")
         self.assertEqual(accepted, proposals[-1])
         self.assertEqual(len(requests), 6)
@@ -28,6 +28,26 @@ class ProposalRecovery(unittest.TestCase):
         for index, item in enumerate(requests[1:]):
             self.assertEqual(item["correction"]["previous_response"], proposals[index])
         self.assertNotIn("correction", request)
+
+    def test_default_budget_is_five_and_repairs_explicitly_replace_rejected_output(self):
+        requests = []
+        def generate(instructions, request):
+            requests.append((instructions, deepcopy(request)))
+            return {}
+        model = Mock(generate_json=generate)
+        with self.assertRaisesRegex(RuntimeError, "Example exhausted 5 proposals"):
+            propose_json(model, "Design", {}, lambda value: value["read"], Mock(), "Example")
+        self.assertEqual(len(requests), 5)
+        self.assertEqual(requests[0][0], "Design")
+        for attempt, (instructions, request) in enumerate(requests[1:], 1):
+            self.assertIn("complete replacement JSON object", instructions)
+            self.assertEqual(request["correction"]["failed_attempt"], attempt)
+
+    def test_unlimited_attempts_are_not_accepted(self):
+        model = Mock()
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            propose_json(model, "Design", {}, lambda value: value, Mock(), "Example", 0)
+        model.generate_json.assert_not_called()
 
     def test_explicit_retry_limit_has_a_clear_failure_and_cause(self):
         model = Mock(generate_json=Mock(return_value={}))

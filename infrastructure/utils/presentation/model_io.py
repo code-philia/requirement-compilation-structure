@@ -118,9 +118,13 @@ def _input_summary(arguments: dict) -> str:
 
 def _usage_summary(usage: dict) -> str:
     """Keep a compact plain-text usage line in the persistent log."""
-    return "Reported tokens | " + " | ".join(
-        f"{name.lower()}: {value:,}" if value is not None else f"{name.lower()}: unavailable"
-        for name, value in _usage_counts(usage).items())
+    counts = _usage_counts(usage)
+    summary = "Reported tokens | " + " | ".join(
+        f"{name.lower()}: {counts[name]:,}" if counts[name] is not None else f"{name.lower()}: unavailable"
+        for name in ("Input", "Cached input", "Output", "Total"))
+    if counts["Reasoning"] is not None:
+        summary += f"\nReasoning tokens: {counts['Reasoning']:,} | Non-reasoning output: {counts['Non-reasoning output']}"
+    return summary
 
 
 def _input_view(arguments):
@@ -148,9 +152,12 @@ def _usage_counts(usage):
     def first(*values):
         return next((value for value in values if type(value) is int), None)
     details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+    output = first(usage.get("completion_tokens"), usage.get("output_tokens"))
+    reasoning = first((usage.get("completion_tokens_details") or {}).get("reasoning_tokens"))
     return {"Input": first(usage.get("prompt_tokens"), usage.get("input_tokens")),
         "Cached input": first(details.get("cached_tokens"), usage.get("prompt_cache_hit_tokens")),
-        "Output": first(usage.get("completion_tokens"), usage.get("output_tokens")),
+        "Output": output, "Reasoning": reasoning,
+        "Non-reasoning output": output - reasoning if output is not None and reasoning is not None else None,
         "Total": first(usage.get("total_tokens"))}
 
 
@@ -233,7 +240,7 @@ def show_call_totals():
     view = table("Stage model calls", "Value", "Usage availability")
     view.add_row(text("Calls / failed"), text(f"{stats['calls']} / {stats['failed']}"), text("SDK calls; time includes retries"))
     view.add_row(text("Total round-trip time"), text(f"{stats['seconds']:.2f} s"), text("sum of calls"))
-    for key in ("Input", "Cached input", "Output", "Total"):
+    for key in ("Input", "Cached input", "Output", "Reasoning", "Non-reasoning output", "Total"):
         view.add_row(text(key), text(f"{stats[key]:,}" if key in stats else "unavailable"),
             text(f"reported in {stats.get(key + ' reports', 0)}/{stats['calls']} calls"))
     show_panel("Stage model usage | reported counts only", view, tone="output")

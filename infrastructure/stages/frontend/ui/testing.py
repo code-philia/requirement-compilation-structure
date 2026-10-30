@@ -139,6 +139,8 @@ def parse_playwright_result(result: dict, include_files: bool = False) -> dict:
     for suite in report.get("suites", []):
         visit(suite)
     stats = report.get("stats", {})
+    if isinstance(stats.get("duration"), (int, float)):
+        result["test_seconds"] = stats["duration"] / 1000
     result.update({"passed": stats.get("expected", 0), "failed": stats.get("unexpected", 0),
         "skipped": stats.get("skipped", 0), "flaky": stats.get("flaky", 0),
         "errors": report.get("errors", []), "failures": failures})

@@ -1,4 +1,4 @@
-"""Model-selected source paths, stable exports and portable imports."""
+"""Implementation source paths, stable exports and portable imports."""
 
 import posixpath
 from pathlib import Path, PurePosixPath
@@ -20,7 +20,7 @@ def selected_path(output: Path, kind: str, identity: str) -> str | None:
 
 
 def remember_path(output: Path, kind: str, identity: str, relative: str) -> None:
-    """Remember the first edit's path without adding model response fields."""
+    """Persist the implementation path for a target without model response metadata."""
     index = output / ".arc/implementation_paths.json"
     paths = json.loads(index.read_text(encoding="utf-8-sig")) if index.is_file() else {}
     paths.setdefault(kind, {})[identity] = relative

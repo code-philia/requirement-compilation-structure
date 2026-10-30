@@ -5,10 +5,15 @@ from copy import deepcopy
 
 
 INSTRUCTIONS = """Design UI and frontend data for the supplied leaf requirement, using scenarios,
-visual references and retrieved page subtrees. Return:
-{pages:{}, elements:{}, bindings:{}, requirement_ui:[], step_ui:{}}.
-Return COMPLETE new or changed records keyed by ID; unchanged records may be reused
-by reference. Updates replace records, so retain unrelated content on shared pages.
+visual references and retrieved page subtrees. Return one JSON object with all five
+top-level sections: {"pages":{},"elements":{},"bindings":{},"requirement_ui":[],"step_ui":{}}.
+Return complete new or changed records INSIDE these sections. For an unchanged map,
+return {} rather than omitting its section. requirement_ui still lists reused element
+IDs. Updates replace records, so retain unrelated content on shared pages.
+pages contains page metadata only; it does not define the page's controls or data.
+A new page also needs its root and controls in elements, and its variables in
+bindings. A page listed in all_pages is only a catalogue entry; reuse complete
+records from retrieved_pages when supplied.
 
 pages maps PAGE IDs to {name, route, root, images, fixtures}. route is a URL path;
 root is an ELEMENT ID; images lists supplied image IDs. These IDs have different roles.
@@ -40,6 +45,18 @@ return empty records and lists. Preserve visible text in its original language;
 images provide layout/style evidence, not hidden business rules. Use supplied image.page
 hints for page IDs. Do not return triggers, handlers, code or tests.
 """
+
+
+OUTPUT_TEMPLATE = {"pages": {}, "elements": {}, "bindings": {}, "requirement_ui": [], "step_ui": {}}
+
+
+class UIResponseError(ValueError):
+    """Attach the concrete output layout after a model record cannot be consumed."""
+    def __init__(self, error, proposal):
+        super().__init__(f"Cannot read UI/data response: {error}")
+        self.feedback = {"response_template": OUTPUT_TEMPLATE,
+            "missing_sections": [key for key in OUTPUT_TEMPLATE if not isinstance(proposal, dict) or key not in proposal],
+            "repair": "Return the complete five-section UI response. pages alone is incomplete. Define new page roots and controls in elements, variables in bindings, and requirement/step associations in requirement_ui and step_ui. Existing records may be reused by ID; missing new records must be written. Do not repeat the rejected pages-only response."}
 
 
 def empty_design() -> dict:

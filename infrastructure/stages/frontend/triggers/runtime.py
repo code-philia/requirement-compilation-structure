@@ -4,14 +4,27 @@ Compiler-owned TypeScript strings provide UI state, canonical API calls, navigat
 and event registration. The model implements each trigger's business logic; the
 compiler activates only the triggers accepted or currently being implemented."""
 
+from hashlib import sha256
 import json
 
 from infrastructure.stages.frontend.ui.runtime import UI_RUNTIME
-from infrastructure.shared.project.entrypoints import import_path, implementation_entrypoint
+from infrastructure.shared.project.entrypoints import import_path, implementation_entrypoint, selected_path, remember_path
 from infrastructure.utils.files import save_text
 
 TRIGGER_REGISTRY = "frontend/src/ui-triggers.ts"
 API_CLIENT = "frontend/src/ui-api.ts"
+
+
+def prepare_trigger_paths(output, identities):
+    """Reserve writable targets so one edits list can implement a complete requirement."""
+    paths = {}
+    for tid in sorted(identities):
+        relative = selected_path(output, "trigger", tid)
+        if relative is None:
+            relative = "frontend/src/triggers/trigger-" + sha256(tid.encode()).hexdigest()[:16] + ".ts"
+            remember_path(output, "trigger", tid, relative)
+        paths[tid] = relative
+    return paths
 
 CLIENT_SOURCE = '''
 export async function callApi(apiId: string, request: UiApiRequest = {}): Promise<UiApiResponse> {

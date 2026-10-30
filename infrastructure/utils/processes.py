@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+from time import monotonic
 
 WINDOWS = os.name == "nt"
 
@@ -54,6 +55,7 @@ def stop_process(process) -> None:
 
 def capture_process(command, *, cwd, timeout, env=None) -> dict:
     """Capture UTF-8 output and clean the whole process tree before re-raising timeout or Ctrl+C."""
+    started = monotonic()
     process = start_process(command, cwd=cwd, env=env, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     try:
@@ -62,7 +64,10 @@ def capture_process(command, *, cwd, timeout, env=None) -> dict:
         stop_process(process)
         process.communicate(timeout=5)
         raise
-    return {"returncode": process.returncode, "stdout": stdout,
+    elapsed = monotonic() - started
+    label = " ".join([Path(str(command[0])).name, *(str(part) for part in command[1:])])
+    print(f"[CHECK] {label} | {elapsed:.2f} s | exit {process.returncode}", flush=True)
+    return {"returncode": process.returncode, "stdout": stdout, "elapsed_seconds": elapsed,
         "output": (stdout + stderr)[-24000:]}
 
 

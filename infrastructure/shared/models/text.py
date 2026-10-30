@@ -11,6 +11,41 @@ from infrastructure.utils.presentation.model_io import http_client, invoke
 
 JSON_OUTPUT_RULE = "Return exactly one JSON object without Markdown."
 
+
+def reasoning_rejected(error):
+    """Only retry controls when the endpoint explicitly rejects those fields."""
+    message = str(error).lower()
+    return getattr(error, "status_code", None) in {400, 422} and any(
+        word in message for word in ("unsupported", "unknown", "unrecognized", "not supported", "not allowed", "unexpected")) and any(
+        word in message for word in ("thinking", "reasoning_effort"))
+
+
+def reasoning_arguments(name, mode):
+    """Translate configured reasoning to the provider's documented request fields."""
+    if mode == "provider":
+        return {}
+    if name.lower().startswith("deepseek"):
+        if mode == "none":
+            return {"extra_body": {"thinking": {"type": "disabled"}}}
+        return {"reasoning_effort": mode, "extra_body": {"thinking": {"type": "enabled"}}}
+    return {"reasoning_effort": mode}
+
+
+def task_reasoning(name, configured, payload):
+    """Use low reasoning for design/tests; disable thinking for code implementation and repair."""
+    if configured != "auto":
+        return configured
+    if not name.lower().startswith("deepseek"):
+        return "provider"
+    task = payload.get("task")
+    if isinstance(task, dict):
+        return "low" if "test_path" in task else "none"
+    if "correction" in payload:
+        return "low"
+    if "entity_name" in payload:
+        return "none"
+    return "low"
+
 class TextModel:
     """Transport for structured stage proposals and file-edit responses."""
     def __init__(self) -> None:
@@ -26,6 +61,10 @@ class TextModel:
             raise ValueError("MAX_OUTPUT_TOKENS must be a positive integer") from error
         if self.max_output_tokens < 1:
             raise ValueError("MAX_OUTPUT_TOKENS must be a positive integer")
+        self.reasoning = os.getenv("MODEL_REASONING", "auto").lower()
+        if self.reasoning not in {"auto", "provider", "none", "low", "high", "max"}:
+            raise ValueError("MODEL_REASONING must be auto, provider, none, low, high or max")
+        self._reasoning_supported = True
         self._token_parameter = "max_completion_tokens"
         self.client = OpenAI(
             api_key=api_key,
@@ -36,21 +75,29 @@ class TextModel:
 
     def _request(self, **arguments):
         """Apply one output budget to JSON calls, with legacy endpoint compatibility."""
-        try:
-            response = invoke(self.client, {**arguments, self._token_parameter: self.max_output_tokens})
-        except OpenAIError as error:
-            # Some compatible endpoints only support the older max_tokens name.
-            # Retry only an explicit parameter rejection, not arbitrary failures.
-            message = str(error).lower()
-            unsupported = any(word in message for word in ("unsupported", "unknown", "unrecognized", "not supported", "not allowed", "unexpected"))
-            if self._token_parameter != "max_completion_tokens" or getattr(error, "status_code", None) not in {400, 422} or "max_completion_tokens" not in message or not unsupported:
+        while True:
+            options = dict(arguments)
+            if not getattr(self, "_reasoning_supported", True):
+                options.pop("reasoning_effort", None)
+                options.pop("extra_body", None)
+            try:
+                return invoke(self.client, {**options, self._token_parameter: self.max_output_tokens})
+            except OpenAIError as error:
+                message = str(error).lower()
+                rejected = getattr(error, "status_code", None) in {400, 422} and any(
+                    word in message for word in ("unsupported", "unknown", "unrecognized", "not supported", "not allowed", "unexpected"))
+                if rejected and self._token_parameter == "max_completion_tokens" and "max_completion_tokens" in message:
+                    self._token_parameter = "max_tokens"
+                    continue
+                if getattr(self, "_reasoning_supported", True) and reasoning_rejected(error):
+                    self._reasoning_supported = False
+                    print("Provider rejected reasoning controls; using provider defaults.", flush=True)
+                    continue
                 raise
-            self._token_parameter = "max_tokens"
-            response = invoke(self.client, {**arguments, "max_tokens": self.max_output_tokens})
-        return response
 
     def generate_json(self, instructions: str, payload: dict) -> dict:
         """Request JSON using the stage prompt and serialized task data."""
+        mode = task_reasoning(self.name, getattr(self, "reasoning", "auto"), payload)
         try:
             response = self._request(
                 model=self.name,
@@ -59,6 +106,7 @@ class TextModel:
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
                 response_format={"type": "json_object"},
+                **reasoning_arguments(self.name, mode),
             )
         except OpenAIError as error:
             raise RuntimeError(f"Text model request failed: {error}") from error

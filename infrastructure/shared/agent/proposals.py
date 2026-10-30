@@ -1,10 +1,14 @@
 """Retry model proposals when parsing or consuming their returned records fails."""
 
-from itertools import count
 import json
 
 
 RESPONSE_ERRORS = (ValueError, KeyError, TypeError, AttributeError, IndexError)
+REPAIR_INSTRUCTIONS = """The previous proposal was rejected. Read correction.error and correction.details
+in the input and fix that failure. correction.previous_response is the rejected
+answer, not an accepted example. Return a complete replacement JSON object in the
+original output format, including every required top-level section. Do not return
+only the unchanged portion, a partial patch, or the correction metadata itself."""
 
 
 def response_feedback(error, response):
@@ -21,21 +25,23 @@ def response_feedback(error, response):
     return feedback
 
 
-def propose_json(model, instructions, request, accept, console, label, max_attempts=0):
-    """Generate, consume and repair one proposal; zero attempts means retry until interrupted."""
-    if max_attempts < 0:
-        raise ValueError("--max-attempts must be nonnegative; use 0 for unlimited attempts")
+def propose_json(model, instructions, request, accept, console, label, max_attempts=5):
+    """Generate and repair a proposal within a finite total model-call budget."""
+    if max_attempts < 1:
+        raise ValueError("--max-attempts must be positive")
     request = dict(request)
-    for attempt in count(1):
-        progress = f"{attempt}/{max_attempts}" if max_attempts else f"{attempt} (unlimited)"
+    for attempt in range(1, max_attempts + 1):
+        progress = f"{attempt}/{max_attempts}"
         console.show(f"{label} | Model proposal {progress}", "Generate the proposal; response-reading and obligation errors receive repair feedback.")
         response = None
         try:
-            response = model.generate_json(instructions, request)
+            prompt = instructions if "correction" not in request else instructions + "\n\n" + REPAIR_INSTRUCTIONS
+            response = model.generate_json(prompt, request)
             return accept(response), response
         except RESPONSE_ERRORS as error:
             feedback = response_feedback(error, response)
+            feedback["failed_attempt"] = attempt
             console.show(f"{label} | Repair feedback", json.dumps(feedback, ensure_ascii=False, indent=2))
-            if max_attempts and attempt >= max_attempts:
+            if attempt >= max_attempts:
                 raise RuntimeError(f"{label} exhausted {max_attempts} proposals: {feedback['error']}") from error
             request["correction"] = feedback

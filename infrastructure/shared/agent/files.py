@@ -37,6 +37,7 @@ class FileWorkspace:
         self.writable = set(writable)
         self.files = self.writable | set(references)
         self.observed = {}
+        self.changed_paths = set()
         self.new_file = new_file
         self.target = new_file
         for path in self.files:
@@ -140,6 +141,7 @@ class FileWorkspace:
                 else:
                     save_bytes(self.path(relative), originals[relative])
             raise
+        self.changed_paths.update(staged)
         if created is not None:
             self.writable.add(created)
             self.files.add(created)

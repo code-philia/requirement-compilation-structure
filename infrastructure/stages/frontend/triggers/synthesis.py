@@ -8,7 +8,7 @@ from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 
 
-def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, max_attempts=0):
+def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, max_attempts=5):
     result = empty_triggers(tree)
     for rid in tree.leaves:
         label = f"Trigger design {rid}"

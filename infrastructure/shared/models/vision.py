@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 from infrastructure.utils.presentation.model_io import http_client, invoke
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.shared.agent.proposals import propose_json
-from infrastructure.shared.models.text import JSON_OUTPUT_RULE
+from infrastructure.shared.models.text import JSON_OUTPUT_RULE, reasoning_arguments, reasoning_rejected
 
 
 VISION_INSTRUCTIONS = """Describe the supplied UI reference using visible evidence only.
@@ -57,9 +57,13 @@ class VisualModel:
         base_url = os.getenv("VISUAL_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
         if not self.name or not api_key:
             raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env; the model must accept images")
+        self.reasoning = os.getenv("VISUAL_REASONING", os.getenv("MODEL_REASONING", "auto")).lower()
+        if self.reasoning not in {"auto", "provider", "none", "low", "high", "max"}:
+            raise ValueError("VISUAL_REASONING must be auto, provider, none, low, high or max")
+        self._reasoning_supported = True
         self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=600, max_retries=2, http_client=http_client())
 
-    def analyze(self, image: Path, max_attempts: int = 0) -> dict:
+    def analyze(self, image: Path, max_attempts: int = 5) -> dict:
         """Send one supported reference image and parse the returned layout, elements, and style evidence."""
         mime = mimetypes.guess_type(image.name)[0]
         if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
@@ -77,15 +81,28 @@ class VisualModel:
         text = instructions.rstrip() + "\n" + JSON_OUTPUT_RULE
         if "correction" in payload:
             text += "\n" + VISUAL_REPAIR_PREFIX + json.dumps(payload["correction"], ensure_ascii=False)
-        try:
-            response = invoke(self.client, {
+        mode = getattr(self, "reasoning", "auto")
+        if mode == "auto":
+            mode = "none" if self.name.lower().startswith("deepseek") else "provider"
+        arguments = {
                 "model": self.name,
                 "messages": [{"role": "user", "content": [
                     {"type": "text", "text": text},
                     {"type": "image_url", "image_url": {"url": payload["image_url"], "detail": "high"}},
                 ]}],
                 "response_format": {"type": "json_object"},
-            })
+            }
+        try:
+            while True:
+                controls = reasoning_arguments(self.name, mode) if getattr(self, "_reasoning_supported", True) else {}
+                try:
+                    response = invoke(self.client, {**arguments, **controls})
+                    break
+                except OpenAIError as error:
+                    if not getattr(self, "_reasoning_supported", True) or not reasoning_rejected(error):
+                        raise
+                    self._reasoning_supported = False
+                    print("Provider rejected reasoning controls; using provider defaults.", flush=True)
         except OpenAIError as error:
             raise RuntimeError(f"Visual model request failed: {error}") from error
         if not response.choices or not response.choices[0].message.content:
