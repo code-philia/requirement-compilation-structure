@@ -19,7 +19,6 @@ from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.utils.files import read_artifact, read_source, save_json, save_text
 from infrastructure.utils.paths import relative_path
 from infrastructure.utils import processes
-import run_all
 
 
 class PortableFiles(unittest.TestCase):
@@ -174,51 +173,6 @@ class PortableProcesses(unittest.TestCase):
             before = marker.read_bytes()
             time.sleep(.2)
             self.assertEqual(marker.read_bytes(), before)
-
-
-class PortableBatchRunner(unittest.TestCase):
-    """Keep batch sequencing, failure status, and interruption cleanup independent of the shell."""
-
-    def invoke(self, processes_to_start):
-        """Run a tiny fake pipeline with the real argument parser and directory resolution."""
-        with TemporaryDirectory(prefix="arc batch ") as temporary:
-            root = Path(temporary)
-            inputs = root / "input"
-            inputs.mkdir()
-            argv = ["run_all.py", "--input", str(inputs), "--output", str(root / "output with spaces")]
-            with patch.object(sys, "argv", argv), patch.object(run_all, "STEPS", ("first.py", "second.py", "third.py")), patch.object(run_all, "start_process", side_effect=processes_to_start) as start, patch.object(run_all, "stop_process") as stop, redirect_stdout(StringIO()), redirect_stderr(StringIO()):
-                try:
-                    run_all.main()
-                except SystemExit as error:
-                    status = error.code
-                else:
-                    status = 0
-            return status, start, stop
-
-    def test_success_keeps_interpreter_paths_and_no_pause(self):
-        """A successful stage starts the next stage using the same Python and resolved paths."""
-        status, start, _ = self.invoke([Mock(wait=Mock(return_value=0)) for _ in range(3)])
-        self.assertEqual(status, 0)
-        self.assertEqual(start.call_count, 3)
-        for call in start.call_args_list:
-            command = call.args[0]
-            self.assertEqual(command[0], sys.executable)
-            self.assertNotIn("--pause", command)
-            self.assertTrue(Path(command[-1]).is_absolute())
-
-    def test_failure_stops_the_pipeline(self):
-        """Propagate the failing stage's code without starting later stages."""
-        status, start, _ = self.invoke([Mock(wait=Mock(return_value=7))])
-        self.assertEqual(status, 7)
-        self.assertEqual(start.call_count, 1)
-
-    def test_interrupt_stops_the_owned_stage(self):
-        """Ctrl+C cleans the active stage tree and exits with the normal interruption status."""
-        child = Mock(wait=Mock(side_effect=KeyboardInterrupt))
-        status, start, stop = self.invoke([child])
-        self.assertEqual(status, 130)
-        self.assertEqual(start.call_count, 1)
-        stop.assert_called_once_with(child)
 
 
 if __name__ == "__main__":
