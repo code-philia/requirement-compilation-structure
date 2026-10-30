@@ -28,7 +28,7 @@ class TextModel:
         self.client = OpenAI(
             api_key=api_key,
             base_url=os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
-            timeout=120, max_retries=2,
+            timeout=600, max_retries=2,
             http_client=http_client(),
         )
 
