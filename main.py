@@ -1,5 +1,3 @@
-"""ARC-Bench entry point skeleton: parse arguments without running a workflow."""
-
 import argparse
 from pathlib import Path
 
