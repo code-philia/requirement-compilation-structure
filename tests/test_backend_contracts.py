@@ -117,7 +117,7 @@ class BackendDesign(unittest.TestCase):
             return proposal
         result = self.run_design(generate)
         self.assertEqual(len(requests), 4)
-        feedback = requests[2]["correction"]["obligation_coverage"]
+        feedback = requests[2]["correction"]["details"]
         self.assertEqual(feedback["requirement_id"], "REQ-A")
         self.assertEqual(feedback["missing"]["write"], ["Note.id", "Note.text"])
         self.assertNotIn("API-OTHER", requests[2]["api_inventory"])
@@ -143,6 +143,27 @@ class BackendDesign(unittest.TestCase):
         self.run_design(generate)
         self.assertEqual(len(requests), 4)
         self.assertEqual(requests[1]["correction"]["invalid_response"], "{broken")
+
+    def test_nested_read_write_response_gets_feedback_instead_of_keyerror_exit(self):
+        requests = []
+        bad = self.proposal("REQ-A")
+        api = bad["apis"]["API-SAVE"]
+        api["read/write"] = {mode: api.pop(mode) for mode in ("read", "write")}
+
+        def generate(instructions, payload):
+            requests.append(deepcopy(payload))
+            if len(requests) == 1:
+                return deepcopy(bad)
+            if len(requests) == 2:
+                self.assertEqual(payload["correction"]["error_type"], "KeyError")
+                self.assertIn("read", payload["correction"]["error"])
+                self.assertEqual(payload["correction"]["previous_response"], bad)
+            return self.proposal(payload["requirement"]["id"])
+
+        result = self.run_design(generate)
+        self.assertEqual(len(requests), 4)
+        self.assertIn("read", result["apis"]["API-SAVE"])
+        self.assertNotIn("read/write", result["apis"]["API-SAVE"])
 
 
 if __name__ == "__main__":

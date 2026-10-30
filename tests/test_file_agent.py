@@ -68,6 +68,25 @@ class FileAgentTests(unittest.TestCase):
         self.assertEqual(gate.call_count, 3)
         self.assertEqual(read_source(self.root / relative), "good")
 
+    def test_malformed_edit_records_receive_original_response_feedback(self):
+        relative = "src/current.ts"
+        save_text(self.root / relative, "original")
+        workspace = FileWorkspace(self.root, {relative})
+        model = Mock()
+        malformed = [{"edit": []}, {"edits": None},
+            {"edits": [{"path": relative, "content": []}]}]
+        model.generate_json.side_effect = [*malformed,
+            {"edits": [{"path": relative, "content": "fixed"}]}]
+        gate = Mock(return_value={"green": True})
+        result = run_file_agent(model, "Implement", {}, workspace, gate, 4, Mock(), "Example")
+        self.assertEqual(result["turns"], 4)
+        self.assertEqual(gate.call_count, 1)
+        requests = [call.args[1] for call in model.generate_json.call_args_list]
+        for index, request in enumerate(requests[1:]):
+            self.assertEqual(request["feedback"][0]["previous_response"], malformed[index])
+            self.assertEqual(request["files"][relative]["content"], "original")
+        self.assertEqual(read_source(self.root / relative), "fixed")
+
     def test_fixed_paths_and_runtime_registration_need_no_index(self):
         initialize_project(self.root)
         api = {"API-EXAMPLE": {"signature": {"name": "example", "method": "GET", "path": "/api/example"}}}
