@@ -33,7 +33,7 @@ def main() -> None:
     with ExitStack() as stack:
         try:
             _, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir))
+            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
             check_db_obligations(output_dir / ".arc", args.pause)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")

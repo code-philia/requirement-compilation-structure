@@ -39,7 +39,7 @@ def main() -> None:
     with ExitStack() as stack:
         try:
             input_dir, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir))
+            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
             design_ui_interactions(input_dir, output_dir / ".arc", args.pause, args.max_attempts)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")

@@ -19,6 +19,7 @@ def create_parser(description: str) -> argparse.ArgumentParser:
         help="Target directory containing shared .arc artifacts (default: compiler/output)",
     )
     parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
+    parser.add_argument("--debug-model-io", action="store_true", help="Save raw model requests/responses under OUTPUT/.arc/model_logs")
     return parser
 
 

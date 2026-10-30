@@ -333,7 +333,7 @@ def main() -> None:
     with ExitStack() as stack:
         try:
             input_dir, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir))
+            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
             if not input_dir.is_dir():
                 raise ValueError(f"Input directory does not exist or is not a directory: {input_dir}")
             requirements = explore_requirement(input_dir, output_dir / ".arc", args.pause)

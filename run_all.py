@@ -33,6 +33,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=COMPILER_DIR / "input", help="Requirement/image directory")
     parser.add_argument("--output", type=Path, required=True, help="Shared output directory for all steps")
+    parser.add_argument("--debug-model-io", action="store_true", help="Save raw model requests/responses under OUTPUT/.arc/model_logs")
     args = parser.parse_args()
     try:
         input_dir, output_dir = resolve_directories(args)
@@ -42,6 +43,8 @@ def main() -> None:
         for index, step in enumerate(STEPS, 1):
             show_panel(f"[{index}/{len(STEPS)}] {stage_label(step)}", f"Running {step}")
             command = [sys.executable, str(COMPILER_DIR / step), "--input", str(input_dir), "--output", str(output_dir)]
+            if args.debug_model_io:
+                command.append("--debug-model-io")
             if step == "01_explore_requirement.py":
                 command.append("--no-browse")
             process = start_process(

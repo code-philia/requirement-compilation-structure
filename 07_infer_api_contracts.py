@@ -92,7 +92,7 @@ def main() -> None:
     with ExitStack() as stack:
         try:
             _, output = resolve_directories(args)
-            stack.enter_context(console_log(output))
+            stack.enter_context(console_log(output, debug_model_io=args.debug_model_io))
             infer_api_contracts(output / ".arc", args.pause)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")

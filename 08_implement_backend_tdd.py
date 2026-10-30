@@ -292,7 +292,7 @@ def main() -> None:
     with ExitStack() as stack:
         try:
             _, output = resolve_directories(args)
-            stack.enter_context(console_log(output))
+            stack.enter_context(console_log(output, debug_model_io=args.debug_model_io))
             implement_backend_tdd(output / ".arc", args.pause, args.max_turns, args.max_tests)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")

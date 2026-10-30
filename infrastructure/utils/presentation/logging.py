@@ -63,7 +63,7 @@ def configure_console() -> None:
 
 
 @contextmanager
-def console_log(output_dir: Path):
+def console_log(output_dir: Path, *, debug_model_io: bool = False):
     """Append a timestamped step session to compiler.log while mirroring stdout/stderr and recording uncaught failures."""
     from infrastructure.utils.presentation.console import show_panel
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -75,7 +75,8 @@ def console_log(output_dir: Path):
         with redirect_stdout(stdout), redirect_stderr(stderr):
             timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
             script = Path(sys.argv[0]).name
-            token = _session.set({"output": output_dir, "stage": stage_label(script), "lock": lock, "log": log})
+            token = _session.set({"output": output_dir, "stage": stage_label(script), "lock": lock, "log": log,
+                "debug_model_io": debug_model_io})
             started = monotonic()
             show_panel(f"[START] {stage_label(script)}", f"{timestamp}\nScript: {script}\nLogs: {output_dir / 'compiler.log'}\nFull model I/O: {output_dir / 'model_calls.jsonl'}")
             try:
