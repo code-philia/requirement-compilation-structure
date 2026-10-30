@@ -101,8 +101,6 @@ def console_log(output_dir: Path, *, debug_model_io: bool = False, model_log: bo
             else:
                 show_panel(f"[DONE] {stage_label(script)}", f"Completed in {monotonic() - started:.1f}s", tone="success")
             finally:
-                from infrastructure.utils.presentation.model_io import show_call_totals
-                show_call_totals()
                 stdout.flush()
                 stderr.flush()
                 _session.reset(token)
