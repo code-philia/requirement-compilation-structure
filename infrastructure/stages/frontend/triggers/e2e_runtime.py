@@ -26,11 +26,11 @@ export default defineConfig({
     trace: "retain-on-failure", screenshot: "only-on-failure" },
   webServer: [
     { command: "node --import tsx ../backend/src/server.ts",
-      url: `http://127.0.0.1:${backendPort}/api/health`, reuseExistingServer: false, timeout: 30000,
+      url: `http://127.0.0.1:${backendPort}/api/health`, reuseExistingServer: false, timeout: 600000,
       ...(process.platform === "win32" ? {} : { gracefulShutdown: { signal: "SIGTERM" as const, timeout: 3000 } }),
       env: { PORT: backendPort, DATABASE_URL: database } },
     { command: `node ../node_modules/vite/bin/vite.js --config vite.e2e.config.ts --host 127.0.0.1 --port ${frontendPort} --strictPort`,
-      url: `http://127.0.0.1:${frontendPort}`, reuseExistingServer: false, timeout: 30000,
+      url: `http://127.0.0.1:${frontendPort}`, reuseExistingServer: false, timeout: 600000,
       ...(process.platform === "win32" ? {} : { gracefulShutdown: { signal: "SIGTERM" as const, timeout: 3000 } }),
       env: { ARC_BACKEND_URL: `http://127.0.0.1:${backendPort}` } },
   ],

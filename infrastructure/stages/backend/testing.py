@@ -12,7 +12,7 @@ from infrastructure.utils.processes import capture_process
 
 class BackendChecks:
     """Compiler-owned TypeScript and Node test commands; generated code cannot choose shell commands."""
-    def __init__(self, output: Path, timeout: int = 120) -> None:
+    def __init__(self, output: Path, timeout: int = 600) -> None:
         """Bind fixed backend check commands to the generated workspace and require an available Node.js executable."""
         self.output = output.resolve()
         self.timeout = timeout

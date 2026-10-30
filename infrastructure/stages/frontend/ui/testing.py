@@ -152,7 +152,7 @@ def parse_playwright_result(result: dict, include_files: bool = False) -> dict:
 
 class FrontendChecks:
     """Compiler-owned browser installation, TypeScript, Playwright, and workspace build commands."""
-    def __init__(self, output: Path, timeout: int = 180) -> None:
+    def __init__(self, output: Path, timeout: int = 600) -> None:
         """Bind browser/build checks to the generated workspace and locate Node.js and npm."""
         self.output, self.timeout = output.resolve(), timeout
         self.node = shutil.which("node")

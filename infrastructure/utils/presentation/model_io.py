@@ -87,7 +87,7 @@ def _http_response(response: httpx.Response) -> None:
 def http_client() -> httpx.Client:
     """Connect directly, retaining audit hooks and the SDK's transport limits."""
     from openai import DefaultHttpxClient
-    return DefaultHttpxClient(trust_env=False,
+    return DefaultHttpxClient(trust_env=False, timeout=httpx.Timeout(600),
         event_hooks={"request": [_http_request], "response": [_http_response]})
 
 
@@ -282,9 +282,13 @@ def invoke(client, arguments: dict):
         elapsed = monotonic() - started
         _count_call({}, elapsed, failed=True)
         waiting.close()
+        cause = f"{type(error.__cause__).__name__}: {error.__cause__}" if error.__cause__ else None
         _record("error", elapsed_seconds=elapsed,
-            error_type=type(error).__name__, message=str(error))
-        show_panel(f"[MODEL FAILED] {label}", f"Round-trip latency: {elapsed:.2f} s\n{type(error).__name__}: {error}", tone="error", max_lines=12, max_chars=1800)
+            error_type=type(error).__name__, message=str(error), cause=cause)
+        detail = f"Round-trip latency: {elapsed:.2f} s\n{type(error).__name__}: {error}"
+        if cause:
+            detail += "\nCause: " + cause
+        show_panel(f"[MODEL FAILED] {label}", detail, tone="error", max_lines=12, max_chars=1800)
         raise
     finally:
         waiting.close()

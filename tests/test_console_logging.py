@@ -54,9 +54,24 @@ class ConsoleLogging(unittest.TestCase):
                         self.assertEqual(transport.event_hooks["request"], [_http_request])
                         self.assertEqual(transport.event_hooks["response"], [_http_response])
                         self.assertEqual(model.client.timeout, 600)
+                        self.assertEqual(transport.timeout.as_dict(),
+                            {"connect": 600, "read": 600, "write": 600, "pool": 600})
                         self.assertEqual(model.client.max_retries, 2)
                     finally:
                         model.client.close()
+
+    def test_connection_failure_logs_the_underlying_transport_reason(self):
+        def handler(request):
+            raise httpx.ConnectError("TLS connection closed by peer", request=request)
+        model = self.model(handler)
+        model.client.max_retries = 0
+        with TemporaryDirectory() as temporary, redirect_stdout(StringIO()):
+            root = Path(temporary)
+            with console_log(root), self.assertRaisesRegex(RuntimeError, "Connection error"):
+                model.generate_json("Design", {})
+            record = json.loads((root / "model_calls.jsonl").read_text().splitlines()[-1])
+            self.assertEqual(record["error_type"], "APIConnectionError")
+            self.assertIn("ConnectError: TLS connection closed by peer", record["cause"])
 
     def test_console_is_bounded_but_panels_and_model_io_are_complete(self):
         source = "export const answer = 42;\n" * 1000 + "END-OF-SOURCE"

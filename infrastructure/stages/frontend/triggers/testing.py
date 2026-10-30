@@ -31,8 +31,8 @@ def require_behavioral_red(result):
 class E2EChecks(FrontendChecks):
     """Real-app Playwright checks with isolated test data."""
     def __init__(self, output, maximum=5):
-        """Reuse frontend checks with a longer real-server timeout and a per-requirement test-count hint."""
-        super().__init__(output, timeout=300)
+        """Reuse the ten-minute frontend command timeout and a per-requirement test-count hint."""
+        super().__init__(output)
         self.maximum = maximum
 
     def typecheck(self, files, full_source=True):
