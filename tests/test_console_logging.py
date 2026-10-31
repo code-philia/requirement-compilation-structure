@@ -42,6 +42,7 @@ class ConsoleLogging(unittest.TestCase):
         with patch.dict("os.environ", {
             "OPENAI_API_KEY": "test-key", "MODEL": "test-model", "OPENAI_BASE_URL": "https://model.test/v1",
             "VISUAL_API_KEY": "test-key", "VISUAL_MODEL": "test-model", "VISUAL_BASE_URL": "https://model.test/v1",
+            "MAX_OUTPUT_TOKENS": "320000",
             "HTTP_PROXY": "invalid-proxy", "HTTPS_PROXY": "invalid-proxy", "ALL_PROXY": "invalid-proxy",
             "http_proxy": "invalid-proxy", "https_proxy": "invalid-proxy", "all_proxy": "invalid-proxy",
         }):
@@ -54,6 +55,8 @@ class ConsoleLogging(unittest.TestCase):
                         self.assertEqual(transport.event_hooks["request"], [_http_request])
                         self.assertEqual(transport.event_hooks["response"], [_http_response])
                         self.assertEqual(model.client.timeout, 600)
+                        if isinstance(model, TextModel):
+                            self.assertEqual(model.max_output_tokens, 320000)
                         self.assertEqual(transport.timeout.as_dict(),
                             {"connect": 600, "read": 600, "write": 600, "pool": 600})
                         self.assertEqual(model.client.max_retries, 2)
@@ -225,6 +228,26 @@ class ConsoleLogging(unittest.TestCase):
                 model.generate_json("Design complete UI", {})
         self.assertNotIn("response_format", attempts[0])
         self.assertIn("Return exactly one JSON object without Markdown", attempts[0]["messages"][0]["content"])
+
+    def test_length_feedback_explains_output_budget_instead_of_attempting_to_parse_partial_code(self):
+        model = self.model(lambda request: httpx.Response(200, json=self.response('{"edits":[', finish="length")))
+        model.max_output_tokens = 320000
+        with redirect_stdout(StringIO()), self.assertRaisesRegex(ValueError, r"finish_reason=length.*320000 tokens including reasoning"):
+            model.generate_json("Implement", {"task": {}})
+
+    def test_many_files_and_edits_are_not_limited_by_console_preview_caps(self):
+        files = {f"frontend/src/part-{index}.ts": {"content": f"export const value = {index};", "writable": True}
+            for index in range(40)}
+        edits = [{"path": path, "content": record["content"] + "\n// complete output"} for path, record in files.items()]
+        requests = []
+        def handler(request):
+            requests.append(json.loads(request.content))
+            return httpx.Response(200, json=self.response(json.dumps({"edits": edits})))
+        model = self.model(handler)
+        with redirect_stdout(StringIO()):
+            result = model.generate_json("Implement all required files", {"task": {}, "files": files})
+        self.assertEqual(json.loads(requests[0]["messages"][-1]["content"])["files"], files)
+        self.assertEqual(result["edits"], edits)
 
     def test_image_data_is_full_in_logs_and_absent_from_terminal(self):
         model = self.model(lambda request: httpx.Response(200, json=self.response('{"layout":"visible"}')))

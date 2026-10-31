@@ -43,7 +43,7 @@ class TextModel:
         if not self.name or not api_key:
             raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env")
         try:
-            self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "32768"))
+            self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "320000"))
         except ValueError as error:
             raise ValueError("MAX_OUTPUT_TOKENS must be a positive integer") from error
         if self.max_output_tokens < 1:
@@ -98,6 +98,12 @@ class TextModel:
             )
         except OpenAIError as error:
             raise RuntimeError(f"Text model request failed: {error}") from error
+        if response.choices and response.choices[0].finish_reason == "length":
+            raise ValueError(
+                f"Model output was truncated (finish_reason=length). The output budget is "
+                f"{self.max_output_tokens} tokens including reasoning; this is not an input-length error. "
+                "Return a complete JSON object with only necessary edits; omit unchanged files. "
+                "Do not spend the entire budget restating the task.")
         if response.choices and getattr(response.choices[0].message, "refusal", None):
             raise ValueError(f"Text model refused the request: {response.choices[0].message.refusal}")
         if not response.choices or not response.choices[0].message.content:

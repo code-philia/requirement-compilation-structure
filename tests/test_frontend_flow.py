@@ -136,7 +136,13 @@ class FrontendFlow(unittest.TestCase):
     def test_trigger_batch_reuses_existing_path_and_only_creates_missing_handlers(self):
         self.check_event_creation(preexisting=True)
 
-    def check_event_creation(self, early_green=False, needs_repair=False, partial_batch=False, preexisting=False):
+    def test_integration_can_repair_related_backend_sources_and_regresses_api_tests(self):
+        self.check_event_creation(backend_repair=True)
+
+    def test_backend_regression_failure_returns_to_integration_repair(self):
+        self.check_event_creation(backend_repair=True, backend_fails_once=True)
+
+    def check_event_creation(self, early_green=False, needs_repair=False, partial_batch=False, preexisting=False, backend_repair=False, backend_fails_once=False):
         """Run the real orchestration with fake browser reports and model edits."""
         from unittest.mock import patch
         from infrastructure.shared.agent.files import FileWorkspace
@@ -148,6 +154,18 @@ class FrontendFlow(unittest.TestCase):
         if preexisting:
             remember_path(self.output, "trigger", "TR-INPUT", existing_path)
             save_text(self.output / existing_path, "export function handle() { /* existing */ }")
+        api_paths = {}
+        backend_suites = []
+        for aid in self.backend["apis"]:
+            api_paths[aid] = f"backend/src/handlers/{aid}.ts"
+            remember_path(self.output, "api", aid, api_paths[aid])
+            save_text(self.output / api_paths[aid], "export function handle() {}")
+            suite = f"backend/tests/{aid}.test.ts"
+            remember_path(self.output, "backend_test", aid, suite)
+            save_text(self.output / suite, "frozen API assertions")
+            backend_suites.append(suite)
+        save_text(self.output / "frontend/src/features/other-page-helper.ts", "export const helper = 1;")
+        save_text(self.output / "backend/src/features/other-api-helper.ts", "export const helper = 2;")
         for pid in self.ui["pages"]:
             workspace = FileWorkspace.for_target(self.output, "page", pid)
             workspace.state()
@@ -165,38 +183,63 @@ class FrontendFlow(unittest.TestCase):
                     path = selected_path(self.output, "trigger", eid)
                     self.assertTrue(payload["files"][path]["writable"], eid)
                 self.assertNotIn("frontend/tests/ui/editor.spec.ts", payload["files"])
+                for pid in ("editor", "summary"):
+                    self.assertTrue(payload["files"][f"frontend/src/screens/{pid}.tsx"]["writable"])
+                for path in api_paths.values():
+                    self.assertTrue(payload["files"][path]["writable"])
+                for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts", "frontend/src/style.css"):
+                    self.assertTrue(payload["files"][path]["writable"])
+                self.assertFalse(payload["files"]["backend/src/server.ts"]["writable"])
+                self.assertFalse(payload["files"]["backend/src/db/client.ts"]["writable"])
                 if len(implementation_calls) == 1:
                     ids = sorted(tid for tid, path in task["implementation_paths"].items()
                         if payload["files"][path]["content"] is None)
                     self.assertEqual(set(ids), set(self.interactions["triggers"]) - ({"TR-INPUT"} if preexisting else set()))
                     if partial_batch:
                         ids = ids[:-1]
-                    return {"edits": [{"path": task["implementation_paths"][tid],
-                        "content": "export function handle() {}"} for tid in ids]}
+                    edits = [{"path": task["implementation_paths"][tid],
+                        "content": "export function handle() {}"} for tid in ids]
+                    if backend_repair:
+                        edits.append({"path": api_paths["API-SAVE"], "content": "export function handle() { /* fixed integration */ }"})
+                        edits.extend({"path": path, "content": "export const helper = 4;"} for path in (
+                            "frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts"))
+                    return {"edits": edits}
                 if partial_batch:
                     self.assertIn("Create all supplied trigger files", payload["feedback"][0]["error"])
                     missing = [path for path in task["implementation_paths"].values()
                         if payload["files"][path]["content"] is None]
                     self.assertEqual(len(missing), 1)
                     return {"edits": [{"path": missing[0], "content": "export function handle() {}"}]}
+                if backend_fails_once:
+                    self.assertEqual(payload["feedback"][0]["checks"]["backend_tests"]["returncode"], 1)
+                    self.assertFalse(payload["files"][backend_suites[0]]["writable"])
+                    return {"edits": [{"path": api_paths["API-SAVE"], "content": "export function handle() { /* API regression repaired */ }"}]}
                 repaired = True
                 return {"edits": [{"path": selected_path(self.output, "trigger", "TR-INPUT"),
                     "content": "export function handle() { /* repaired */ }"}]}
             creation = task["new_file"]
             self.assertEqual(creation["kind"], "e2e_test")
-            self.assertNotIn("frontend/src/screens/editor.tsx", payload["files"])
+            self.assertFalse(payload["files"]["frontend/src/screens/editor.tsx"]["writable"])
+            self.assertEqual(task["max_tests"], 2)
+            for aid in task["backend_apis"]:
+                self.assertFalse(payload["files"][api_paths[aid]]["writable"])
             self.assertFalse(payload["files"]["frontend/src/ui-runtime.ts"]["writable"])
             utilities = payload["files"]["backend/tests/support/context.ts"]
             self.assertFalse(utilities["writable"])
             self.assertIn("export function fixturePasswordHash(password: string): string", utilities["content"])
             path = f"{creation['directory']}/chosen/{creation['target']}.spec.ts"
             return {"edits": [{"path": path, "content": "export function handle() {}"}]}
-        checks, ui_checks = Mock(), Mock()
+        checks, api_checks = Mock(), Mock()
         checks.typecheck.return_value = {"returncode": 0, "output": "compiled"}
         checks.build.return_value = {"returncode": 0, "output": "built"}
         green = {"returncode": 0, "output": "passed", "passed": 1, "failed": 0,
             "skipped": 0, "flaky": 0, "errors": [], "failures": []}
-        ui_checks.tests.return_value = green
+        api_checks.typecheck.return_value = {"returncode": 0, "output": "compiled backend"}
+        api_checks.tests.return_value = {"returncode": 0, "tests": 2, "pass": 2, "fail": 0, "output": "API regression passed"}
+        if backend_fails_once:
+            api_checks.tests.side_effect = [
+                {"returncode": 1, "tests": 2, "pass": 1, "fail": 1, "output": "Assertion failed: " + backend_suites[0]},
+                api_checks.tests.return_value]
         def test_events(files):
             if early_green or (all(selected_path(self.output, "trigger", eid) for eid in self.interactions["triggers"])
                     and (not needs_repair or repaired)):
@@ -209,7 +252,7 @@ class FrontendFlow(unittest.TestCase):
             api["signature"] = {"method": "POST", "path": "/api/" + aid, "name": aid}
         with patch.object(implementation, "install_dependencies"), \
                 patch.object(implementation, "E2EChecks", return_value=checks), \
-                patch.object(implementation, "FrontendChecks", return_value=ui_checks):
+                patch.object(implementation, "BackendChecks", return_value=api_checks) as backend_checks:
             report = implementation.run_trigger_tdd(self.arc, self.tree, {"entities": {}},
                 backend, self.ui, self.interactions, {},
                 {rid: {"id": rid} for rid in self.tree.leaves}, Mock(generate_json=generate),
@@ -217,9 +260,9 @@ class FrontendFlow(unittest.TestCase):
         self.assertEqual(report["status"], "GREEN")
         self.assertEqual(set(implementation_calls[0]["task"]["implementation_paths"]),
             {"TR-COUNT", "TR-INPUT", "TR-SAVE"})
-        self.assertEqual(len(implementation_calls), 2 if needs_repair or partial_batch else 1)
+        self.assertEqual(len(implementation_calls), 2 if needs_repair or partial_batch or backend_fails_once else 1)
         self.assertEqual(report["requirements"]["REQ-A"]["implementation_turns"],
-            2 if needs_repair or partial_batch else 1)
+            2 if needs_repair or partial_batch or backend_fails_once else 1)
         if early_green:
             self.assertEqual(selected_path(self.output, "trigger", "TR-COUNT"), "frontend/src/deleted.ts")
         if preexisting:
@@ -230,8 +273,16 @@ class FrontendFlow(unittest.TestCase):
         # Three test-generation runs, one batch acceptance, final full regression;
         # failed batch acceptance adds exactly one repair regression.
         self.assertEqual(checks.tests.call_count, 6 if needs_repair else 5)
-        self.assertEqual(checks.typecheck.call_count, 5 if needs_repair else 4)
-        self.assertEqual(ui_checks.tests.call_count, 3)
+        self.assertEqual(checks.typecheck.call_count, 5 if needs_repair or backend_fails_once else 4)
+        if backend_repair:
+            self.assertEqual(backend_checks.call_count, 2 if backend_fails_once else 1)
+            self.assertTrue(all(call.args == (self.output.resolve(),) for call in backend_checks.call_args_list))
+            self.assertTrue(all(call.args == (backend_suites,) for call in api_checks.tests.call_args_list))
+            for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts"):
+                self.assertEqual((self.output / path).read_text(), "export const helper = 4;")
+        else:
+            backend_checks.assert_not_called()
+        self.assertEqual(report["summary"]["ui_tests"], 0)
         self.assertEqual(checks.tests.call_args.args[0],
             [report["requirements"][rid]["test_path"] for rid in self.tree.leaves])
 
@@ -455,6 +506,14 @@ class FrontendFlow(unittest.TestCase):
         self.assertEqual(set(context["triggers"]), {"TR-INPUT", "TR-SAVE", "TR-COUNT"})
         self.assertEqual(len(context["triggers"]), 3)
         self.assertEqual(self.interactions["requirements"]["REQ-A"], ["TR-INPUT", "TR-SAVE"])
+
+    def test_destination_page_does_not_pull_its_other_business_triggers_into_requirement(self):
+        triggers = deepcopy(self.interactions)
+        triggers["triggers"]["TR-FUTURE"] = {"source": "UI-BACK", "event": "click", "read": [], "write": [], "action": []}
+        triggers["requirements"]["REQ-C"].append("TR-FUTURE")
+        context = scenario_context(self.ui, triggers, "REQ-A")
+        self.assertIn("TR-COUNT", context["triggers"])
+        self.assertNotIn("TR-FUTURE", context["triggers"])
 
     def test_backend_only_requirements_need_no_frontend_triggers(self):
         ui = normalize_design(empty_design(), self.tree)

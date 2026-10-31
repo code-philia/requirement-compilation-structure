@@ -1,4 +1,4 @@
-"""Step 12: implement frontend triggers through real-application Playwright E2E TDD."""
+"""Step 12: connect frontend triggers to backend APIs through functional smoke tests."""
 
 from contextlib import ExitStack
 from pathlib import Path
@@ -13,7 +13,7 @@ from infrastructure.utils.files import save_json
 
 
 def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = False,
-        max_turns: int = 10, max_tests: int = 5) -> dict:
+        max_turns: int = 10, max_tests: int = 2) -> dict:
     if min(max_turns, max_tests) < 1:
         raise ValueError("--max-turns and --max-tests must be positive")
     tree, schema, backend, ui, interactions, images, contexts = load_e2e_context(arc_dir, input_dir)
@@ -25,10 +25,10 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
             report.update({"status": "NO_UI", "summary": {"requirements": 0, "triggers": 0, "e2e_tests": 0, "ui_tests": 0, "failed": 0}})
             save_json(arc_dir / "frontend_e2e.json", report)
             return report
-        model = TextModel() if any(interactions["requirements"][rid] or tree.own_steps[rid] for rid in tree.leaves) else None
+        model = TextModel(json_mode=False) if any(interactions["requirements"][rid] or tree.own_steps[rid] for rid in tree.leaves) else None
         result = run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
             contexts, model, DemoConsole(pause), report, max_turns, max_tests)
-        print(f"Frontend E2E TDD GREEN: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
+        print(f"Frontend functional smoke GREEN: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
         return result
     except BaseException as error:
         report.update({"status": "FAILED", "error": str(error)})
@@ -40,9 +40,9 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
 
 
 def main() -> None:
-    parser = create_parser("Step 12: Frontend Trigger Implementation through Playwright E2E TDD")
+    parser = create_parser("Step 12: Frontend/Backend Integration with Playwright Functional Smoke Tests")
     parser.add_argument("--max-turns", type=int, default=10, help="Maximum edit rounds per requirement's test/implementation agent")
-    parser.add_argument("--max-tests", type=int, default=5, help="Maximum key E2E cases per requirement")
+    parser.add_argument("--max-tests", type=int, default=2, help="Maximum functional smoke cases per requirement (default: 2)")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:
