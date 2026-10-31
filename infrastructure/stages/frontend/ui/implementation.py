@@ -9,6 +9,7 @@ from pathlib import Path
 
 from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.agent.loop import run_file_agent
+from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.ui.design import owners, page_context
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pages
@@ -89,37 +90,41 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             require_green(result["tests"])
             return result
 
-        # Compile tests separately before deciding whether browser failure is RED.
-        current = implementation_checks()
-        if current["tests"] is not None:
-            report["pages"][pid]["status"] = presentation_run_status(current["tests"])
-            console.show(label + " | " + report["pages"][pid]["status"], current["tests"]["output"])
+        with implementation_task(output, report["pages"][pid], console, "10 / " + pid):
+            # Compile tests separately before deciding whether browser failure is RED.
+            current = implementation_checks()
+            if current["tests"] is not None:
+                report["pages"][pid]["status"] = presentation_run_status(current["tests"])
+                console.show(label + " | " + report["pages"][pid]["status"], current["tests"]["output"])
+            save_json(arc_dir / "ui_checks.json", report)
+            if current["tests"] and current["tests"]["returncode"] == 0:
+                agent = {"turns": 0, "checks": current}
+            else:
+                context = {"page": page_context(design, pid),
+                    "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"} for rid in uses],
+                    "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
+                    "implementation_path": selected_path(output, "page", pid)}
+                workspace = selection.workspace(target=("page", pid),
+                    references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json", "frontend/tsconfig.json"])
+                report["pages"][pid]["status"] = "IMPLEMENTING"
+                agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
+                    max_turns, console, label + " / Implementation", feedback=current,
+                    feedback_filter=lambda value: selection.feedback(workspace, value))
+            accepted.append(pid)
+            report["pages"][pid].update({"status": "GREEN", "turns": agent["turns"],
+                "implementation_path": selected_path(output, "page", pid),
+                "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"}})
+            save_json(arc_dir / "ui_checks.json", report)
+            console.show(label + " | GREEN", agent["checks"]["tests"]["output"])
         save_json(arc_dir / "ui_checks.json", report)
-        if current["tests"] and current["tests"]["returncode"] == 0:
-            agent = {"turns": 0, "checks": current}
-        else:
-            context = {"page": page_context(design, pid),
-                "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"} for rid in uses],
-                "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
-                "implementation_path": selected_path(output, "page", pid)}
-            workspace = selection.workspace(target=("page", pid),
-                references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json", "frontend/tsconfig.json"])
-            agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
-                max_turns, console, label + " / Implementation", feedback=current,
-                feedback_filter=lambda value: selection.feedback(workspace, value))
-        last_checks = agent["checks"]
-        accepted.append(pid)
-        report["pages"][pid].update({"status": "GREEN", "turns": agent["turns"],
-            "implementation_path": selected_path(output, "page", pid),
-            "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"}})
-        save_json(arc_dir / "ui_checks.json", report)
-        console.show(label + " | GREEN", agent["checks"]["tests"]["output"])
-    console.show("UI final verification", "All pages passed the latest complete display regression; build the application.")
-    final = last_checks["tests"]
-    require_green(final)
-    built = checks.build()
-    if built["returncode"]:
-        raise ValueError(built["output"])
-    report.update({"status": "GREEN", "summary": {"pages": len(accepted), "tests": final["passed"], "failed": final["failed"]}})
+    console.show("UI final verification", "All page tasks were attempted. Run display regression and build, retaining any failures.")
+    files = [test_path(pid) for pid in design["pages"]]
+    verification = final_checks(console,
+        typecheck=(lambda: checks.typecheck(files), None),
+        tests=(lambda: checks.tests(files), require_green),
+        build=(checks.build, None))
+    final = verification["tests"].get("result") or {}
+    report["summary"] = {"pages": len(accepted), "tests": final.get("passed", 0), "failed": final.get("failed", 0)}
+    complete_report(report, report["pages"].values(), verification)
     save_json(arc_dir / "ui_checks.json", report)
     return report

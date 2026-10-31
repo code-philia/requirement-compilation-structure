@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from infrastructure.utils.processes import capture_process
+from infrastructure.utils.processes import capture_process, npm_command
 
 
 class BackendChecks:
@@ -22,13 +22,18 @@ class BackendChecks:
         if not self.node or not (self.output / "node_modules/typescript/bin/tsc").is_file() or not (self.output / "node_modules/tsx").is_dir():
             raise ValueError("Node.js and workspace dev dependencies (typescript/tsx) are required for backend checks")
 
-    def execute(self, argv: list[str]) -> dict:
+    def execute(self, argv: list[str], executable: str | None = None) -> dict:
         """Run a fixed Node command in the workspace and return its exit code and captured output."""
         try:
-            result = capture_process([self.node, *argv], cwd=self.output, timeout=self.timeout)
+            result = capture_process([executable or self.node, *argv], cwd=self.output, timeout=self.timeout)
         except subprocess.TimeoutExpired as error:
             raise ValueError(f"Backend check timed out after {self.timeout}s") from error
         return {"returncode": result["returncode"], "output": result["output"]}
+
+    def build(self) -> dict:
+        """Build the backend, including publication of its SQL runtime assets."""
+        command = npm_command()
+        return self.execute([*command[1:], "run", "build", "--workspace", "@arc/backend"], executable=command[0])
 
     def typecheck(self, files: list[str] | None = None) -> dict:
         """Compile selected backend tests with TypeScript, using and cleaning a temporary test configuration."""

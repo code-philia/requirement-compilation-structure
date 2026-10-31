@@ -239,7 +239,7 @@ class FrontendFlow(unittest.TestCase):
         if backend_fails_once:
             api_checks.tests.side_effect = [
                 {"returncode": 1, "tests": 2, "pass": 1, "fail": 1, "output": "Assertion failed: " + backend_suites[0]},
-                api_checks.tests.return_value]
+                api_checks.tests.return_value, api_checks.tests.return_value]
         def test_events(files):
             if early_green or (all(selected_path(self.output, "trigger", eid) for eid in self.interactions["triggers"])
                     and (not needs_repair or repaired)):
@@ -273,15 +273,15 @@ class FrontendFlow(unittest.TestCase):
         # Three test-generation runs, one batch acceptance, final full regression;
         # failed batch acceptance adds exactly one repair regression.
         self.assertEqual(checks.tests.call_count, 6 if needs_repair else 5)
-        self.assertEqual(checks.typecheck.call_count, 5 if needs_repair or backend_fails_once else 4)
+        self.assertEqual(checks.typecheck.call_count, 6 if needs_repair or backend_fails_once else 5)
         if backend_repair:
-            self.assertEqual(backend_checks.call_count, 2 if backend_fails_once else 1)
+            self.assertEqual(backend_checks.call_count, 3 if backend_fails_once else 2)
             self.assertTrue(all(call.args == (self.output.resolve(),) for call in backend_checks.call_args_list))
             self.assertTrue(all(call.args == (backend_suites,) for call in api_checks.tests.call_args_list))
             for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts"):
                 self.assertEqual((self.output / path).read_text(), "export const helper = 4;")
         else:
-            backend_checks.assert_not_called()
+            backend_checks.assert_called_once_with(self.output.resolve())
         self.assertEqual(report["summary"]["ui_tests"], 0)
         self.assertEqual(checks.tests.call_args.args[0],
             [report["requirements"][rid]["test_path"] for rid in self.tree.leaves])

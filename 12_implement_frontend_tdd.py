@@ -28,7 +28,7 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
         model = TextModel(json_mode=False) if any(interactions["requirements"][rid] or tree.own_steps[rid] for rid in tree.leaves) else None
         result = run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
             contexts, model, DemoConsole(pause), report, max_turns, max_tests)
-        print(f"Frontend functional smoke GREEN: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
+        print(f"Frontend functional smoke {result['status']}: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
         return result
     except BaseException as error:
         report.update({"status": "FAILED", "error": str(error)})
@@ -48,9 +48,12 @@ def main() -> None:
         try:
             input_dir, output_dir = resolve_directories(args)
             stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            implement_frontend_triggers(input_dir, output_dir / ".arc", args.pause, args.max_turns, args.max_tests)
+            result = implement_frontend_triggers(input_dir, output_dir / ".arc", args.pause, args.max_turns, args.max_tests)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")
+
+    if result["status"] == "COMPLETED_WITH_FAILURES":
+        parser.exit(1, "All implementation tasks were attempted; some acceptance checks failed. See the .arc report.\n")
 
 
 if __name__ == "__main__":

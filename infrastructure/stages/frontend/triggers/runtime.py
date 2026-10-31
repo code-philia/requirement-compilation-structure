@@ -165,9 +165,10 @@ def sync_triggers(output, ui, design, backend, active_triggers):
     pages, components = [], []
     for number, (pid, page) in enumerate(ui["pages"].items()):
         entry = implementation_entrypoint(output, "page", pid)
-        if not entry:
-            raise ValueError(f"Missing implemented page {pid}; complete step 10 first")
-        imports.append(f'import {{ {entry["export"]} as Page{number} }} from {json.dumps(import_path("frontend/src/App.tsx", entry["path"], extension=""))};')
+        if entry:
+            imports.append(f'import {{ {entry["export"]} as Page{number} }} from {json.dumps(import_path("frontend/src/App.tsx", entry["path"], extension=""))};')
+        else:
+            imports.append(f'const Page{number} = (_props: UiPageProps) => <main><h1>UI implementation pending</h1></main>;')
         pages.append({"id": pid, "route": page["route"], "root": page["root"]})
         components.append(f"{json.dumps(pid)}: Page{number}")
     triggers = [{"id": tid, "source": trigger["source"], "event": trigger["event"]}

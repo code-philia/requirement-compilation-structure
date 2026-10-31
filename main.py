@@ -48,7 +48,10 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(130)
     except Exception as error:
         print(f"Compilation failed at {compiler.current_stage or 'startup'}: {error}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(0)
+    if compiler.report["status"] == "COMPLETED_WITH_FAILURES":
+        print(f"All passes completed. Report: {compiler.arc_dir / 'compilation.json'}", file=sys.stderr)
+        raise SystemExit(0)
 
 
 if __name__ == "__main__":

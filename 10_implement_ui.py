@@ -32,7 +32,7 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
             return report
         result = implement_ui(arc_dir, design, TextModel(), console, report, max_turns,
             images=images, requirement_contexts=contexts)
-        print(f"UI existence TDD GREEN. Checks: {arc_dir / 'ui_checks.json'}", flush=True)
+        print(f"UI existence TDD {result['status']}. Checks: {arc_dir / 'ui_checks.json'}", flush=True)
         return result
     except BaseException as error:
         report.update({"status": "FAILED", "error": str(error)})
@@ -51,9 +51,12 @@ def main() -> None:
         try:
             input_dir, output_dir = resolve_directories(args)
             stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            implement_frontend_ui(input_dir, output_dir / ".arc", args.pause, args.max_turns)
+            result = implement_frontend_ui(input_dir, output_dir / ".arc", args.pause, args.max_turns)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")
+
+    if result["status"] == "COMPLETED_WITH_FAILURES":
+        parser.exit(1, "All implementation tasks were attempted; some acceptance checks failed. See the .arc report.\n")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import json
 
 from infrastructure.shared.agent.files import source_paths, editable_sources
 from infrastructure.shared.agent.loop import run_file_agent
+from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare_e2e
@@ -177,131 +178,151 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         report["requirements"][rid] = {"status": "GENERATING_TESTS", "triggers": sorted(tids),
             "target_triggers": sorted(targets), "test_path": relative}
         save_json(arc_dir / "frontend_e2e.json", report)
-        regression_files = [test_path(key, output) for key in [*accepted, rid]]
-        sync_triggers(output, ui, design, backend, active)
-
-        def generation_checks():
-            """Typecheck selected tests; test_gate also runs the real application."""
-            nonlocal relative, regression_files
-            relative = test_path(rid, output)
+        with implementation_task(output, report["requirements"][rid], console, "12 / " + rid):
             regression_files = [test_path(key, output) for key in [*accepted, rid]]
-            return checks.typecheck(regression_files, full_source=False)
-
-        def test_gate():
-            """Accept generated tests only when their structure and compilation pass; allow behavioral RED before implementation."""
-            compiled = generation_checks()
-            if compiled["returncode"]:
-                raise ValueError(compiled["output"])
-            behavior = checks.tests([relative])
-            try:
-                status = test_run_status(behavior)
-            except ValueError as error:
-                raise TriggerCheckFailure("Repair invalid E2E tests or affected application sources", behavior) from error
-            return {"typecheck": compiled, "behavior": behavior, "status": status}
-
-        test_context = {**model_context(context), "schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
-            "max_tests": max_tests}
-        test_workspace = selection.workspace(target=("e2e_test", rid), existing=relative,
-            references=["frontend/src/ui-runtime.ts", FIXTURE, "backend/tests/support/context.ts",
-                *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
-        agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
-            test_workspace, test_gate, max_turns, console, label + " / Test Generation",
-            feedback_filter=lambda value: selection.feedback(test_workspace, value))
-        report["requirements"][rid]["test_turns"] = agent["turns"]
-        report["requirements"][rid]["test_path"] = relative
-
-        workspace = None
-
-        def implementation_checks():
-            """Compile sources and run accepted functional scenarios; regress APIs if edited."""
             sync_triggers(output, ui, design, backend, active)
-            compiled = checks.typecheck(regression_files)
-            result = {"typecheck": compiled, "e2e": None}
-            if compiled["returncode"]:
-                return result
-            if workspace and any(path.startswith("backend/src/") for path in workspace.changed_paths):
-                api_checks = BackendChecks(output)
-                result["backend_typecheck"] = api_checks.typecheck()
-                if result["backend_typecheck"]["returncode"]:
-                    return result
-                suites = [path for aid in backend["apis"]
-                    if (path := selected_path(output, "backend_test", aid))]
-                if suites:
-                    result["backend_tests"] = api_checks.tests(suites)
-                    if result["backend_tests"]["returncode"]:
-                        return result
-            result["e2e"] = checks.tests(regression_files)
-            return result
 
-        def implementation_gate():
-            """Require actual implementations, compilation and functional smoke results."""
-            absent = [tid for tid in sorted(targets)
-                if not (path := selected_path(output, "trigger", tid)) or not (output / path).is_file()]
-            if absent:
-                raise ValueError("Create all supplied trigger files before acceptance: " + ", ".join(absent))
-            result = implementation_checks()
-            try:
-                for kind in ("typecheck", "backend_typecheck"):
-                    if result.get(kind) and result[kind]["returncode"]:
-                        raise ValueError(result[kind]["output"])
-                if "backend_tests" in result:
-                    require_backend_green(result["backend_tests"])
-                require_green(result["e2e"])
-            except ValueError as error:
-                raise TriggerCheckFailure("Functional integration or compilation failed", result) from error
-            return result
+            def generation_checks():
+                """Typecheck selected tests; test_gate also runs the real application."""
+                nonlocal relative, regression_files
+                relative = test_path(rid, output)
+                regression_files = [test_path(key, output) for key in [*accepted, rid]]
+                return checks.typecheck(regression_files, full_source=False)
 
-        generated = agent["checks"]
-        missing = [tid for tid in sorted(targets)
-            if not (path := selected_path(output, "trigger", tid)) or not (output / path).is_file()]
-        application_changed = any(path.startswith("frontend/src/") for path in test_workspace.changed_paths)
-        current = {"typecheck": generated["typecheck"], "e2e": generated["behavior"]}
-        report["requirements"][rid]["status"] = generated["status"]
-        save_json(arc_dir / "frontend_e2e.json", report)
-        # Reuse passing smoke results when test generation did not change application sources.
-        if not missing and not application_changed and generated["status"] == "GREEN":
-            agent = {"turns": 0, "checks": current}
-        else:
-            needs_implementation = bool(missing) or generated["status"] != "GREEN"
-            feedback = current
-            if not needs_implementation:
+            def test_gate():
+                """Accept generated tests only when their structure and compilation pass; allow behavioral RED before implementation."""
+                compiled = generation_checks()
+                if compiled["returncode"]:
+                    raise ValueError(compiled["output"])
+                behavior = checks.tests([relative])
                 try:
-                    agent = {"turns": 0, "checks": implementation_gate()}
+                    status = test_run_status(behavior)
                 except ValueError as error:
-                    needs_implementation = True
-                    feedback = getattr(error, "feedback", {"error": str(error)})
-            if needs_implementation:
-                task = {**model_context(context),
-                    "implementation_paths": prepare_trigger_paths(output, context_tids)}
-                workspace = selection.workspace(triggers=context_tids,
-                    paths=[*editable_sources(output, "frontend/src"), "frontend/src/style.css"],
-                    references=[relative, "backend/tests/support/context.ts",
-                        *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
-                backend_selection.include(workspace, editable_sources(output, "backend/src"))
+                    raise TriggerCheckFailure("Repair invalid E2E tests or affected application sources", behavior) from error
+                return {"typecheck": compiled, "behavior": behavior, "status": status}
 
-                def repair_feedback(value):
-                    return selection.feedback(workspace, backend_selection.feedback(workspace, value))
-                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
-                    implementation_gate, max_turns, console, label + " / Trigger Implementation",
-                    feedback=feedback,
-                    feedback_filter=repair_feedback)
-        accepted.append(rid)
-        reused = tids & implemented
-        implemented.update(targets)
-        result = agent["checks"]["e2e"]
-        report["requirements"][rid].update({"status": "GREEN", "implementation_turns": agent["turns"],
-            "steps": list(steps), "passed": result["passed"], "reused_triggers": sorted(reused)})
+            test_context = {**model_context(context), "schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
+                "max_tests": max_tests}
+            test_workspace = selection.workspace(target=("e2e_test", rid), existing=relative,
+                references=["frontend/src/ui-runtime.ts", FIXTURE, "backend/tests/support/context.ts",
+                    *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
+            agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
+                test_workspace, test_gate, max_turns, console, label + " / Test Generation",
+                feedback_filter=lambda value: selection.feedback(test_workspace, value))
+            report["requirements"][rid]["test_turns"] = agent["turns"]
+            report["requirements"][rid]["test_path"] = relative
+
+            workspace = None
+
+            def implementation_checks():
+                """Compile sources and run accepted functional scenarios; regress APIs if edited."""
+                sync_triggers(output, ui, design, backend, active)
+                compiled = checks.typecheck(regression_files)
+                result = {"typecheck": compiled, "e2e": None}
+                if compiled["returncode"]:
+                    return result
+                if workspace and any(path.startswith("backend/src/") for path in workspace.changed_paths):
+                    api_checks = BackendChecks(output)
+                    result["backend_typecheck"] = api_checks.typecheck()
+                    if result["backend_typecheck"]["returncode"]:
+                        return result
+                    suites = [path for aid in backend["apis"]
+                        if (path := selected_path(output, "backend_test", aid))]
+                    if suites:
+                        result["backend_tests"] = api_checks.tests(suites)
+                        if result["backend_tests"]["returncode"]:
+                            return result
+                result["e2e"] = checks.tests(regression_files)
+                return result
+
+            def implementation_gate():
+                """Require actual implementations, compilation and functional smoke results."""
+                absent = [tid for tid in sorted(targets)
+                    if not (path := selected_path(output, "trigger", tid)) or not (output / path).is_file()]
+                if absent:
+                    raise ValueError("Create all supplied trigger files before acceptance: " + ", ".join(absent))
+                result = implementation_checks()
+                try:
+                    for kind in ("typecheck", "backend_typecheck"):
+                        if result.get(kind) and result[kind]["returncode"]:
+                            raise ValueError(result[kind]["output"])
+                    if "backend_tests" in result:
+                        require_backend_green(result["backend_tests"])
+                    require_green(result["e2e"])
+                except ValueError as error:
+                    raise TriggerCheckFailure("Functional integration or compilation failed", result) from error
+                return result
+
+            generated = agent["checks"]
+            missing = [tid for tid in sorted(targets)
+                if not (path := selected_path(output, "trigger", tid)) or not (output / path).is_file()]
+            application_changed = any(path.startswith("frontend/src/") for path in test_workspace.changed_paths)
+            current = {"typecheck": generated["typecheck"], "e2e": generated["behavior"]}
+            report["requirements"][rid]["status"] = generated["status"]
+            save_json(arc_dir / "frontend_e2e.json", report)
+            # Reuse passing smoke results when test generation did not change application sources.
+            if not missing and not application_changed and generated["status"] == "GREEN":
+                agent = {"turns": 0, "checks": current}
+            else:
+                needs_implementation = bool(missing) or generated["status"] != "GREEN"
+                feedback = current
+                if not needs_implementation:
+                    try:
+                        agent = {"turns": 0, "checks": implementation_gate()}
+                    except ValueError as error:
+                        needs_implementation = True
+                        feedback = getattr(error, "feedback", {"error": str(error)})
+                if needs_implementation:
+                    report["requirements"][rid]["status"] = "IMPLEMENTING"
+                    task = {**model_context(context),
+                        "implementation_paths": prepare_trigger_paths(output, context_tids)}
+                    workspace = selection.workspace(triggers=context_tids,
+                        paths=[*editable_sources(output, "frontend/src"), "frontend/src/style.css"],
+                        references=[relative, "backend/tests/support/context.ts",
+                            *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
+                    backend_selection.include(workspace, editable_sources(output, "backend/src"))
+
+                    def repair_feedback(value):
+                        return selection.feedback(workspace, backend_selection.feedback(workspace, value))
+                    agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
+                        implementation_gate, max_turns, console, label + " / Trigger Implementation",
+                        feedback=feedback,
+                        feedback_filter=repair_feedback)
+            accepted.append(rid)
+            reused = tids & implemented
+            implemented.update(targets)
+            result = agent["checks"]["e2e"]
+            report["requirements"][rid].update({"status": "GREEN", "implementation_turns": agent["turns"],
+                "steps": list(steps), "passed": result["passed"], "reused_triggers": sorted(reused)})
+            save_json(arc_dir / "frontend_e2e.json", report)
+            console.show(label + " | GREEN", result["output"])
         save_json(arc_dir / "frontend_e2e.json", report)
-        console.show(label + " | GREEN", result["output"])
     sync_triggers(output, ui, design, backend, implemented)
-    console.show("Final frontend verification", "Run every functional smoke scenario, then build the complete frontend and backend.")
-    final = checks.tests([test_path(rid, output) for rid in accepted]) if accepted else None
-    if final is not None:
-        require_green(final)
-    built = checks.build()
-    if built["returncode"]:
-        raise ValueError(built["output"])
-    report.update({"status": "GREEN", "summary": {"requirements": len(accepted), "triggers": len(implemented),
-        "e2e_tests": final["passed"] if final else 0, "ui_tests": 0, "failed": 0}})
+    console.show("Final frontend verification", "All requirements were attempted. Run available functional suites, UI regression and both builds.")
+    files = [test_path(rid, output) for rid in tree.leaves
+        if report["requirements"].get(rid, {}).get("status") != "NO_TRIGGERS"
+        and (output / test_path(rid, output)).is_file()]
+    from infrastructure.stages.frontend.ui.testing import FrontendChecks, test_path as ui_test_path
+    ui_checks = FrontendChecks(output)
+    ui_files = [ui_test_path(pid) for pid in ui["pages"] if (output / ui_test_path(pid)).is_file()]
+    api_checks = BackendChecks(output)
+    api_files = [path for aid in backend["apis"]
+        if (path := selected_path(output, "backend_test", aid)) and (output / path).is_file()]
+    verification = final_checks(console,
+        typecheck=(lambda: checks.typecheck(files), None),
+        e2e=(lambda: checks.tests(files), require_green)) if files else final_checks(console,
+            typecheck=(lambda: checks.typecheck([]), None))
+    if ui_files:
+        verification.update(final_checks(console, ui=(lambda: ui_checks.tests(ui_files), require_green)))
+    verification.update(final_checks(console,
+        backend_typecheck=(api_checks.typecheck, None),
+        backend_tests=(lambda: api_checks.tests(api_files), require_backend_green if api_files else None),
+        build=(checks.build, None)))
+    final = verification.get("e2e", {}).get("result") or {}
+    ui_final = verification.get("ui", {}).get("result") or {}
+    report["summary"] = {"requirements": len(accepted), "triggers": len(implemented),
+        "e2e_tests": final.get("passed", 0), "ui_tests": ui_final.get("passed", 0),
+        "failed": final.get("failed", 0) + ui_final.get("failed", 0)}
+    complete_report(report, report["requirements"].values(), verification)
     save_json(arc_dir / "frontend_e2e.json", report)
     return report
