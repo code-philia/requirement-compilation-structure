@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+import main
 from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.stages.backend.runtime import prepare_runtime
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend
@@ -59,6 +60,9 @@ class StressTest(unittest.TestCase):
             self.assertEqual(command[0], str(args.python))
             self.assertEqual(command[command.index('--port')+1], str(ports[index]))
             self.assertIn('--model-log', command)
+            parsed = main.parse_args(command[3:])
+            self.assertEqual(parsed.requirement_path, args.input)
+            self.assertEqual(parsed.output_dir, Path(result['jobs'][index]['output']))
             self.assertEqual(call.kwargs['env']['OPENAI_API_KEY'], 'test-secret')
             self.assertEqual(call.kwargs['env']['PORT'], str(ports[index]))
             self.assertTrue(call.kwargs['start_new_session'])

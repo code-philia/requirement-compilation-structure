@@ -76,8 +76,8 @@ def launch(args):
     for index, port in enumerate(ports, 1):
         name = f"run-{index:03d}"
         output = args.output / name
-        command = [str(args.python), "-u", str(ROOT / "main.py"), "--input", str(args.input),
-            "--output", str(output), "--port", str(port)]
+        command = [str(args.python), "-u", str(ROOT / "main.py"), str(args.input),
+            "--output-dir", str(output), "--port", str(port)]
         if args.model_log:
             command.append("--model-log")
         manifest["jobs"].append({"name": name, "port": port, "output": str(output),

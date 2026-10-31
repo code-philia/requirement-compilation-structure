@@ -140,30 +140,42 @@ class CompilerCLI(unittest.TestCase):
         (source / 'requirements.yaml').write_text('id: ROOT\nchildren: []\n')
         return source
 
-    def test_main_initializes_the_compiler_after_resolving_three_options(self):
+    def test_main_initializes_the_compiler_with_positional_requirement_path(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.source(root)
             output = root / 'output'
             with patch.object(main, 'Compiler') as cls:
-                main.main(['--input', str(source), '--output', str(output), '--model-log'])
+                main.main([str(source), '--output-dir', str(output), '--model-log'])
             cls.assert_called_once_with(source.resolve(), output.resolve(), model_log=True, port=3000)
             cls.return_value.compile.assert_called_once_with()
             self.assertFalse(output.exists())
-            args = main.parse_args(['--input', str(source), '--output', str(output)])
+            args = main.parse_args([str(source), '--output-dir', str(output)])
+            self.assertEqual(args.requirement_path, source.resolve())
+            self.assertEqual(args.output_dir, output.resolve())
             self.assertFalse(args.model_log)
-            self.assertTrue(main.parse_args(['--input', str(source), '--output', str(output), '--debug-model-io']).model_log)
+            self.assertTrue(main.parse_args([str(source), '--output-dir', str(output), '--debug-model-io']).model_log)
+
+    def test_requirement_path_and_output_are_required_with_exact_option_names(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.source(root)
+            for arguments in ([], [str(source)], ['-o', str(root/'output')],
+                    ['--input', str(source), '-o', str(root/'output')],
+                    [str(source), '--output', str(root/'output')]):
+                with self.subTest(arguments=arguments), redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                    main.parse_args(arguments)
 
     def test_port_and_short_output_option_reach_the_compiler(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.source(root)
             with patch.object(main, 'Compiler') as cls:
-                main.main(['--input', str(source), '-o', str(root / 'output'), '--port', '33042'])
+                main.main([str(source), '-o', str(root / 'output'), '--port', '33042'])
             self.assertEqual(cls.call_args.kwargs['port'], 33042)
             for port in ('0', '-1', '65536'):
                 with self.subTest(port=port), redirect_stderr(StringIO()), self.assertRaises(SystemExit):
-                    main.parse_args(['--input', str(source), '-o', str(root / 'output'), '--port', port])
+                    main.parse_args([str(source), '-o', str(root / 'output'), '--port', port])
 
     def test_invalid_locations_fail_before_creating_compiler_or_output(self):
         with TemporaryDirectory() as temporary:
@@ -177,7 +189,7 @@ class CompilerCLI(unittest.TestCase):
                     (source, source), (source, source / 'nested'), (source, output_file)]:
                 with self.subTest(inputs=inputs, output=output), patch.object(main, 'Compiler') as cls, redirect_stderr(StringIO()):
                     with self.assertRaises(SystemExit) as error:
-                        main.main(['--input', str(inputs), '--output', str(output)])
+                        main.main([str(inputs), '--output-dir', str(output)])
                     self.assertEqual(error.exception.code, 2)
                     cls.assert_not_called()
             self.assertFalse((root / 'output').exists())
@@ -192,7 +204,7 @@ class CompilerCLI(unittest.TestCase):
                     cls.return_value.current_stage = '08_implement_backend_tdd.py'
                     cls.return_value.compile.side_effect = failure
                     with self.assertRaises(SystemExit) as error:
-                        main.main(['--input', str(source), '--output', str(root / 'output')])
+                        main.main([str(source), '--output-dir', str(root / 'output')])
                     self.assertEqual(error.exception.code, status)
                     cls.return_value.compile.assert_called_once_with()
 

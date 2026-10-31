@@ -5,16 +5,16 @@ from pathlib import Path
 import sys
 
 from infrastructure.compiler import Compiler
-from infrastructure.utils.cli import COMPILER_DIR, resolve_directories
+from infrastructure.utils.cli import resolve_directories
 from infrastructure.utils.presentation.logging import configure_console
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Read public options and validate paths and the backend port before compilation."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=COMPILER_DIR / "input",
-        help="Requirement directory containing requirements.yaml and reference assets (default: compiler/input)")
-    parser.add_argument("--output", "--output-dir", "-o", dest="output", type=Path, required=True,
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("requirement_path", type=Path,
+        help="Requirement directory containing requirements.yaml and reference assets")
+    parser.add_argument("-o", "--output-dir", type=Path, required=True,
         help="Directory for the generated application and .arc artifacts")
     parser.add_argument("--model-log", "--debug-model-io", dest="model_log", action="store_true",
         help="Show detailed model I/O and save per-call prompt/response logs; usage and timing are always shown")
@@ -24,13 +24,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     try:
         if not 1 <= args.port <= 65535:
             raise ValueError("--port must be between 1 and 65535")
-        args.input, args.output = resolve_directories(args)
-        if not args.input.is_dir():
-            raise ValueError(f"Input directory does not exist: {args.input}")
-        if not (args.input / "requirements.yaml").is_file():
-            raise ValueError(f"Missing requirement document: {args.input / 'requirements.yaml'}")
-        if args.output.exists() and not args.output.is_dir():
-            raise ValueError(f"Output must be a directory: {args.output}")
+        args.requirement_path, args.output_dir = resolve_directories(
+            argparse.Namespace(input=args.requirement_path, output=args.output_dir))
+        if not args.requirement_path.is_dir():
+            raise ValueError(f"Input directory does not exist: {args.requirement_path}")
+        if not (args.requirement_path / "requirements.yaml").is_file():
+            raise ValueError(f"Missing requirement document: {args.requirement_path / 'requirements.yaml'}")
+        if args.output_dir.exists() and not args.output_dir.is_dir():
+            raise ValueError(f"Output must be a directory: {args.output_dir}")
     except (OSError, ValueError) as error:
         parser.error(str(error))
     return args
@@ -39,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     configure_console()
     args = parse_args(argv)
-    compiler = Compiler(args.input, args.output, model_log=args.model_log, port=args.port)
+    compiler = Compiler(args.requirement_path, args.output_dir, model_log=args.model_log, port=args.port)
     try:
         compiler.compile()
     except KeyboardInterrupt:
