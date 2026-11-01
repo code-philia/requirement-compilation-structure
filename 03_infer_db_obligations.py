@@ -6,7 +6,7 @@ from pathlib import Path
 
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
-from infrastructure.stages.database.obligations.records import normalize_inference, normalize_obligations
+from infrastructure.stages.database.obligations.records import normalize_inference, normalize_obligations, check_symbols
 from infrastructure.stages.database.schema import check_related_fields
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
@@ -95,6 +95,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
         }
         def accept(response):
             inferred = normalize_inference(response, tree.own_steps[rid])
+            check_symbols([inferred["requirement"], *inferred["steps"].values()], schema)
             summary = format_obligations({rid: inferred["requirement"], **inferred["steps"]})
             return inferred, summary
 

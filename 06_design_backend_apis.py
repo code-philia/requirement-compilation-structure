@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
+from infrastructure.stages.database.obligations.records import check_symbols
 from infrastructure.stages.backend.primitives import apply_decomposition, validate_design
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
@@ -163,6 +164,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
         def accept(response):
             nonlocal conventions
             updated = apply_decomposition(design, response, rid, obligations, tree=tree)
+            check_symbols(updated["apis"].values(), schema)
             revised = merge_conventions(conventions, response, rid, related)
             selected = {aid: updated["apis"][aid] for aid in updated["requirements"][rid]}
             definitions = {aid: {key: api[key] for key in (

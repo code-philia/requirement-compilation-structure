@@ -3,8 +3,9 @@
 import json
 
 from infrastructure.stages.frontend.triggers.prompts import INSTRUCTIONS
-from infrastructure.stages.frontend.triggers.design import apply_decomposition, empty_triggers, relevant_pages, trigger_obligations, api_ids
-from infrastructure.utils.files import save_json
+from infrastructure.stages.frontend.triggers.design import apply_decomposition, empty_triggers, relevant_pages, trigger_obligations, api_ids, validate_coverage
+from infrastructure.utils.files import save_json, read_artifact
+from infrastructure.stages.database.obligations.records import normalize_obligations
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.discovery import ContextIndex
 from infrastructure.shared.agent.conventions import load_conventions, select_conventions
@@ -12,6 +13,8 @@ from infrastructure.shared.agent.conventions import load_conventions, select_con
 
 def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, max_attempts=10):
     result = empty_triggers(tree)
+    obligations = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
+    accepted = []
     for rid in tree.leaves:
         label = f"Trigger design {rid}"
         if not relevant_pages(ui, rid):
@@ -27,16 +30,22 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
         aids = set(backend["requirements"].get(rid, [])) | {aid for trigger in existing.values() for aid in api_ids(trigger)}
         conventions = load_conventions(arc_dir)
         request = {"requirement": contexts[rid], "ui": local_ui,
+            "required_obligations": obligations["requirements"][rid],
+            "step_obligations": {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]},
             "shared_conventions": select_conventions(conventions, requirements=[rid]),
             "existing_triggers": existing, "backend_apis": {aid: backend["apis"][aid] for aid in aids}}
         def accept(proposal):
+            for sid in tree.own_steps[rid]:
+                proposal["step_triggers"][sid]
             updated = apply_decomposition(result, proposal, rid)
+            validate_coverage(updated, backend, obligations, tree, [*accepted, rid])
             derived = {tid: trigger_obligations(updated["triggers"][tid], backend)
                 for tid in updated["requirements"][rid]}
             console.show(label + " | Derived DB effects", json.dumps(derived, ensure_ascii=False, indent=2))
             return updated
 
         result, _ = propose_json(model, INSTRUCTIONS, request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": backend["apis"], "page": ui["pages"], "ui_element": ui["elements"], "binding": ui["bindings"], "trigger": result["triggers"]}))
+        accepted.append(rid)
         console.artifact("frontend_triggers", result, label)
         save_json(arc_dir / "frontend_triggers.json", result)
     save_json(arc_dir / "frontend_triggers.json", result)

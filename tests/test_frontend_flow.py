@@ -480,9 +480,12 @@ class FrontendFlow(unittest.TestCase):
             {"read": ["Note.id", "Note.text"], "write": []})
         self.assertEqual(result["triggers"]["T"]["read"], ["form.text"])
 
-    def test_trigger_synthesis_only_retries_json_and_has_no_contract_pass(self):
+    def test_trigger_synthesis_retries_json_and_checks_declared_obligations(self):
         from infrastructure.stages.frontend.triggers.synthesis import synthesize_triggers
         calls = []
+        self.obligations["steps"] = {sid: self.obligations["requirements"][rid]
+            for rid in self.tree.leaves for sid in self.tree.own_steps[rid]}
+        save_json(self.arc / "db_obligations.json", self.obligations)
 
         def generate(instructions, payload):
             calls.append(deepcopy(payload))
@@ -491,13 +494,13 @@ class FrontendFlow(unittest.TestCase):
             rid = payload["requirement"]["id"]
             ids = self.interactions["requirements"][rid]
             return {"triggers": {tid: self.interactions["triggers"][tid] for tid in ids},
-                "requirement_triggers": ids, "step_triggers": {}}
+                "requirement_triggers": ids, "step_triggers": {sid: ids for sid in self.tree.own_steps[rid]}}
 
         result = synthesize_triggers(self.arc, self.ui, self.tree, self.backend,
             self.tree.requirements, Mock(generate_json=generate), Mock())
         self.assertEqual(len(calls), 4)
         self.assertIn("correction", calls[1])
-        self.assertTrue(all("obligations" not in call for call in calls))
+        self.assertTrue(all("required_obligations" in call for call in calls))
         self.assertEqual(set(result), {"triggers", "requirements", "steps"})
         self.assertTrue((self.arc / "frontend_triggers.json").is_file())
 

@@ -24,7 +24,7 @@ class ValidationPolicy(unittest.TestCase):
         design["apis"]["A"].update(read=[], write=["Table.a"])
         with self.assertRaises(ObligationCoverageError): validate_design(design, obligations)
 
-    def test_obligation_inference_has_no_symbol_or_related_field_gate(self):
+    def test_normalization_is_separate_from_schema_resolution(self):
         result = normalize_inference({"requirement": {"read": ["Unknown.field"], "write": []}}, [])
         self.assertEqual(result["requirement"]["read"], ["Unknown.field"])
 
@@ -34,7 +34,7 @@ class ValidationPolicy(unittest.TestCase):
         proposal = {"requirement": {"read": [], "write": []}, "steps": {}}
         with TemporaryDirectory() as temporary:
             arc, _, _ = prepare_artifacts(Path(temporary))
-            with patch.object(stage, "TextModel", return_value=Mock(generate_json=Mock(return_value=proposal))), \
+            with patch.object(stage, "TextModel", return_value=Mock(generate_json=lambda _, payload: {**proposal, "steps": {step["id"]: {"read": [], "write": []} for step in payload["steps"]}})), \
                     patch.object(stage, "DemoConsole", return_value=Mock()):
                 result = stage.infer_db_obligations(arc)
         self.assertEqual(result["requirements"]["REQ-A"], {"read": [], "write": []})

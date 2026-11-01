@@ -4,7 +4,7 @@ from pathlib import Path
 
 from infrastructure.utils.files import read_artifact
 
-from infrastructure.stages.database.obligations.records import normalize_obligations
+from infrastructure.stages.database.obligations.records import normalize_obligations, check_symbols
 from infrastructure.stages.requirements.tree import RequirementTree
 
 
@@ -13,6 +13,7 @@ def load_context(arc_dir: Path):
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     schema = read_artifact(arc_dir, "db_schema.json")
     obligations = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
+    check_symbols([*obligations["requirements"].values(), *obligations["steps"].values()], schema)
     return tree, schema, obligations
 
 

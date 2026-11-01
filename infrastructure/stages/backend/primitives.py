@@ -22,7 +22,7 @@ def validate_design(design, obligations, complete=True, tree=None):
     for rid in expected:
         if tree is not None and tree.children.get(rid):
             continue
-        apis = [design["apis"][aid] for aid in design["requirements"].get(rid, [])]
+        apis = [design["apis"][aid] for aid in design["requirements"][rid]]
         required = obligations["requirements"][rid]
         gaps = coverage(required, apis)
         if any(fields for gap in gaps.values() for fields in gap.values()):

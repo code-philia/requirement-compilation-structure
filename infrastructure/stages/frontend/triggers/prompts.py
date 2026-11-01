@@ -53,10 +53,13 @@ triggers for additional behavior such as filtering, not routine value copying. A
 trigger represents page entry; use that page's root element as its source.
 Reuse trigger IDs where behavior is shared and preserve earlier behavior when updating.
 requirement_triggers associates this requirement's triggers; step_triggers maps scenario
-steps to trigger lists, using [] for static/native behavior. Non-UI behavior needs no trigger.
+EVERY supplied step to trigger lists, using [] for static/native behavior. Non-UI behavior needs no trigger.
 
 The read and write arrays name FRONTEND variables, not DB fields. DB effects are derived
-from called APIs. Return only trigger definitions and requirement/step associations.
+from called APIs. The union of API DB effects for requirement_triggers must equal
+required_obligations. Each step must include calls covering its step_obligations;
+conditional API effects may be broader than one rejection step. These are declarations,
+not proof of implementation behavior. Return only trigger definitions and requirement/step associations.
 Expected business outcomes come
 from the requirement; API contracts supply transport and persistence behavior.
 """
