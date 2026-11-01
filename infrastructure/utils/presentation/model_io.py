@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import json
 import re
+import traceback
 from time import monotonic
 from uuid import uuid4
 from contextvars import ContextVar
@@ -19,6 +20,19 @@ from infrastructure.utils.presentation.artifacts import proposal_kind, render_ar
 
 
 _call = ContextVar("compiler_model_call", default=None)
+
+
+def _exception_chain(error: BaseException) -> list[dict[str, str]]:
+    """Return every linked exception without losing explicit or implicit context."""
+    chain = []
+    seen = set()
+    current = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append({"type": type(current).__name__, "message": str(current)})
+        # Explicit ``raise ... from ...`` takes precedence over implicit context.
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+    return chain
 
 
 def _record(event: str, **data) -> None:
@@ -282,9 +296,12 @@ def invoke(client, arguments: dict):
         elapsed = monotonic() - started
         _count_call({}, elapsed, failed=True)
         waiting.close()
-        cause = f"{type(error.__cause__).__name__}: {error.__cause__}" if error.__cause__ else None
+        chain = _exception_chain(error)
+        cause = ": ".join(f"{item['type']}: {item['message']}" for item in chain[1:]) or None
         _record("error", elapsed_seconds=elapsed,
-            error_type=type(error).__name__, message=str(error), cause=cause)
+            error_type=type(error).__name__, message=str(error), cause=cause,
+            exception_chain=chain,
+            traceback="".join(traceback.format_exception(error)))
         detail = f"Round-trip latency: {elapsed:.2f} s\n{type(error).__name__}: {error}"
         if cause:
             detail += "\nCause: " + cause
