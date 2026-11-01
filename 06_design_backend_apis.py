@@ -17,6 +17,7 @@ from infrastructure.shared.rag.apis import ApiRetriever
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.discovery import ContextIndex
+from infrastructure.shared.agent.conventions import CONVENTION_RULES, load_conventions, select_conventions, merge_conventions
 
 
 INSTRUCTIONS = """Design complete backend APIs for the supplied leaf requirement and scenarios.
@@ -126,6 +127,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
     if top_k < 1:
         raise ValueError("--top-k must be positive")
     console, retriever, model = DemoConsole(pause), ApiRetriever(), TextModel()
+    conventions = load_conventions(arc_dir)
     # Parents organize requirements; they do not receive APIs or coverage checks.
     design = {"apis": {}, "requirements": {rid: [] for rid in tree.requirements if tree.children[rid]}}
     # --- Extension point 06A: leaf order and reusable API discovery ------------
@@ -155,10 +157,13 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
             if any(symbol.startswith(name + ".") for symbol in related)}
         request = {
             "requirement": context, "obligations": required, "related_schema": related_schema,
+            "shared_conventions": select_conventions(conventions, fields=related, requirements=[rid]),
             "retrieved_apis": retrieved["apis"], "api_inventory": list(retrieved["apis"]),
         }
         def accept(response):
+            nonlocal conventions
             updated = apply_decomposition(design, response, rid, obligations, tree=tree)
+            revised = merge_conventions(conventions, response, rid, related)
             selected = {aid: updated["apis"][aid] for aid in updated["requirements"][rid]}
             definitions = {aid: {key: api[key] for key in (
                 "signature", "request", "response", "read", "write", "precondition", "postcondition")}
@@ -167,12 +172,14 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
             console.show(f"{label} | API design / Obligation Propagation",
                 format_apis(selected) + "\nRequired direct obligations:\n" + format_obligations({rid: required})
                 + "\nAssigned API obligation union:\n" + format_obligations({rid: union(selected.values())}))
+            conventions = revised
             return updated
 
-        updated, _ = propose_json(model, INSTRUCTIONS, request, accept, console,
-            f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.requirements}}))
+        updated, _ = propose_json(model, INSTRUCTIONS + "\n\n" + CONVENTION_RULES, request, accept, console,
+            f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.requirements}}))
         design = updated
         save_json(arc_dir / "backend_apis.json", design)
+        save_json(arc_dir / "shared_conventions.json", conventions)
         console.artifact("backend_apis", design, f"{label} | Accepted APIs")
     # --- Extension point 06B: API -> DB Access Primitive decomposition ---------
     # Intentionally absent: an API directly accesses the database in step 08.

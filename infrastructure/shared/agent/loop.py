@@ -4,6 +4,7 @@ import json
 
 from infrastructure.shared.agent.discovery import project_index, DISCOVERY_RULES, check_budget, ContextLimit
 from infrastructure.shared.agent.context import SourceFiles
+from infrastructure.shared.agent.conventions import task_conventions
 
 from infrastructure.shared.agent.files import FileWorkspace
 from infrastructure.shared.agent.protocol import FILE_EDIT_RULES
@@ -39,6 +40,9 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
             def request_model():
                 request = {"task": files.task_state(task), "files": files.state(), "feedback": feedback,
                     "context_kinds": list(index.records())}
+                conventions = task_conventions(files.output, task)
+                if conventions:
+                    request["task"]["shared_conventions"] = conventions
                 if context_result is not None:
                     request["context_result"] = context_result
                 check_budget(request)
