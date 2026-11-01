@@ -14,6 +14,7 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import apply_patch, check_related_fields
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.discovery import ContextIndex
 
 
 # --- Extension point 02A: schema discovery policy ------------------------------
@@ -135,7 +136,7 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_atte
             return updated, changes
 
         (updated, changes), patch = propose_json(model, INSTRUCTIONS, request, accept,
-            console, f"Schema design {requirement['id']}", max_attempts)
+            console, f"Schema design {requirement['id']}", max_attempts, context_index=ContextIndex(lambda: {"schema": schema["entities"]}))
         # --- Pass boundary: publish the schema ----------------------
         # Subsequent requirements retrieve from this updated graph.
         save_json(arc_dir / "db_schema.json", updated)

@@ -16,6 +16,7 @@ from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.shared.rag.apis import ApiRetriever
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.discovery import ContextIndex
 
 
 INSTRUCTIONS = """Design complete backend APIs for the supplied leaf requirement and scenarios.
@@ -169,7 +170,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
             return updated
 
         updated, _ = propose_json(model, INSTRUCTIONS, request, accept, console,
-            f"Backend API design {rid}", max_attempts)
+            f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.requirements}}))
         design = updated
         save_json(arc_dir / "backend_apis.json", design)
         console.artifact("backend_apis", design, f"{label} | Accepted APIs")

@@ -2,6 +2,8 @@
 
 import json
 
+from infrastructure.shared.agent.discovery import DISCOVERY_RULES, check_budget, ContextLimit
+
 
 RESPONSE_ERRORS = (ValueError, KeyError, TypeError, AttributeError, IndexError)
 REPAIR_INSTRUCTIONS = """The previous proposal was rejected. Read correction.error and correction.details
@@ -25,11 +27,15 @@ def response_feedback(error, response):
     return feedback
 
 
-def propose_json(model, instructions, request, accept, console, label, max_attempts=10):
+def propose_json(model, instructions, request, accept, console, label, max_attempts=10, context_index=None):
     """Generate and repair a proposal within a finite total model-call budget."""
     if max_attempts < 1:
         raise ValueError("--max-attempts must be positive")
     request = dict(request)
+    if context_index is not None:
+        instructions += "\n\n" + DISCOVERY_RULES
+        request["context_kinds"] = list(context_index.records())
+    queries = 0
     for attempt in range(1, max_attempts + 1):
         progress = f"{attempt}/{max_attempts}"
         console.show(f"{label} | Model proposal {progress}", "Generate the proposal; response-reading and obligation errors receive repair feedback.")
@@ -41,8 +47,21 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
                 prompt += "\nActual failure: " + correction["error"]
                 if correction.get("details"):
                     prompt += "\nRepair details:\n" + json.dumps(correction["details"], ensure_ascii=False, indent=2)
+            if context_index is not None:
+                check_budget(request)
             response = model.generate_json(prompt, request)
+            while context_index is not None and isinstance(response, dict) and "context_request" in response:
+                if queries >= 4:
+                    raise ContextLimit("Context discovery budget exhausted; narrow or split the task")
+                queries += 1
+                query = response["context_request"]
+                console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
+                request["context_result"] = context_index.query(query)
+                check_budget(request)
+                response = model.generate_json(prompt, request)
             return accept(response), response
+        except ContextLimit:
+            raise
         except RESPONSE_ERRORS as error:
             feedback = response_feedback(error, response)
             feedback["failed_attempt"] = attempt

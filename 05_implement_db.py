@@ -12,6 +12,7 @@ from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.discovery import project_index
 from infrastructure.utils.files import save_text
 
 
@@ -89,7 +90,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10) -> 
             }
             content, _ = propose_json(model, INSTRUCTIONS, request,
                 lambda response: response["content"].rstrip() + "\n", console,
-                f"SQL implementation {name}", max_attempts)
+                f"SQL implementation {name}", max_attempts, context_index=project_index(arc_dir.parent))
             proposal = {"path": expected_path, "content": content}
             console.show(f"{label} | 3. Model file proposal", expected_path + "\n\n" + content)
             target = output_dir / expected_path

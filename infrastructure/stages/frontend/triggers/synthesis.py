@@ -6,6 +6,7 @@ from infrastructure.stages.frontend.triggers.prompts import INSTRUCTIONS
 from infrastructure.stages.frontend.triggers.design import apply_decomposition, empty_triggers, relevant_pages, trigger_obligations, api_ids
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.discovery import ContextIndex
 
 
 def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, max_attempts=10):
@@ -32,7 +33,7 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
             console.show(label + " | Derived DB effects", json.dumps(derived, ensure_ascii=False, indent=2))
             return updated
 
-        result, _ = propose_json(model, INSTRUCTIONS, request, accept, console, label, max_attempts)
+        result, _ = propose_json(model, INSTRUCTIONS, request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"api": backend["apis"], "page": ui["pages"], "ui_element": ui["elements"], "binding": ui["bindings"], "trigger": result["triggers"]}))
         console.artifact("frontend_triggers", result, label)
         save_json(arc_dir / "frontend_triggers.json", result)
     save_json(arc_dir / "frontend_triggers.json", result)

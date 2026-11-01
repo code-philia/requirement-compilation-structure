@@ -2,6 +2,9 @@
 
 import json
 
+from infrastructure.shared.agent.discovery import project_index, DISCOVERY_RULES, check_budget, ContextLimit
+from infrastructure.shared.agent.context import SourceFiles
+
 from infrastructure.shared.agent.files import FileWorkspace
 from infrastructure.shared.agent.protocol import FILE_EDIT_RULES
 from infrastructure.shared.agent.proposals import RESPONSE_ERRORS, response_feedback
@@ -25,14 +28,37 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
     """
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
+    index = project_index(files.output)
+    queries, context_result = 0, None
     feedback = [] if feedback is None else [feedback_filter(feedback) if feedback_filter else feedback]
     for turn in range(1, max_turns + 1):
         console.show(f"{label} | Edit round {turn}/{max_turns}",
             "Generate file edits, then run the stage's compilation and test acceptance checks.")
         response, applied = None, False
         try:
-            response = model.generate_json(instructions + "\n\n" + FILE_EDIT_RULES,
-                {"task": files.task_state(task), "files": files.state(), "feedback": feedback})
+            def request_model():
+                request = {"task": files.task_state(task), "files": files.state(), "feedback": feedback,
+                    "context_kinds": list(index.records())}
+                if context_result is not None:
+                    request["context_result"] = context_result
+                check_budget(request)
+                return model.generate_json(instructions + "\n\n" + FILE_EDIT_RULES + "\n\n" + DISCOVERY_RULES, request)
+            response = request_model()
+            query_files, query_writable = set(files.files), set(files.writable)
+            while isinstance(response, dict) and "context_request" in response:
+                if queries >= 4:
+                    raise ContextLimit("Context discovery budget exhausted; narrow or split the task")
+                queries += 1
+                query = response["context_request"]
+                console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
+                context_result = index.query(query)
+                files.files, files.writable = set(query_files), set(query_writable)
+                if query["kind"] == "file" and query.get("ids"):
+                    for layer in ("frontend", "backend"):
+                        SourceFiles(files.output, root=layer + "/src", tests_root=layer + "/tests").include(
+                            files, [path for path in context_result["records"] if path.startswith(layer + "/")])
+                    context_result = {"kind": "file", "supplied_paths": list(context_result["records"])}
+                response = request_model()
             if isinstance(response, dict) and response.get("diagnosis"):
                 console.show(label + " | Failure diagnosis", json.dumps(response["diagnosis"], ensure_ascii=False, indent=2))
             files.apply(response)
@@ -42,6 +68,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
             console.show(f"{label} | Edit round {turn}/{max_turns}",
                 str([edit["path"] for edit in response["edits"]]))
             return {"turns": turn, "checks": gate()}
+        except ContextLimit:
+            raise
         except (*RESPONSE_ERRORS, RuntimeError) as error:
             message = str(error)
             console.show(f"{label} | Repair feedback", message)

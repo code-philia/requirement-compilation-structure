@@ -11,6 +11,7 @@ from infrastructure.stages.frontend.ui.proposals import INSTRUCTIONS as EXAMPLE_
 from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.discovery import ContextIndex
 
 
 def bind_requirement_image_pages(design, requirement, rid):
@@ -78,7 +79,7 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
             return updated
 
         updated, proposal = propose_json(model, INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS,
-            request, accept, console, label, max_attempts)
+            request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"page": design["pages"], "ui_element": design["elements"], "binding": design["bindings"]}))
         console.show(label + " | 4. Incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
         design = updated
         save_json(arc_dir / "ui_design.json", design)
