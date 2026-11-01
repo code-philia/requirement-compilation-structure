@@ -8,7 +8,7 @@ from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
-from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses, supplied_sources
+from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses, supplied_sources, related_schema
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.runtime import TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green, require_red
@@ -169,15 +169,13 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
 
                     context = {
                         "api_id": aid, "api": api,
-                        "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
-                        "regression_requirements": [requirement_context(tree, owner) for owner in
-                            dict.fromkeys(owner for key in accepted for owner in owners[key])],
-                        "db_schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
+                        "requirement": requirement_context(tree, rid),
+                        "db_schema": related_schema(schema, [api]), "test_path": relative if (output / relative).is_file() else None,
                         "max_tests": max_tests,
                         "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
                     }
                     workspace = selection.workspace(target=("backend_test", aid), existing=relative,
-                        references=[TEST_BINDINGS_PATH, *[targets[key] for key in accepted], *supplied_sources(output, api, schema)])
+                        references=[TEST_BINDINGS_PATH, *supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation",
                         feedback_filter=lambda value: selection.feedback(workspace, value))
@@ -215,14 +213,12 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         agent = {"turns": 0, "checks": current}
                     else:
                         context = {
-                            "api_id": aid, "api": api, "db_schema": schema["entities"],
-                            "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
-                            "regression_requirements": [requirement_context(tree, owner) for owner in
-                                dict.fromkeys(owner for key in accepted for owner in owners[key])],
+                            "api_id": aid, "api": api, "db_schema": related_schema(schema, [api]),
+                            "requirement": requirement_context(tree, rid),
                             "implementation_path": selected_path(output, "api", aid),
                         }
                         workspace = selection.workspace(target=("api", aid),
-                            references=[*regression_files, *supplied_sources(output, api, schema)])
+                            references=[*files_by_api[aid], *supplied_sources(output, api, schema)])
                         agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
                             implementation_gate, max_turns, console, aid + " / Implementation", feedback=current,
                             feedback_filter=lambda value: selection.feedback(workspace, value))

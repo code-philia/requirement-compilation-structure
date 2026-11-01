@@ -25,8 +25,8 @@ the compiler merges your entities update into the schema accepted from earlier c
 The first call starts with an empty schema. Later calls extend that same schema,
 not a new database for each requirement.
 
-symbol_inventory is the complete inventory of entity and field names that already
-exist. retrieved_schema contains selected definitions from that inventory; it is
+symbol_inventory lists only the retrieved candidate entity and field names.
+It is NOT a complete inventory; a retrieval miss does not prove absence. retrieved_schema contains selected definitions from that inventory; it is
 only a detail excerpt, not a separate schema or a complete list of existing entities.
 Reuse exact existing names and extend existing entities rather than introducing
 synonyms. Preserve unrelated definitions and names referenced by earlier requirements.
@@ -124,7 +124,7 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_atte
         # apply_patch() merges the proposed entity and field updates.
         request = {
             "requirement": requirement,
-            "symbol_inventory": {name: list(entity["fields"]) for name, entity in schema["entities"].items()},
+            "symbol_inventory": {name: list(entity["fields"]) for name, entity in retrieved["entities"].items()},
             "retrieved_schema": {"entities": retrieved["entities"]},
         }
         def accept(patch):

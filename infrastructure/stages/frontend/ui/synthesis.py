@@ -64,7 +64,7 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
         request = {
             "requirement": requirement, "retrieved_pages": retrieved["pages"],
             "all_pages": {pid: {key: page[key] for key in ("name", "route", "root", "images")}
-                for pid, page in design["pages"].items()},
+                for pid, page in design["pages"].items() if pid in retrieved["pages"]},
             "max_fixtures": max_fixtures,
         }
         def accept(proposal):

@@ -92,8 +92,7 @@ class BackendDesign(unittest.TestCase):
         self.assertEqual(len(requests), 3)
         self.assertEqual([call["requirement"]["id"] for call in requests], ["REQ-A", "REQ-B", "REQ-C"])
         shared = requests[1]
-        self.assertEqual([use["id"] for use in shared["api_uses"]["API-SAVE"]], ["REQ-A"])
-        self.assertEqual(shared["api_uses"]["API-SAVE"][0]["steps"][0]["id"], "STEP-REQ-A")
+        self.assertNotIn("api_uses", shared)
         self.assertEqual(shared["requirement"]["steps"][0]["id"], "STEP-REQ-B")
         self.assertIn("postcondition", shared["retrieved_apis"]["API-SAVE"])
         self.assertEqual(result["requirements"]["REQ-A"], result["requirements"]["REQ-B"])

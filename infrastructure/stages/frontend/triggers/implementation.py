@@ -16,6 +16,7 @@ from infrastructure.stages.frontend.triggers.testing import E2EChecks, require_b
 from infrastructure.stages.frontend.triggers.runtime import sync_triggers, prepare_trigger_paths
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
+from infrastructure.stages.backend.context import related_schema, supplied_sources
 from infrastructure.stages.backend.testing import BackendChecks, require_green as require_backend_green
 from infrastructure.stages.frontend.triggers.design import api_ids, trigger_obligations, relevant_pages
 from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, model_context
@@ -175,7 +176,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         ui_files = [ui_test_path(pid) for pid in pages if (output / ui_test_path(pid)).is_file()]
         called = {aid for trigger in context["triggers"].values() for aid in api_ids(trigger)}
         context["obligations"] = {tid: trigger_obligations(trigger, backend) for tid, trigger in context["triggers"].items()}
-        context.update({"requirement": contexts[rid], "regression_requirements": [contexts[key] for key in accepted],
+        context.update({"requirement": contexts[rid],
             "target_trigger_ids": sorted(targets),
             "backend_apis": {aid: backend["apis"][aid] for aid in sorted(called)}})
         console.show(label + " | Scenario context", json.dumps(context, ensure_ascii=False, indent=2))
@@ -205,12 +206,13 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     raise TriggerCheckFailure("Repair invalid E2E tests or affected application sources", behavior) from error
                 return {"typecheck": compiled, "behavior": behavior, "status": status}
 
-            test_context = {**model_context(context), "schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
+            test_context = {**model_context(context), "schema": related_schema(schema, context["backend_apis"].values()), "test_path": relative if (output / relative).is_file() else None,
                 "max_tests": max_tests}
             test_workspace = selection.workspace(target=("e2e_test", rid), existing=relative,
                 references=["frontend/src/ui-runtime.ts", FIXTURE, "backend/tests/support/context.ts",
-                    *[test_path(key, output) for key in accepted],
-                    *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
+                    *selection.paths("page", pages), *selection.paths("trigger", context_tids),
+                    *backend_selection.paths("api", called),
+                    *[f"backend/src/db/tables/{name}.sql" for name in related_schema(schema, context["backend_apis"].values())]])
             agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
                 test_workspace, test_gate, max_turns, console, label + " / Test Generation",
                 feedback_filter=lambda value: selection.feedback(test_workspace, value))
@@ -286,11 +288,11 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     task = {**model_context(context),
                         "implementation_paths": prepare_trigger_paths(output, context_tids)}
                     workspace = selection.workspace(triggers=context_tids,
-                        paths=[*editable_sources(output, "frontend/src"), "frontend/src/style.css"],
-                        references=[*regression_files, *ui_files, "backend/tests/support/context.ts",
-                            *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
-                    backend_selection.include(workspace, [*editable_sources(output, "backend/src"),
-                        *[path for aid in backend["apis"] if (path := selected_path(output, "backend_test", aid))]])
+                        paths=[*selection.paths("page", pages), "frontend/src/style.css"],
+                        references=[relative, *ui_files, "backend/tests/support/context.ts",
+                            "frontend/src/ui-runtime.ts"])
+                    backend_selection.include(workspace, [*backend_selection.paths("api", called),
+                        *[path for aid in called if (path := selected_path(output, "backend_test", aid))]])
 
                     def repair_feedback(value):
                         return selection.feedback(workspace, backend_selection.feedback(workspace, value))

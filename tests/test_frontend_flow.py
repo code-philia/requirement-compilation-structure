@@ -187,10 +187,9 @@ class FrontendFlow(unittest.TestCase):
                     self.assertTrue(payload["files"][f"frontend/src/screens/{pid}.tsx"]["writable"])
                 for path in api_paths.values():
                     self.assertTrue(payload["files"][path]["writable"])
-                for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts", "frontend/src/style.css"):
-                    self.assertTrue(payload["files"][path]["writable"])
-                self.assertFalse(payload["files"]["backend/src/server.ts"]["writable"])
-                self.assertFalse(payload["files"]["backend/src/db/client.ts"]["writable"])
+                for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts", "backend/src/server.ts"):
+                    self.assertNotIn(path, payload["files"])
+                self.assertTrue(payload["files"]["frontend/src/style.css"]["writable"])
                 if len(implementation_calls) == 1:
                     ids = sorted(tid for tid, path in task["implementation_paths"].items()
                         if payload["files"][path]["content"] is None)
@@ -201,8 +200,6 @@ class FrontendFlow(unittest.TestCase):
                         "content": "export function handle() {}"} for tid in ids]
                     if backend_repair:
                         edits.append({"path": api_paths["API-SAVE"], "content": "export function handle() { /* fixed integration */ }"})
-                        edits.extend({"path": path, "content": "export const helper = 4;"} for path in (
-                            "frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts"))
                     return {"edits": edits}
                 if partial_batch:
                     self.assertIn("Create all supplied trigger files", payload["feedback"][0]["error"])
@@ -278,8 +275,8 @@ class FrontendFlow(unittest.TestCase):
             self.assertEqual(backend_checks.call_count, 3 if backend_fails_once else 2)
             self.assertTrue(all(call.args == (self.output.resolve(),) for call in backend_checks.call_args_list))
             self.assertTrue(all(call.args == (backend_suites,) for call in api_checks.tests.call_args_list))
-            for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts"):
-                self.assertEqual((self.output / path).read_text(), "export const helper = 4;")
+            self.assertEqual((self.output / "frontend/src/features/other-page-helper.ts").read_text(), "export const helper = 1;")
+            self.assertEqual((self.output / "backend/src/features/other-api-helper.ts").read_text(), "export const helper = 2;")
         else:
             backend_checks.assert_called_once_with(self.output.resolve())
         self.assertEqual(report["summary"]["ui_tests"], 0)
@@ -300,7 +297,7 @@ class FrontendFlow(unittest.TestCase):
         self.assertNotIn("contracts", selected)
 
 
-    def test_repair_scope_keeps_all_handlers_and_transitive_imports_writable(self):
+    def test_repair_scope_keeps_handlers_and_direct_imports_then_reads_failure_dependencies(self):
         """Do not omit required handlers/helpers, including a missing indexed file."""
         from infrastructure.shared.project.entrypoints import remember_path
         from infrastructure.shared.agent.context import SourceFiles
@@ -316,8 +313,13 @@ class FrontendFlow(unittest.TestCase):
         selected = SourceFiles(self.output, self.ui)
         workspace = selected.workspace(triggers=set(paths), references=["frontend/src/ui-runtime.ts"])
         files = workspace.state()
-        for relative in [*paths.values(), "frontend/src/shared/value.ts", "frontend/src/shared/nested/index.ts"]:
+        for relative in [*paths.values(), "frontend/src/shared/value.ts"]:
             self.assertTrue(files[relative]["writable"], relative)
+        self.assertNotIn("frontend/src/shared/nested/index.ts", files)
+        selected.feedback(workspace, {"error": "frontend/src/shared/nested/index.ts: invalid value"})
+        self.assertIn("frontend/src/shared/nested/index.ts", workspace.state())
+        selected.feedback(workspace, {"error": "another failure"})
+        self.assertNotIn("frontend/src/shared/nested/index.ts", workspace.state())
         self.assertIsNone(files[paths["TR-COUNT"]]["content"])
         self.assertNotIn("frontend/src/unrelated.ts", files)
         self.assertFalse(files["frontend/src/ui-runtime.ts"]["writable"])

@@ -38,7 +38,8 @@ class SourceFiles:
 
     def include(self, workspace, paths):
         """Add selected files plus transitive local imports, preserving write protection."""
-        pending = list(paths)
+        roots = set(paths)
+        pending = list(roots)
         seen = set()
         while pending:
             relative = pending.pop()
@@ -52,7 +53,7 @@ class SourceFiles:
             target = self.output / relative
             # Compiler-owned wiring can import the whole application. Supply its
             # interface only; it must not expand the source context transitively.
-            if relative not in self.editable or not target.is_file():
+            if relative not in roots or relative not in self.editable or not target.is_file():
                 continue
             source = read_source(target)
             imports = re.findall(r'''(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\(\s*)["'](\.[^"']+)["']''', source)
@@ -109,8 +110,18 @@ class SourceFiles:
         for pid in self.ui["pages"]:
             if f"frontend/tests/ui/{pid}.spec.ts" in text or f"tests/ui/{pid}.spec.ts" in text:
                 named.update(self.paths("page", [pid]))
+        if not hasattr(workspace, "context_baseline"):
+            workspace.context_baseline = (set(workspace.files), set(workspace.writable))
+        base_files, base_writable = workspace.context_baseline
+        # Replace this layer's previous failure context; keep other layers intact.
+        workspace.files = {path for path in workspace.files if not path.startswith(self.layer + "/")} | base_files
+        workspace.writable = {path for path in workspace.writable if not path.startswith(self.layer + "/")} | base_writable
+        if workspace.target:
+            path = selected_path(self.output, *workspace.target)
+            if path:
+                workspace.files.add(path)
+                workspace.writable.add(path)
         self.include(workspace, named)
-        self.include(workspace, workspace.writable)
 
         def compact(item):
             """Remove successful checks and reporter copies without truncating actual failures."""

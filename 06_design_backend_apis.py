@@ -107,8 +107,7 @@ Response bodies expose business results, not password hashes or session secrets.
 Specify success and rejection branches supported by the requirement; HTTP 501 is
 reserved for the TDD stub. Do not invent business policy or generic failure branches.
 
-retrieved_apis contains existing complete definitions; api_uses contains their earlier
-requirement scenarios. The current requirement is separate. A shared API has one
+retrieved_apis contains selected canonical definitions, not the complete API inventory. The current requirement is separate. A shared API has one
 canonical interface and P/Q covering its known uses. Return a complete updated API
 when new evidence requires coordinated interface or P/Q changes; retain earlier behavior.
 
@@ -134,7 +133,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
         required = obligations["requirements"][rid]
         label = f"{number}/{len(tree.leaves)} {rid}"
         console.show(f"{label} | 1. Requirement and Dataflow Obligations", (
-            context["name"] + "\n" + context["description"] + "\n\n" + context["concatenated_steps"]
+            context["name"] + "\n" + context["description"] + "\n\n" + tree.concatenated_steps(rid)
             + "\n\nRequirement obligations:\n" + format_obligations({rid: required})
         ))
         console.show(f"{label} | 2. All Existing APIs", format_apis(design["apis"]))
@@ -155,9 +154,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
             if any(symbol.startswith(name + ".") for symbol in related)}
         request = {
             "requirement": context, "obligations": required, "related_schema": related_schema,
-            "retrieved_apis": retrieved["apis"], "api_inventory": list(candidates),
-            "api_uses": {aid: api_requirement_uses(tree, design["requirements"], aid)
-                for aid in retrieved["apis"]},
+            "retrieved_apis": retrieved["apis"], "api_inventory": list(retrieved["apis"]),
         }
         def accept(response):
             updated = apply_decomposition(design, response, rid, obligations, tree=tree)

@@ -111,11 +111,11 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             else:
                 context = {"page": page_context(design, pid),
                     "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"}
-                        for rid in dict.fromkeys(owner for page_id in [*accepted, pid] for owner in owners(design, page_id))],
+                        for rid in uses],
                     "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
                     "implementation_path": selected_path(output, "page", pid)}
                 workspace = selection.workspace(target=("page", pid),
-                    references=["frontend/src/ui-runtime.ts", *files, "frontend/package.json", "frontend/tsconfig.json"])
+                    references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json", "frontend/tsconfig.json"])
                 report["pages"][pid]["status"] = "IMPLEMENTING"
                 agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
                     max_turns, console, label + " / Implementation", feedback=current,
