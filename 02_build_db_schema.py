@@ -11,7 +11,7 @@ from infrastructure.utils.presentation.formatting import format_changes, format_
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.requirements.tree import RequirementTree
-from infrastructure.stages.database.schema import apply_patch
+from infrastructure.stages.database.schema import apply_patch, check_related_fields
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 
@@ -19,9 +19,35 @@ from infrastructure.shared.agent.proposals import propose_json
 # --- Extension point 02A: schema discovery policy ------------------------------
 # Experiment with entity boundaries, reuse decisions, and constraint inference.
 # Keep the upsert response compatible with infrastructure/stages/database/schema.py.
-INSTRUCTIONS = """Design persistent data for the supplied requirement and its scenario steps.
-Reuse the supplied retrieved entities and symbol_inventory; extend existing entities
-rather than introducing synonyms for the same concept. Preserve unrelated definitions.
+INSTRUCTIONS = """Incrementally maintain ONE shared database schema while requirements are visited
+in document order. This call handles only the supplied requirement and its steps;
+the compiler merges your entities update into the schema accepted from earlier calls.
+The first call starts with an empty schema. Later calls extend that same schema,
+not a new database for each requirement.
+
+symbol_inventory is the complete inventory of entity and field names that already
+exist. retrieved_schema contains selected definitions from that inventory; it is
+only a detail excerpt, not a separate schema or a complete list of existing entities.
+Reuse exact existing names and extend existing entities rather than introducing
+synonyms. Preserve unrelated definitions and names referenced by earlier requirements.
+
+For this requirement, follow this order:
+1. Identify persistent data needed by its behavior and scenarios, including data it
+   only READS. Given state such as an existing account or session still needs schema
+   definitions, even if account/session creation belongs to a later requirement.
+2. Reuse existing entities/fields from symbol_inventory. For any needed entity or
+   field that is absent, DEFINE it in this response's entities update, including its
+   required field properties. Do not merely mention it or leave a placeholder.
+3. List related_fields using only fields that will exist AFTER this update is merged:
+   existing inventory fields plus fields defined in this response. Do not rely on
+   a future requirement to define a field referenced by the current requirement.
+
+For example, if a requirement reads Session.id and Session.account_id but Session is
+absent from symbol_inventory, entities must define Session with both fields in this
+same response before related_fields can contain those names. If the existing entity
+is AccountSession, reuse AccountSession's exact field names instead of citing Session.
+Listing a field in related_fields does not create that entity or field.
+
 Store persistent business data, not transient UI values such as password confirmation.
 Derive constraints from requirement evidence; example fixture values alone do not
 establish uniqueness, normalization, value ranges or defaults.
@@ -103,6 +129,7 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_atte
         }
         def accept(patch):
             updated = apply_patch(schema, patch)
+            check_related_fields(updated, patch["related_fields"])
             updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
             changes = format_changes(schema, updated)
             return updated, changes

@@ -7,6 +7,7 @@ from pathlib import Path
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.stages.database.obligations.records import normalize_inference, normalize_obligations
+from infrastructure.stages.database.schema import check_related_fields
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.logging import console_log
@@ -70,6 +71,11 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
             f"\n\nConcatenated steps:\n{steps_text or '(No steps on this requirement.)'}"
         ))
         related_fields = schema["requirements"].get(rid)
+        try:
+            check_related_fields(schema, related_fields)
+        except ValueError as error:
+            raise ValueError(f"Invalid schema associations for {rid} in .arc/db_schema.json. "
+                f"Rerun 02_build_db_schema.py to repair the schema before inference. {error}") from error
         related_entities = {}
         for symbol in related_fields:
             entity, field = symbol.split(".", 1)
