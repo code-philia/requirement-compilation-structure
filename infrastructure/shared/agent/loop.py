@@ -21,7 +21,7 @@ class AgentExhausted(ValueError):
 
 
 def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, gate,
-        max_turns: int, console, label: str, feedback=None, feedback_filter=None) -> dict:
+        max_turns: int, console, label: str, feedback=None, feedback_filter=None, context_index=None) -> dict:
     """Refresh files and paths; optionally select failure-related files before repair.
 
     The stage-owned feedback filter may add writable sources/read-only references
@@ -29,7 +29,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
     """
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
-    index = project_index(files.output)
+    index = context_index if context_index is not None else project_index(files.output)
     queries, context_result = 0, None
     feedback = [] if feedback is None else [feedback_filter(feedback) if feedback_filter else feedback]
     for turn in range(1, max_turns + 1):
@@ -65,7 +65,17 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
                 response = request_model()
             if isinstance(response, dict) and response.get("diagnosis"):
                 console.show(label + " | Failure diagnosis", json.dumps(response["diagnosis"], ensure_ascii=False, indent=2))
+            before = dict(files.observed)
             files.apply(response)
+            changes = [{"path": edit["path"], "before": before[edit["path"]], "after": edit["content"]}
+                for edit in response["edits"] if edit["path"] in before and before[edit["path"]] is not None
+                and "/tests/" in edit["path"] and before[edit["path"]] != edit["content"]]
+            if changes:
+                audit = files.output / ".arc/test_repairs.jsonl"
+                audit.parent.mkdir(parents=True, exist_ok=True)
+                with audit.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps({"task": label, "turn": turn, "diagnosis": response.get("diagnosis"),
+                        "feedback": feedback, "changes": changes}, ensure_ascii=False) + "\n")
             applied = True
             if files.new_file is not None:
                 raise ValueError("Create the target file in the first edit before running acceptance checks")

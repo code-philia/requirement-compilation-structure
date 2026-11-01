@@ -20,7 +20,7 @@ from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_bytes, save_json, save_text
 
 
-TEST_INSTRUCTIONS = """Write one canonical test suite for task.api, shared by all_requirement_uses, before
+TEST_INSTRUCTIONS = """Write one canonical test suite for task.api, whose contract covers its shared uses, before
 implementing the API. Base expected outcomes on the requirement scenarios, API I/O,
 preconditions, postconditions and DB effects. Use db_schema and supplied SQL for fixtures.
 
@@ -57,7 +57,7 @@ When repairing tests, preserve requirement-defined cases and assertions. Missing
 behavior is expected RED; fix test/fixture errors without deleting that behavioral coverage.
 """
 
-IMPLEMENT_INSTRUCTIONS = """Implement task.api for all_requirement_uses against its generated tests.
+IMPLEMENT_INSTRUCTIONS = """Implement task.api according to its canonical contract against its generated tests.
 Create the task.new_file target or update implementation_path. Export:
 export async function handle(request: ApiRequest, connection: Database.Database): Promise<ApiResponse>.
 The export is always handle; api.signature.name is the compiler-provided business alias
@@ -175,7 +175,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
                     }
                     workspace = selection.workspace(target=("backend_test", aid), existing=relative,
-                        references=[TEST_BINDINGS_PATH, *supplied_sources(output, api, schema)])
+                        references=[*supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation",
                         feedback_filter=lambda value: selection.feedback(workspace, value))

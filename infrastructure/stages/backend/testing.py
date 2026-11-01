@@ -1,5 +1,7 @@
 """Execute actual backend compilation and tests without source/title policy gates."""
 
+from infrastructure.shared.agent.feedback import CheckFailure
+
 import json
 import re
 import shutil
@@ -63,13 +65,18 @@ class BackendChecks:
         for kind in ("tests", "pass", "fail", "skipped", "todo"):
             found = re.search(rf"^# {kind} (\d+)\s*$", result["output"], re.MULTILINE)
             result[kind] = int(found.group(1)) if found else 0
+        # TAP diagnostic blocks contain the assertion, stack and source location.
+        # Successful subtests remain in the saved tool report, not repair context.
+        failures = re.findall(r"(?m)^\s*not ok[^\n]*\n(?:[ \t]+[^\n]*\n)*", result["output"])
+        if failures:
+            result["failures"] = failures
         return result
 
 
 def require_green(report: dict) -> None:
     """Reject a test report unless the selected suite passed."""
     if report["returncode"] != 0 or not report.get("tests") or report.get("fail"):
-        raise ValueError(f"Tests are not GREEN: {report}")
+        raise CheckFailure("Tests are not GREEN", report)
 
 
 def require_red(report: dict) -> None:

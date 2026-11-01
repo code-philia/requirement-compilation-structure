@@ -1,5 +1,7 @@
 """Deterministic UI existence suites and bounded browser/typecheck commands."""
 
+from infrastructure.shared.agent.feedback import CheckFailure
+
 import json
 import os
 from pathlib import Path
@@ -83,7 +85,7 @@ def existence_suite(design: dict, pid: str) -> str:
 def require_green(result: dict) -> None:
     """Require passing actual browser assertions with no reported runtime errors."""
     if result["returncode"] or result.get("errors") or not result.get("passed") or result.get("failed"):
-        raise ValueError(f"UI checks are not GREEN: {result}")
+        raise CheckFailure("UI checks are not GREEN", result)
 
 
 def require_red(result: dict) -> None:
@@ -114,7 +116,7 @@ def parse_playwright_result(result: dict, include_files: bool = False) -> dict:
             for test in spec.get("tests", []):
                 for run in test.get("results", []):
                     if run.get("status") not in {"passed", "skipped"}:
-                        failures.append("\n".join(item.get("message", "") for item in run.get("errors", [])))
+                        failures.append("\n".join(item.get("message", "") for item in run.get("errors", [])) + "\nTest file: " + filename)
         for child in suite.get("suites", []):
             visit(child)
 

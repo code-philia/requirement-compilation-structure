@@ -113,6 +113,8 @@ class FileWorkspace:
             if self.new_file is not None and number == 0:
                 kind, identity = self.new_file
                 root = FILE_ROOTS[kind]
+                if "/tests/e2e/acceptance/" in relative:
+                    raise ValueError("Independent acceptance paths are owned by the separate test-review task")
                 if not relative.startswith(root + "/") or target.exists() or relative in self.files:
                     raise ValueError(f"Choose an unused path under {root} for {identity}")
                 created = relative

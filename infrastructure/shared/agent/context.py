@@ -4,6 +4,7 @@ import json
 import posixpath
 import re
 
+from infrastructure.shared.agent.feedback import compact_feedback
 from infrastructure.shared.agent.files import FileWorkspace, editable_sources, source_paths
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.utils.files import read_source
@@ -34,7 +35,7 @@ class SourceFiles:
 
     def is_test(self, relative):
         """Identify generated suites, leaving shared fixtures and test utilities read-only."""
-        return relative.startswith(self.tests_root + "/") and relative.endswith((".spec.ts", ".test.ts"))
+        return "/tests/e2e/acceptance/" not in relative and relative.startswith(self.tests_root + "/") and relative.endswith((".spec.ts", ".test.ts"))
 
     def include(self, workspace, paths):
         """Add selected files plus transitive local imports, preserving write protection."""
@@ -89,6 +90,7 @@ class SourceFiles:
         Full reports remain in compiler results/logs. The model receives failure
         details once. Successful checks and duplicate JSON `output` are omitted.
         """
+        value = compact_feedback(value)
         text = (value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)).replace("\\\\", "/").replace("\\", "/")
         application_files = {path for path in workspace.writable if path.startswith(self.root + "/")}
         self.sources.update(application_files)
@@ -123,15 +125,4 @@ class SourceFiles:
                 workspace.writable.add(path)
         self.include(workspace, named)
 
-        def compact(item):
-            """Remove successful checks and reporter copies without truncating actual failures."""
-            if isinstance(item, dict):
-                if item.get("returncode") == 0:
-                    return {"returncode": 0}
-                return {key: compact(child) for key, child in item.items()
-                    if not (key in {"output", "stdout"} and item.get("failures"))}
-            if isinstance(item, list):
-                return [compact(child) for child in item]
-            return item
-
-        return compact(value)
+        return value

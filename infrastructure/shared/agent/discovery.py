@@ -64,7 +64,13 @@ class ContextIndex:
                     if entity in records and field in records[entity]['fields']:
                         found[identity] = records[entity]['fields'][field]
                 elif identity in records:
-                    found[identity] = records[identity]
+                    if kind == 'test_requirement':
+                        offset = max(0, int(request.get('offset', 0)))
+                        owners = records[identity]
+                        found[identity] = {'requirement_ids': owners[offset:offset + 6],
+                            'next_offset': offset + 6 if offset + 6 < len(owners) else None}
+                    else:
+                        found[identity] = records[identity]
             result = {'records': deepcopy(found), 'missing': [key for key in ids if key not in found]}
         else:
             words = set(tokenize(request['query']))

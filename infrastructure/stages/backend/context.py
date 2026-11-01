@@ -40,7 +40,7 @@ def supplied_sources(output: Path, api: dict, schema: dict) -> dict:
                 if target not in entities:
                     entities.add(target)
                     pending.append(target)
-    paths = ["backend/src/api/types.ts", "backend/src/db/client.ts", "backend/src/db/initialize.ts", "backend/tests/support/context.ts"]
+    paths = ["backend/src/api/types.ts", "backend/src/db/client.ts", "backend/tests/support/context.ts"]
     paths.extend(f"backend/src/db/tables/{name}.sql" for name in sorted(entities))
     return {relative: (output / relative).read_text(encoding="utf-8-sig") for relative in paths}
 

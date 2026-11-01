@@ -80,3 +80,33 @@ npm start
 ```
 
 Open `http://localhost:3000` (or the port you selected).
+
+### Local context and independent acceptance
+
+Models receive the current task, selected dependencies and latest failure evidence.
+Completed requirements and full source inventories are not appended to every prompt.
+The optional `context_request` response discovers candidate IDs or reads exact artifacts
+and files; ordinary changes still use `edits`. Each task allows four discovery queries.
+`ARC_CONTEXT_MAX_CHARS` defaults to 180000 characters. Oversized tasks fail explicitly
+without truncating evidence; automatic decomposition of a single oversized task is not
+implemented. The limit measures input size, not estimated tokens.
+
+Step 06 owns `.arc/shared_conventions.json`. It records concise shared decisions and
+compiler-maintained relevance associations. Implementation tasks read related conventions;
+changes belong to API design. Obligation records require explicit read/write arrays and
+step entries. Step 11 checks declared requirement/step calls against DB obligations;
+these checks do not prove actual code semantics.
+
+Step 12 ends with independent acceptance generated per original `requirements.yaml`
+leaf. Its model sees original scenarios, selected UI/API interfaces, schema and fixture
+utilities, but no application source or process tests. Tests are stored under
+`frontend/tests/e2e/acceptance/` and are read-only to application repair. Failed tests may
+be corrected by a separate requirement-grounded test-review call; its completion gate
+checks compilation, not behavioral success. The real browser verdict remains authoritative.
+An unresolved failure produces `COMPLETED_WITH_FAILURES` and does not prevent other
+requirements from being attempted. See `.arc/independent_acceptance.json` and the final
+stage verification report. Generated tests are still fallible; this separation reduces
+shared blind spots, not a proof of complete requirement correctness.
+
+Changes to existing generated tests are recorded with before/after content, diagnosis and
+actual feedback in `.arc/test_repairs.jsonl`. No source-text policy scans are introduced.

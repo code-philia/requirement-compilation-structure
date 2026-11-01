@@ -1,7 +1,7 @@
 """Canonical cross-requirement decisions owned by API design, not application repair."""
 
 from copy import deepcopy
-from infrastructure.utils.files import read_artifact, save_json
+from infrastructure.utils.files import read_artifact
 
 CONVENTION_RULES = '''shared_conventions are canonical cross-requirement decisions, selected for this task.
 Reuse their exact identities, credential transport and observable meanings. API contracts

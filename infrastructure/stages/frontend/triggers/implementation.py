@@ -35,8 +35,6 @@ def scenario_context(ui, design, rid):
             if trigger["source"] in elements and trigger["event"] == "mount"}
         targets = {action.get("ui") for tid in tids for action in design["triggers"][tid]["action"] if action["kind"] == "ui"}
         destinations = {pid for pid, page in ui["pages"].items() if page["root"] in targets}
-        hrefs = {ui["elements"][uid]["prop"].get("href") for uid in elements}
-        destinations.update(pid for pid, page in ui["pages"].items() if page["route"] in hrefs)
         if destinations.issubset(pages):
             return {"page_subtrees": {pid: page_context(ui, pid) for pid in sorted(pages)},
                 "triggers": {tid: design["triggers"][tid] for tid in sorted(tids)}}

@@ -216,7 +216,8 @@ class FrontendFlow(unittest.TestCase):
                     "content": "export function handle() { /* repaired */ }"}]}
             creation = task["new_file"]
             self.assertEqual(creation["kind"], "e2e_test")
-            self.assertFalse(payload["files"]["frontend/src/screens/editor.tsx"]["writable"])
+            for pid in task["page_subtrees"]:
+                self.assertFalse(payload["files"][f"frontend/src/screens/{pid}.tsx"]["writable"])
             self.assertEqual(task["max_tests"], 2)
             for aid in task["backend_apis"]:
                 self.assertFalse(payload["files"][api_paths[aid]]["writable"])
