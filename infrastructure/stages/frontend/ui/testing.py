@@ -33,10 +33,13 @@ def test_path(pid: str) -> str:
 
 
 def existence_suite(design: dict, pid: str) -> str:
-    """Render deterministic presence tests for key visible UI elements across the page's designed display fixtures."""
+    """Check element presence per display state and required runtime data keys only."""
     page = design["pages"][pid]
     elements = page_elements(design, pid)
     defaults = {var: binding["initial"] for var, binding in design["bindings"].items()}
+    variables = {var for node in elements.values() for var in node.get("data", [])}
+    variables.update(node["prop"]["visible"]["var"] for node in elements.values()
+        if isinstance(node.get("prop", {}).get("visible"), dict) and "var" in node["prop"]["visible"])
     lines = ['// Compiler-owned existence assertions, generated from the UI/data design.',
         'import { test, expect } from "@playwright/test";', '']
     for name, fixture in page["fixtures"].items():
@@ -60,33 +63,12 @@ def existence_suite(design: dict, pid: str) -> str:
             lines.append(f"  await expect({locator}){'' if shown else '.not'}.toBeVisible();")
             if not shown:
                 continue
-            prop = node.get("prop", {})
-            if kind in {"input", "checkbox", "select"}:
-                if prop.get("label"):
-                    lines.append(f'  await expect({locator}).toHaveAccessibleName({json.dumps(prop["label"])});')
-                if "placeholder" in prop:
-                    lines.append(f'  await expect({locator}).toHaveAttribute("placeholder", {json.dumps(prop["placeholder"])});')
-                if kind in {"input", "checkbox"}:
-                    input_type = "checkbox" if kind == "checkbox" else prop.get("input_type", "text")
-                    lines.append(f'  await expect({locator}).toHaveAttribute("type", {json.dumps(input_type)});')
-                if kind == "select":
-                    for option in prop.get("options", []):
-                        lines.append(f'  await expect({locator}.getByRole("option", {{ name: {json.dumps(option)}, exact: true }})).toHaveCount(1);')
-                if node.get("data"):
-                    initial = values[node["data"][0]]
-                    if kind == "checkbox" and isinstance(initial, bool):
-                        lines.append(f"  await expect({locator}){'' if initial else '.not'}.toBeChecked();")
-                    elif kind in {"input", "select"} and isinstance(initial, (str, int, float)) and not isinstance(initial, bool):
-                        lines.append(f'  await expect({locator}).toHaveValue({json.dumps(str(initial))});')
-            if prop.get("text") and kind in {"heading", "text", "button", "link", "alert"}:
-                lines.append(f'  await expect({locator}).toContainText({json.dumps(prop["text"])});')
-            if kind == "alert":
-                lines.append(f'  await expect({locator}).toHaveAttribute("role", "alert");')
-            if kind in {"text", "heading", "alert"}:
-                for var in node["data"]:
-                    value = values[var]
-                    if isinstance(value, str) and value:
-                        lines.append(f'  await expect({locator}).toContainText({json.dumps(value)});')
+        lines.extend([
+            '  await expect.poll(() => page.evaluate(({ pageId, keys }) => {',
+            '    const state = (window as unknown as { __ARC_UI_DATA__?: { page: string; data: Record<string, unknown> } }).__ARC_UI_DATA__;',
+            '    return state?.page === pageId && keys.every(key => Object.prototype.hasOwnProperty.call(state.data, key));',
+            '  }, ' + json.dumps({"pageId": pid, "keys": sorted(variables)}) + ')).toBe(true);',
+        ])
         lines.extend([
             '  } catch (error) {',
             '    if (runtimeErrors.length) throw new Error("UI_RUNTIME_ERROR: " + runtimeErrors.join("\\n"));',

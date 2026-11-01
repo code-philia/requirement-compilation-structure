@@ -1,4 +1,6 @@
-"""Bounded JSON edit -> fixed acceptance check -> repair loop."""
+"""Bounded file editing with failure attribution and real acceptance checks."""
+
+import json
 
 from infrastructure.shared.agent.files import FileWorkspace
 from infrastructure.shared.agent.protocol import FILE_EDIT_RULES
@@ -31,6 +33,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
         try:
             response = model.generate_json(instructions + "\n\n" + FILE_EDIT_RULES,
                 {"task": files.task_state(task), "files": files.state(), "feedback": feedback})
+            if isinstance(response, dict) and response.get("diagnosis"):
+                console.show(label + " | Failure diagnosis", json.dumps(response["diagnosis"], ensure_ascii=False, indent=2))
             files.apply(response)
             applied = True
             if files.new_file is not None:
@@ -43,5 +47,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
             console.show(f"{label} | Repair feedback", message)
             rejected = (getattr(error, "feedback", {"error": message}) if applied
                 else response_feedback(error, response))
+            if isinstance(response, dict) and response.get("diagnosis") and isinstance(rejected, dict):
+                rejected = {**rejected, "previous_diagnosis": response["diagnosis"]}
             feedback = [feedback_filter(rejected) if feedback_filter else rejected]
     raise AgentExhausted(label, max_turns, feedback)

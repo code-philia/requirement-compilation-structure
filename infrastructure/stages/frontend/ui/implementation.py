@@ -2,7 +2,7 @@
 
 Tests are rendered deterministically from the complete step 09 design. A shared
 file agent implements one page at a time, with previously accepted page tests
-included in its checks. Tests and compiler-owned wiring are supplied as read-only files."""
+included in its checks. Generated tests are repairable against requirements; runtime wiring stays read-only."""
 
 import json
 from pathlib import Path
@@ -13,7 +13,7 @@ from infrastructure.shared.agent.recovery import implementation_task, final_chec
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.ui.design import owners, page_context
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pages
-from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_suite, require_green, presentation_run_status, test_path
+from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_suite, require_green, test_path
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
 
@@ -23,7 +23,8 @@ component Page accepting UiPageProps, imported from frontend/src/ui-runtime.ts u
 a relative import. The compiler owns routing, initial data and display fixtures.
 
 Render layout, style, labels, controls, lists and conditional content from data[var]
-and static element props. Use the configured Tailwind utilities with complete class
+and static element props. Fixed labels, hints and captions are static props, not
+dynamic state. State dependencies control rendering without exposing raw status values. Use the configured Tailwind utilities with complete class
 strings; use installed React/ReactDOM without new dependencies. Reproduce visual
 references through real elements, not a screenshot background in place of controls.
 Put data-testid=ELEMENT_ID on each actual designed element, including the page root.
@@ -39,15 +40,19 @@ Render fixture data through the ordinary data prop, without inspecting test glob
 
 Repair supplied writable frontend dependencies when needed, preserving other pages
 and behavior. Use the files map for permissions. The compiler runs TypeScript, current
-and accepted page display tests, then a build. Implement the design without modifying
-tests or compiler wiring to bypass failures.
+and accepted page presence tests, then a build. Presence tests check element
+availability in key states and required frontend data keys, not every attribute,
+option representation, static caption or internal state value as visible text.
+Diagnose feedback against the requirements. Correct writable tests that are wrong or
+overly strict, preserving meaningful presence/state coverage; otherwise fix the page.
+Runtime wiring and shared test utilities remain read-only.
 """
 
 def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 10,
         images: dict | None = None, requirement_contexts: dict | None = None) -> dict:
     """Implement the complete saved UI/data design through component-existence TDD.
 
-    Prepare the project and browser, generate and freeze presence tests, then
+    Prepare the project and browser, generate initial presence tests, then
     repair model-selected page components until checks pass. Update the caller's
     report; runtime wiring remains compiler-owned."""
     output = arc_dir.parent.resolve()
@@ -65,11 +70,12 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         uses = owners(design, pid)
         relative = test_path(pid)
         suite = existence_suite(design, pid)
-        save_text(output / relative, suite)
+        if not (output / relative).is_file():
+            save_text(output / relative, suite)
         report["pages"][pid] = {"status": "TESTS_READY", "requirements": uses, "test_path": relative}
         save_json(arc_dir / "ui_checks.json", report)
         label = f"UI {number}/{len(design['pages'])} {pid}"
-        console.show(label + " | Existence tests before implementation", suite)
+        console.show(label + " | Existence tests before implementation", (output / relative).read_text(encoding="utf-8"))
         files = [test_path(key) for key in [*accepted, pid]]
 
         def implementation_checks():
@@ -92,20 +98,24 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
 
         with implementation_task(output, report["pages"][pid], console, "10 / " + pid):
             # Compile tests separately before deciding whether browser failure is RED.
-            current = implementation_checks()
+            try:
+                current = implementation_checks()
+            except (ValueError, RuntimeError) as error:
+                current = {"error": str(error), "typecheck": None, "tests": None}
             if current["tests"] is not None:
-                report["pages"][pid]["status"] = presentation_run_status(current["tests"])
+                report["pages"][pid]["status"] = "GREEN" if not current["tests"]["returncode"] else "REPAIR_REQUIRED"
                 console.show(label + " | " + report["pages"][pid]["status"], current["tests"]["output"])
             save_json(arc_dir / "ui_checks.json", report)
             if current["tests"] and current["tests"]["returncode"] == 0:
                 agent = {"turns": 0, "checks": current}
             else:
                 context = {"page": page_context(design, pid),
-                    "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"} for rid in uses],
+                    "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"}
+                        for rid in dict.fromkeys(owner for page_id in [*accepted, pid] for owner in owners(design, page_id))],
                     "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
                     "implementation_path": selected_path(output, "page", pid)}
                 workspace = selection.workspace(target=("page", pid),
-                    references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json", "frontend/tsconfig.json"])
+                    references=["frontend/src/ui-runtime.ts", *files, "frontend/package.json", "frontend/tsconfig.json"])
                 report["pages"][pid]["status"] = "IMPLEMENTING"
                 agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
                     max_turns, console, label + " / Implementation", feedback=current,

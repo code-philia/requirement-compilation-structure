@@ -212,7 +212,7 @@ class FrontendFlow(unittest.TestCase):
                     return {"edits": [{"path": missing[0], "content": "export function handle() {}"}]}
                 if backend_fails_once:
                     self.assertEqual(payload["feedback"][0]["checks"]["backend_tests"]["returncode"], 1)
-                    self.assertFalse(payload["files"][backend_suites[0]]["writable"])
+                    self.assertTrue(payload["files"][backend_suites[0]]["writable"])
                     return {"edits": [{"path": api_paths["API-SAVE"], "content": "export function handle() { /* API regression repaired */ }"}]}
                 repaired = True
                 return {"edits": [{"path": selected_path(self.output, "trigger", "TR-INPUT"),
@@ -322,8 +322,8 @@ class FrontendFlow(unittest.TestCase):
         self.assertNotIn("frontend/src/unrelated.ts", files)
         self.assertFalse(files["frontend/src/ui-runtime.ts"]["writable"])
 
-    def test_feedback_expands_page_dependencies_and_preserves_frozen_tests(self):
-        """A locator/compiler error exposes repairable sources, never accepted tests."""
+    def test_feedback_exposes_generated_tests_for_requirement_based_repairs(self):
+        """A locator/compiler error exposes repairable sources and generated test suites."""
         from infrastructure.shared.project.entrypoints import remember_path
         from infrastructure.shared.agent.context import SourceFiles
         page, helper = "frontend/src/screens/summary.tsx", "frontend/src/shared/count.ts"
@@ -344,8 +344,8 @@ class FrontendFlow(unittest.TestCase):
         files = workspace.state()
         self.assertTrue(files[page]["writable"])
         self.assertTrue(files[helper]["writable"])
-        self.assertFalse(files[frozen]["writable"])
-        self.assertFalse(files["frontend/tests/e2e/new.spec.ts"]["writable"])
+        self.assertTrue(files[frozen]["writable"])
+        self.assertTrue(files["frontend/tests/e2e/new.spec.ts"]["writable"])
         self.assertNotIn("output", result["ui"])
         self.assertEqual(result["typecheck"], {"returncode": 0})
 

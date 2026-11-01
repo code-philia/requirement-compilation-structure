@@ -15,7 +15,7 @@ from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, require_behavioral_red, test_path
 from infrastructure.stages.frontend.triggers.runtime import sync_triggers, prepare_trigger_paths
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend
-from infrastructure.stages.frontend.ui.testing import require_green
+from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green as require_backend_green
 from infrastructure.stages.frontend.triggers.design import api_ids, trigger_obligations, relevant_pages
 from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, model_context
@@ -43,7 +43,7 @@ def scenario_context(ui, design, rid):
 
 
 def test_run_status(result):
-    """Route existing frontend runtime failures to code repair, not to test rewriting or valid RED."""
+    """Route existing frontend runtime failures to code repair, not to valid RED."""
     if result["returncode"] == 0:
         require_green(result)
         return "GREEN"
@@ -92,7 +92,8 @@ business result. Compilation and a real browser run check the suite before code 
 IMPLEMENT_INSTRUCTIONS = """Implement the requirement's frontend triggers together against its E2E tests.
 The task supplies the current requirement's triggers, supporting page-entry behavior,
 actual frontend/backend source files. Application sources are writable according to
-files; runtime wiring, schema and frozen tests are references. You may update multiple
+files; runtime wiring and schema are references. Generated tests can be corrected against
+the requirement when their expectations, fixtures or selectors are wrong or too strict. You may update multiple
 pages, API handlers and helpers in the same edits list. Complete the functional path:
 UI event -> frontend values -> API params/query/body -> real backend response -> shared
 frontend state -> visible result and navigation. Use the actual supplied source and API
@@ -129,8 +130,8 @@ surface unexpected errors rather than fabricating successful responses.
 Pages remain presentational; avoid duplicate handlers or test detection. Repair any
 supplied writable frontend source needed for actual behavior, preserving existing UI IDs,
 styles and accepted workflows. Files permissions define editable sources; tests,
-SQL, designs and compiler wiring remain references. Related API handlers and helpers
-are supplied writable for integration fixes; backend tests remain read-only. Compilation,
+SQL, designs, shared test fixtures and compiler wiring remain references. Related API
+handlers, helpers and generated test suites are writable for evidence-based corrections. Compilation,
 functional smoke regressions and the final build accept the requirement implementation. Use their feedback to repair code
 without weakening tests or hardcoding fixture values.
 """
@@ -140,7 +141,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         model, console, report, max_turns=10, max_tests=2):
     """Implement design one requirement at a time through real-app E2E TDD.
 
-    Prepare dependencies/runtime, generate and freeze key scenario tests, then
+    Prepare dependencies/runtime, generate initial key scenario tests, then
     activate and repair the current trigger implementations before advancing. Regress
     accepted smoke scenarios, build the app, and update the caller's report."""
     output = arc_dir.parent.resolve()
@@ -152,6 +153,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     checks = E2EChecks(output, max_tests)
     checks.install_browser()
     accepted, implemented = [], set()
+    ui_checks = FrontendChecks(output)
     selection = SourceFiles(output, ui)
     backend_selection = SourceFiles(output, root="backend/src", tests_root="backend/tests")
     report["status"] = "IMPLEMENTING"
@@ -170,9 +172,11 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         targets = tids | (context_tids - implemented)
         active = implemented | context_tids
         relative = test_path(rid, output)
+        ui_files = [ui_test_path(pid) for pid in pages if (output / ui_test_path(pid)).is_file()]
         called = {aid for trigger in context["triggers"].values() for aid in api_ids(trigger)}
         context["obligations"] = {tid: trigger_obligations(trigger, backend) for tid, trigger in context["triggers"].items()}
-        context.update({"requirement": contexts[rid], "target_trigger_ids": sorted(targets),
+        context.update({"requirement": contexts[rid], "regression_requirements": [contexts[key] for key in accepted],
+            "target_trigger_ids": sorted(targets),
             "backend_apis": {aid: backend["apis"][aid] for aid in sorted(called)}})
         console.show(label + " | Scenario context", json.dumps(context, ensure_ascii=False, indent=2))
         report["requirements"][rid] = {"status": "GENERATING_TESTS", "triggers": sorted(tids),
@@ -205,6 +209,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 "max_tests": max_tests}
             test_workspace = selection.workspace(target=("e2e_test", rid), existing=relative,
                 references=["frontend/src/ui-runtime.ts", FIXTURE, "backend/tests/support/context.ts",
+                    *[test_path(key, output) for key in accepted],
                     *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
             agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
                 test_workspace, test_gate, max_turns, console, label + " / Test Generation",
@@ -221,7 +226,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 result = {"typecheck": compiled, "e2e": None}
                 if compiled["returncode"]:
                     return result
-                if workspace and any(path.startswith("backend/src/") for path in workspace.changed_paths):
+                if workspace and any(path.startswith(("backend/src/", "backend/tests/")) for path in workspace.changed_paths):
                     api_checks = BackendChecks(output)
                     result["backend_typecheck"] = api_checks.typecheck()
                     if result["backend_typecheck"]["returncode"]:
@@ -233,6 +238,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                         if result["backend_tests"]["returncode"]:
                             return result
                 result["e2e"] = checks.tests(regression_files)
+                if ui_files:
+                    result["ui"] = ui_checks.tests(ui_files)
                 return result
 
             def implementation_gate():
@@ -249,6 +256,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     if "backend_tests" in result:
                         require_backend_green(result["backend_tests"])
                     require_green(result["e2e"])
+                    if "ui" in result:
+                        require_green(result["ui"])
                 except ValueError as error:
                     raise TriggerCheckFailure("Functional integration or compilation failed", result) from error
                 return result
@@ -261,7 +270,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             report["requirements"][rid]["status"] = generated["status"]
             save_json(arc_dir / "frontend_e2e.json", report)
             # Reuse passing smoke results when test generation did not change application sources.
-            if not missing and not application_changed and generated["status"] == "GREEN":
+            if not missing and not application_changed and not ui_files and generated["status"] == "GREEN":
                 agent = {"turns": 0, "checks": current}
             else:
                 needs_implementation = bool(missing) or generated["status"] != "GREEN"
@@ -278,9 +287,10 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                         "implementation_paths": prepare_trigger_paths(output, context_tids)}
                     workspace = selection.workspace(triggers=context_tids,
                         paths=[*editable_sources(output, "frontend/src"), "frontend/src/style.css"],
-                        references=[relative, "backend/tests/support/context.ts",
+                        references=[*regression_files, *ui_files, "backend/tests/support/context.ts",
                             *source_paths(output, "frontend/src"), *source_paths(output, "backend/src")])
-                    backend_selection.include(workspace, editable_sources(output, "backend/src"))
+                    backend_selection.include(workspace, [*editable_sources(output, "backend/src"),
+                        *[path for aid in backend["apis"] if (path := selected_path(output, "backend_test", aid))]])
 
                     def repair_feedback(value):
                         return selection.feedback(workspace, backend_selection.feedback(workspace, value))
@@ -302,8 +312,6 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     files = [test_path(rid, output) for rid in tree.leaves
         if report["requirements"].get(rid, {}).get("status") != "NO_TRIGGERS"
         and (output / test_path(rid, output)).is_file()]
-    from infrastructure.stages.frontend.ui.testing import FrontendChecks, test_path as ui_test_path
-    ui_checks = FrontendChecks(output)
     ui_files = [ui_test_path(pid) for pid in ui["pages"] if (output / ui_test_path(pid)).is_file()]
     api_checks = BackendChecks(output)
     api_files = [path for aid in backend["apis"]

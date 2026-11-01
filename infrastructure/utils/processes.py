@@ -67,7 +67,7 @@ def capture_process(command, *, cwd, timeout, env=None) -> dict:
     elapsed = monotonic() - started
     label = " ".join([Path(str(command[0])).name, *(str(part) for part in command[1:])])
     print(f"[CHECK] {label} | {elapsed:.2f} s | exit {process.returncode}", flush=True)
-    return {"returncode": process.returncode, "stdout": stdout, "elapsed_seconds": elapsed,
+    return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr, "elapsed_seconds": elapsed,
         "output": (stdout + stderr)[-24000:]}
 
 

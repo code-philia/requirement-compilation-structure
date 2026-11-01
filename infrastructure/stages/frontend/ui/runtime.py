@@ -19,13 +19,16 @@ export interface UiPageProps { data: Readonly<Record<string, unknown>> }
 declare global {
   interface Window {
     __ARC_UI_FIXTURE__?: { page: string; data: Record<string, unknown> };
+    __ARC_UI_DATA__?: { page: string; data: Readonly<Record<string, unknown>> };
   }
 }
 
 export function initialPageData(page: string, defaults: Record<string, unknown>) {
   const development = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV;
   const fixture = development ? window.__ARC_UI_FIXTURE__ : undefined;
-  return fixture?.page === page ? { ...defaults, ...fixture.data } : defaults;
+  const data = fixture?.page === page ? { ...defaults, ...fixture.data } : defaults;
+  if (development) window.__ARC_UI_DATA__ = { page, data };
+  return data;
 }
 
 export function syncInput(target: EventTarget | null, bindings: Record<string, string[]>, update: (patch: Record<string, unknown>) => void) {

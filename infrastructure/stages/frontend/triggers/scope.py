@@ -1,8 +1,8 @@
 """Small model contexts without reducing the compiler's implementation or test scope.
 
 Requirement implementation and repair see every required handler together.
-Source dependencies and files named by failed checks are added as needed; tests
-remain read-only except for the current suite during test generation.
+Source dependencies and generated tests named by failed checks are added as needed;
+test corrections remain grounded in the supplied requirement contexts.
 """
 
 import json
@@ -29,4 +29,6 @@ def model_context(context, trigger_ids=None):
         "backend_apis": {aid: context["backend_apis"][aid] for aid in sorted(called)}}
     if "requirement" in context:
         result["requirement"] = context["requirement"]
+    if "regression_requirements" in context:
+        result["regression_requirements"] = context["regression_requirements"]
     return result

@@ -48,8 +48,8 @@ Do not assert random IDs/hashes/timestamps or exact wording absent from the cont
 Cast response.body from unknown as needed. HTTP 501 is not a successful business result.
 
 Use real API functions and SQLite, without mocks, skipped/focused tests or extra libraries.
-Cross-API browser workflows belong to frontend E2E tests. The current test is writable;
-other tests and infrastructure follow the files map. During test generation, repair
+Cross-API browser workflows belong to frontend E2E tests. Generated tests are repairable against requirement evidence;
+shared test utilities and infrastructure follow the files map. During test generation, repair
 supplied writable sources only to restore existing behavior or compilation, not to
 implement the new operation. The compiler compiles generated tests and runs accepted
 API regressions, then establishes assertion RED against a 501 stub before implementation.
@@ -68,7 +68,7 @@ Implement request validation, API preconditions, success/rejection responses and
 effects according to the contract and scenarios. Use the supplied connection, parameterized
 better-sqlite3 SQL, and transactions for related writes. Respect schema-generated integer
 keys and use node:crypto for UUIDs or hashing when the schema/contract requires them.
-Use the supplied test utilities and frozen tests to understand existing fixture data
+Use the supplied test utilities and generated tests to understand existing fixture data
 conventions. Preserve compatibility when reading those records. Production storage must
 satisfy the contract and keep plaintext passwords out of persistent data.
 Preserve required comparison rules and shared credential/header conventions.
@@ -77,7 +77,10 @@ Do not start a server, open another database, change schema or seed production d
 Use installed dependencies and Node standard modules. Implement the operation directly;
 no DB-access primitive layer is generated. Routing and test aliases are compiler-owned.
 Preserve unrelated behavior when repairing other supplied writable backend sources.
-Tests, SQL, designs and compiler infrastructure are references according to files.
+Generated tests can be corrected against requirement and API evidence when their
+expectations or fixtures are wrong or overly strict. Preserve required success and
+rejection coverage; do not weaken a valid assertion to accept broken behavior.
+SQL, designs, test utilities and compiler infrastructure remain references.
 The compiler runs TypeScript and current/accepted API tests. Repair implementation
 failures without weakening assertions or detecting tests to fake business behavior.
 """
@@ -146,22 +149,35 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         targets[aid] = chosen
                         files_by_api[aid] = [chosen]
                         generation_files = [targets[key] for key in [*accepted, aid]]
+                        sync_implementations(output, contracts["apis"])
                         compiled = checks.typecheck(generation_files)
                         if compiled["returncode"]:
                             raise ValueError(f"Test TypeScript compilation failed: {compiled['output']}")
                         if accepted:
                             require_green(checks.tests([targets[key] for key in accepted]))
+                        binding_source = (output / TEST_BINDINGS_PATH).read_bytes()
+                        try:
+                            save_text(output / TEST_BINDINGS_PATH,
+                                test_bindings_source(output, contracts["apis"], stubbed=[aid]))
+                            result = checks.tests(files_by_api[aid])
+                            require_red(result)
+                            report["red"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}
+                            console.show(f"{aid} | RED: contract assertions fail against the test stub", result["output"])
+                        finally:
+                            save_bytes(output / TEST_BINDINGS_PATH, binding_source)
                         return compiled
 
                     context = {
                         "api_id": aid, "api": api,
                         "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
+                        "regression_requirements": [requirement_context(tree, owner) for owner in
+                            dict.fromkeys(owner for key in accepted for owner in owners[key])],
                         "db_schema": schema["entities"], "test_path": relative if (output / relative).is_file() else None,
                         "max_tests": max_tests,
                         "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
                     }
                     workspace = selection.workspace(target=("backend_test", aid), existing=relative,
-                        references=[TEST_BINDINGS_PATH, *supplied_sources(output, api, schema)])
+                        references=[TEST_BINDINGS_PATH, *[targets[key] for key in accepted], *supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation",
                         feedback_filter=lambda value: selection.feedback(workspace, value))
@@ -169,22 +185,11 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         report["tests"].setdefault(owner, {})[aid] = targets[aid]
                     report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
                     save_json(arc_dir / "backend_tdd.json", report)
-                    entry["status"] = "CHECKING_RED"
-                    binding_source = (output / TEST_BINDINGS_PATH).read_bytes()
-                    try:
-                        save_text(output / TEST_BINDINGS_PATH,
-                            test_bindings_source(output, contracts["apis"], stubbed=[aid]))
-                        result = checks.tests(files_by_api[aid])
-                        require_red(result)
-                        report["red"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}
-                        console.show(f"{aid} | RED: contract assertions fail against the test stub", result["output"])
-                    finally:
-                        save_bytes(output / TEST_BINDINGS_PATH, binding_source)
                     entry["status"] = "IMPLEMENTING"
                     api = contracts["apis"][aid]
                     console.show(f"{aid} | Implementation context", (
                         json.dumps(api, ensure_ascii=False, indent=2)
-                        + "\nFrozen tests: " + ", ".join(files_by_api[aid])
+                        + "\nContract tests: " + ", ".join(files_by_api[aid])
                         + "\nAPI may directly operate the database; no further Primitive decomposition."
                     ))
                     regression_files = [relative for key in [*accepted, aid] for relative in files_by_api[key]]
@@ -212,10 +217,12 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         context = {
                             "api_id": aid, "api": api, "db_schema": schema["entities"],
                             "all_requirement_uses": api_requirement_uses(tree, contracts["requirements"], aid),
+                            "regression_requirements": [requirement_context(tree, owner) for owner in
+                                dict.fromkeys(owner for key in accepted for owner in owners[key])],
                             "implementation_path": selected_path(output, "api", aid),
                         }
                         workspace = selection.workspace(target=("api", aid),
-                            references=[*files_by_api[aid], *supplied_sources(output, api, schema)])
+                            references=[*regression_files, *supplied_sources(output, api, schema)])
                         agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
                             implementation_gate, max_turns, console, aid + " / Implementation", feedback=current,
                             feedback_filter=lambda value: selection.feedback(workspace, value))

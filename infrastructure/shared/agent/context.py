@@ -14,7 +14,8 @@ class SourceFiles:
 
     The available-file catalogue is compiler-only. It is never sent wholesale to
     the model. All supplied application dependencies stay writable; generated
-    wiring, runtime interfaces, and accepted tests stay read-only.
+    wiring and runtime interfaces stay read-only. Generated test suites can be
+    corrected against requirements; compiler-owned test utilities remain references.
     """
 
     def __init__(self, output, ui=None, *, root="frontend/src", tests_root="frontend/tests"):
@@ -31,6 +32,10 @@ class SourceFiles:
         return {relative for identity in identities
             if (relative := selected_path(self.output, kind, identity)) is not None}
 
+    def is_test(self, relative):
+        """Identify generated suites, leaving shared fixtures and test utilities read-only."""
+        return relative.startswith(self.tests_root + "/") and relative.endswith((".spec.ts", ".test.ts"))
+
     def include(self, workspace, paths):
         """Add selected files plus transitive local imports, preserving write protection."""
         pending = list(paths)
@@ -42,7 +47,7 @@ class SourceFiles:
             seen.add(relative)
             workspace.path(relative)
             workspace.files.add(relative)
-            if relative in self.editable:
+            if relative in self.editable or self.is_test(relative):
                 workspace.writable.add(relative)
             target = self.output / relative
             # Compiler-owned wiring can import the whole application. Supply its
@@ -74,6 +79,7 @@ class SourceFiles:
         self.editable.update(path for path in paths if path.startswith(self.root + "/"))
         self.include(workspace, paths)
         workspace.files.update(references)
+        workspace.writable.update(path for path in references if self.is_test(path))
         return workspace
 
     def feedback(self, workspace, value):

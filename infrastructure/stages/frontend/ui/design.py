@@ -27,6 +27,10 @@ bindings maps VARIABLE NAMES to {dtype, constraints, initial, source}. dtype is 
 type name: string, integer, number, boolean, array, object or null. constraints is an
 array of descriptions, initial is the application default, and source describes the
 origin. Include input, selection, result, loading or error data needed by this UI.
+Create bindings only for values that can change during the requirement's behavior.
+Fixed headings, field labels, hints, agreement text and button captions belong in
+element.prop, not bindings or fixtures. A visibility/status dependency is not display
+text: using session.state to show a username does not mean rendering "authenticated".
 
 elements maps ELEMENT IDs to {type, parent, mode, data, prop}. A page root has type
 "page" and parent=null. Other elements have a parent ELEMENT ID. Use ordinary UI types:
@@ -36,6 +40,8 @@ data is an array of VARIABLE NAMES, not variable objects. prop contains static t
 label, placeholder, input_type, options, style, href, alt or heading level. Optional
 prop.visible is a boolean or {var:VARIABLE_NAME, equals:VALUE}. Express business
 behavior through triggers later, not expression strings embedded in props.
+List genuine dynamic dependencies in data; fixed content remains in prop. A node may
+depend on state without showing that state's raw value to the user.
 
 pages maps PAGE IDs to {name, route, root, images, fixtures}. route is a URL path, root
 is an ELEMENT ID, images lists supplied image IDs. fixtures maps display-state names
