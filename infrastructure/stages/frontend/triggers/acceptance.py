@@ -36,6 +36,9 @@ There is no arbitrary test-count quota: cover the few important outcomes for thi
 
 The database fixture restores requirement-defined startup data before each test. Reuse
 those records when required; do not assume an empty database or insert duplicate identities.
+Use prerequisite records to isolate the current requirement from other requirements'
+registration/creation implementations. Arrange scenario-specific absence or conflicting
+Given states in the isolated test database; still drive the current When through the UI.
 Seed additional minimal valid Given records using the documented database/test utilities. Application
 sources, shared fixtures, original requirements and other suites are not editable.
 During generation only TypeScript is checked; missing application behavior is a useful

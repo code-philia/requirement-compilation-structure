@@ -14,7 +14,7 @@ DEFAULT_STACK = "react-express-sqlite"
 STACKS = {
     DEFAULT_STACK: {
         "templates": Path(__file__).with_name("templates"),
-        "directories": ("backend/src/db/tables",),
+        "directories": ("backend/src/db/tables", "backend/src/db/seeds"),
     },
 }
 

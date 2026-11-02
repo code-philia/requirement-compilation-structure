@@ -11,9 +11,11 @@ Every path is relative to the application working directory, with forward slashe
 The compiler resolves native paths; do not mention the host OS or absolute output path.
 Input.files already contains the most relevant sources, references and missing targets.
 Use these first. Do not re-read supplied content or read every project file. Read only
-missing definitions or relevant nearby lines. Use semantic discovery to find unknown
-symbols/paths rather than guessing or loading global inventories. Query results replace
-previous results; relevant pinned files remain. Reading does not make protected files writable.
+missing definitions or relevant nearby lines. Successful file reads remain in input.read_files
+for this task; different reads do not erase previous evidence. Edited files have their stale
+excerpts removed, so read changed sections again when needed. Do not re-read retained excerpts.
+Use semantic discovery only when input.context_kinds advertises the required scope; otherwise
+use the supplied task and allowed file tools. Reading does not make protected files writable.
 
 INCREMENTAL COMPILATION IS MANDATORY
 Each task extends the application already compiled for earlier requirements. The current

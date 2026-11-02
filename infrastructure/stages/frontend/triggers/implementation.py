@@ -71,8 +71,11 @@ expect from frontend/tests/e2e/support/context.ts with a relative .js import. Te
 async ({page,database}) callbacks. Use the supplied test utility definitions and actual
 backend source to understand fixture signatures and stored-data conventions. The fixture
 resets a real isolated SQLite database and reapplies requirement-defined startup data before
-each case. Inspect backend/src/db/seed.ts when needed; reuse required startup records and
-do not assume tables are empty. Seed only additional necessary Given rows
+each case. Inspect the relevant backend/src/db/seeds/ENTITY.sql when needed; reuse
+prerequisite records and do not assume tables are empty. Do not rerun another requirement's
+registration or content-creation flow just to prepare Given data. If this scenario requires
+absence or a conflicting state, arrange only its relevant records in the isolated database
+before the browser actions. Seed only additional necessary Given rows
 with parameterized SQL and valid values; bind booleans as 0/1. Do not use another API to
 manufacture Given state.
 

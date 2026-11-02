@@ -21,7 +21,8 @@ class AgentExhausted(ValueError):
 
 
 def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
-        max_turns: int, console, label: str, feedback=None, feedback_filter=None, context_index=None) -> dict:
+        max_turns: int, console, label: str, feedback=None, feedback_filter=None, context_index=None,
+        allow_discovery=True) -> dict:
     """Refresh files and paths; optionally select failure-related files before repair.
 
     The stage-owned feedback filter may add writable sources/read-only references
@@ -29,8 +30,11 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
     """
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
-    index = context_index if context_index is not None else project_index(files.output)
+    index = None
+    if allow_discovery:
+        index = context_index if context_index is not None else project_index(files.output)
     discovery, context_result = DiscoverySession(index), None
+    read_files = {}
     feedback = [] if feedback is None else [feedback_filter(feedback) if feedback_filter else feedback]
     for turn in range(1, max_turns + 1):
         console.show(f"{label} | Edit round {turn}/{max_turns}",
@@ -39,16 +43,27 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
         try:
             def request_model():
                 request = {"task": files.task_state(task), "files": files.state(), "feedback": feedback,
-                    "context_kinds": list(index.records()), "tools": files.schemas()}
+                    "context_kinds": list(index.records()) if index is not None else [], "tools": files.schemas()}
+                if read_files:
+                    request["read_files"] = read_files
+                if discovery.evidence:
+                    request["context_records"] = discovery.evidence
                 conventions = task_conventions(files.output, task)
                 if conventions:
                     request["task"]["shared_conventions"] = conventions
                 if context_result is not None:
                     request["context_result"] = context_result
-                return model.generate_json(instructions + "\n\n" + FILE_TOOL_RULES + "\n\n" + DISCOVERY_RULES, request)
+                rules = instructions + "\n\n" + FILE_TOOL_RULES
+                if allow_discovery:
+                    rules += "\n\n" + DISCOVERY_RULES
+                else:
+                    rules += "\nSemantic discovery is disabled for this task. Use supplied evidence and read_file only."
+                return model.generate_json(rules, request)
             response = request_model()
             while isinstance(response, dict):
                 if "context_request" in response:
+                    if not allow_discovery:
+                        raise ValueError("Semantic discovery is disabled for this task; use supplied requirements and read_file for allowed database files")
                     query = response["context_request"]
                     console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                     if isinstance(query, dict) and query.get("kind") == "file" and "ids" in query:
@@ -59,10 +74,22 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     calls = response["tool_calls"]
                     console.show(label + " | Read files", str([call.get("arguments", {}).get("path") for call in calls]))
                     try:
-                        context_result = {"tool_results": files.execute(calls)}
+                        results = files.execute(calls)
+                        observation = {"tool_results": results}
+                        for item in results:
+                            record = item["result"]
+                            excerpts = read_files.setdefault(record["path"], [])
+                            # Keep distinct ranges; a wider read replaces excerpts it covers.
+                            excerpts[:] = [old for old in excerpts if not (
+                                record["start_line"] <= old["start_line"] and record["end_line"] >= old["end_line"])]
+                            excerpts.append(record)
+                        context_result = {"read_paths": [item["result"]["path"] for item in results]}
                     except (*RESPONSE_ERRORS, OSError) as error:
                         context_result = {"tool_results": [{"error": getattr(error, "feedback", {"message": str(error)})}]}
-                    context_result = discovery.observe(context_result)
+                        observation = context_result
+                    observed = discovery.observe(observation)
+                    if observed.get("next_action"):
+                        context_result["next_action"] = observed["next_action"]
                 else:
                     break
                 response = request_model()
@@ -70,6 +97,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 console.show(label + " | Failure diagnosis", json.dumps(response["diagnosis"], ensure_ascii=False, indent=2))
             calls = response["tool_calls"]
             results = files.execute(calls)
+            for change in files.last_changes:
+                read_files.pop(change["path"], None)
             context_result = {"tool_results": results}
             changes = [change for change in files.last_changes if "/tests/" in change["path"]
                 and change["before"] is not None and change["before"] != change["after"]]

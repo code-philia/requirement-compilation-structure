@@ -1,4 +1,4 @@
-"""Step 05: implement SQLite tables, required startup data and real initialization."""
+"""Step 05: implement tables, per-table prerequisite inserts and real initialization."""
 
 import json
 from contextlib import ExitStack
@@ -14,7 +14,6 @@ from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.tasks import TaskFailures
-from infrastructure.shared.agent.discovery import project_index
 from infrastructure.utils.files import save_text
 from infrastructure.shared.project.git import checkpoint
 from infrastructure.stages.database.implementation import implement_startup_data, verify_database_runtime
@@ -109,7 +108,8 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                 related_files = [f"backend/src/db/tables/{target}.sql" for target in dependencies[name]
                     if (output_dir / f"backend/src/db/tables/{target}.sql").is_file()]
                 tools = FileTools.for_target(output_dir, "db", name, fixed_path=expected_path,
-                    references=related_files)
+                    references=related_files,
+                    readable=[f"backend/src/db/tables/{entity}.sql" for entity in order])
 
                 def generated_table():
                     if not (output_dir / expected_path).is_file():
@@ -117,7 +117,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                     return {"path": expected_path, "status": "GENERATED"}
 
                 run_file_agent(model, INSTRUCTIONS, request, tools, generated_table,
-                    max_attempts, console, f"SQL implementation {name}", context_index=project_index(output_dir))
+                    max_attempts, console, f"SQL implementation {name}", allow_discovery=False)
                 content = read_source(output_dir / expected_path)
                 proposal = {"path": expected_path, "content": content}
                 target = output_dir / expected_path
@@ -136,6 +136,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
         details={"table_order": order, "published_tables": list(implementations)})
     print(f"Database initialization wired: {initializer}", flush=True)
     if order:
+        # Revisit requirements after DDL: preserve and extend each table's prerequisite rows.
         implement_startup_data(arc_dir, schema, model, console, failures, max_attempts)
     with failures.task("database runtime"):
         verified = verify_database_runtime(arc_dir, schema, model, console, max_turns)

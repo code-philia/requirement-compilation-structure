@@ -53,6 +53,7 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
                 query = response["context_request"]
                 console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                 request["context_result"] = discovery.resolve(query)
+                request["context_records"] = discovery.evidence
                 response = model.generate_json(prompt, request)
             accepted = accept(response)
             checkpoint(task=label, action=f"Accept design proposal {attempt}",

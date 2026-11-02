@@ -39,9 +39,11 @@ required columns; do not invoke another API to manufacture fixtures. Bind boolea
 Use the supplied test utility definitions for function signatures and fixture data
 conventions. Construct fixtures compatible with those conventions and the API contract;
 do not guess helper arguments or substitute arbitrary encoded values. Database initialization
-also runs backend/src/db/seed.ts. Required startup records may already exist; inspect that
-script and reuse them where appropriate instead of assuming an empty database or inserting
-duplicate identities. Additional scenario-specific Given records belong only in the test.
+also runs backend/src/db/seed.ts, which loads backend/src/db/seeds/ENTITY.sql. Read the
+relevant insertion files when needed; reuse existing prerequisite records rather than
+assuming an empty database or inserting duplicate identities. For creation/rejection cases
+requiring absence or a different Given state, arrange only those records in the isolated
+test database before invoking the operation. Do not rely on another API's implementation.
 
 Within max_tests, prioritize meaningful success and requirement-defined rejection
 branches. Combine related assertions rather than generating a separate case for each
@@ -88,6 +90,8 @@ Preserve required comparison rules and shared credential/header conventions.
 Do not start a server, open another database, change schema or seed production data.
 Use installed dependencies and Node standard modules. Implement the operation directly;
 no DB-access primitive layer is generated. Test aliases are compiler-owned.
+Predefined credentials in seeds/*.sql use seed_password_hash; its scrypt encoding is
+defined in backend/src/db/seed.ts and must remain readable by credential handlers.
 Read and edit task.api_wiring.registry to import this handle and register its actual
 Express route, adapting params/query/body/headers and status/body/headers between HTTP
 and the handler contract. Inspect app/server wiring when needed. The compiler will not

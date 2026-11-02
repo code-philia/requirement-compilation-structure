@@ -11,7 +11,9 @@ DISCOVERY_RULES = '''Context contains selected excerpts, never a complete global
 When evidence is missing, return only {"context_request": {"kind": "schema",
 "query": "session credential"}} to discover candidates, or use "ids": ["Account.id"]
 to read exact records. Available kinds are listed in context_kinds. Search returns
-IDs/descriptions, not definitions; read needed IDs before modifying or calling them.
+IDs/descriptions, not definitions, except requirement searches return complete records.
+Read needed IDs before modifying or calling other kinds of records.
+Each query searches only its named kind; do not search unrelated collections for context.
 Use offset to inspect another search page. A miss is not proof of absence. Search
 shared concepts before creating new entities/APIs; reuse canonical definitions.
 For schema, read Entity.field for a narrow field definition; for large pages read
@@ -22,8 +24,10 @@ Excerpts return content, start_line, end_line and total_lines. File-writing agen
 read_file instead of kind=file exact reads; semantic design tasks may use these excerpts.
 kind=requirement reads original requirement scenarios; kind=test_requirement with a
 test file path as an ID finds its original requirement owner IDs. Read the relevant requirement before
-changing a regression test; never infer its intended behavior from implementation. Query results replace
-previous results. Return your normal stage output when enough evidence is available.
+changing a regression test; never infer its intended behavior from implementation.
+Exact records are retained in context_records for the current task. File-editing tasks
+also retain read_file excerpts in read_files. Use retained evidence instead of querying
+it again. Return your normal stage output when enough evidence is available.
 There is no fixed query-count or character cap. Prefer exact reads after candidate
 searches. Do not repeat searches returning the same candidates: read their IDs, or
 produce the stage output using the available evidence. Query errors are feedback,
@@ -40,6 +44,7 @@ class DiscoverySession:
     def __init__(self, index):
         self.index = index
         self.results = {}
+        self.evidence = {}
 
     def resolve(self, query):
         try:
@@ -47,6 +52,8 @@ class DiscoverySession:
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
             result = {'error': str(error), 'context_kinds': list(self.index.records()),
                 'notice': 'Correct the query or return the normal stage output.'}
+        if result.get('records'):
+            self.evidence.setdefault(result['kind'], {}).update(deepcopy(result['records']))
         return self.observe(result)
 
     def observe(self, result):
@@ -139,6 +146,9 @@ class ContextIndex:
                 candidates.append({'id': key, 'description': str(description)[:300]})
             result = {'candidates': candidates, 'next_offset': offset + 6 if offset + 6 < len(scores) else None,
                 'notice': 'Lexical candidates only. A miss does not establish absence.'}
+            if kind == 'requirement':
+                result['records'] = {item['id']: deepcopy(records[item['id']]) for item in candidates}
+                del result['candidates']
         return {'kind': kind, **result}
 
 
