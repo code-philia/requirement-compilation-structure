@@ -70,7 +70,9 @@ Use edit_file to create the .spec.ts target under frontend/tests/e2e using task.
 expect from frontend/tests/e2e/support/context.ts with a relative .js import. Tests use
 async ({page,database}) callbacks. Use the supplied test utility definitions and actual
 backend source to understand fixture signatures and stored-data conventions. The fixture
-resets a real isolated SQLite database before each case. Seed only necessary Given rows
+resets a real isolated SQLite database and reapplies requirement-defined startup data before
+each case. Inspect backend/src/db/seed.ts when needed; reuse required startup records and
+do not assume tables are empty. Seed only additional necessary Given rows
 with parameterized SQL and valid values; bind booleans as 0/1. Do not use another API to
 manufacture Given state.
 
@@ -100,7 +102,9 @@ frontend state -> visible result and navigation. Use the actual supplied source 
 contract to resolve field names, types, status branches and stored-data conventions.
 Maintain HTTP requests in task.api_wiring.client, which exports
 callApi(apiId, request) => Promise<UiApiResponse>. Read its existing code and preserve
-previous APIs. Implement the current canonical API method/path and serialize actual
+previous APIs. Extend its existing request cases/catalogue; never rebuild it for only
+this requirement. Extend createInitialState without deleting other requirements' keys.
+Implement the current canonical API method/path and serialize actual
 params/query/body/headers, credentials and response status/body/headers. Resolve route
 placeholders with encoded parameter values; do not send literal {name} or :name.
 Handle empty responses and browser-managed cookies correctly. The compiler only creates

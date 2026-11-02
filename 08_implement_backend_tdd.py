@@ -38,7 +38,10 @@ a fresh real SQLite database. Seed Given state directly with parameterized SQL, 
 required columns; do not invoke another API to manufacture fixtures. Bind booleans as 0/1.
 Use the supplied test utility definitions for function signatures and fixture data
 conventions. Construct fixtures compatible with those conventions and the API contract;
-do not guess helper arguments or substitute arbitrary encoded values. No account is preseeded.
+do not guess helper arguments or substitute arbitrary encoded values. Database initialization
+also runs backend/src/db/seed.ts. Required startup records may already exist; inspect that
+script and reuse them where appropriate instead of assuming an empty database or inserting
+duplicate identities. Additional scenario-specific Given records belong only in the test.
 
 Within max_tests, prioritize meaningful success and requirement-defined rejection
 branches. Combine related assertions rather than generating a separate case for each
@@ -89,7 +92,9 @@ Read and edit task.api_wiring.registry to import this handle and register its ac
 Express route, adapting params/query/body/headers and status/body/headers between HTTP
 and the handler contract. Inspect app/server wiring when needed. The compiler will not
 regenerate these files. Preserve all existing routes and middleware; insert/update this
-API without replacing unrelated registrations or introducing duplicate routes. Translate
+API without replacing unrelated registrations or introducing duplicate routes. Extend
+the existing registerApis implementation; never rebuild its body or route map with only
+the current API. Earlier requirement implementations remain mandatory. Translate
 contract path placeholders (including {name}) to syntax accepted by the installed router;
 pass concrete parameter names and values to handle. Preserve cookies and error handling.
 Use read_file with optional line ranges, to inspect related wiring; read only the relevant missing

@@ -72,6 +72,10 @@ def edit_file(files, path, operation, new_content, old_content=""):
         if operation == "replace":
             if not old_content:
                 raise FileToolError("INVALID_ARGUMENTS", "replace requires nonempty exact old_content", path)
+            if current.strip() and old_content.strip() == current.strip():
+                raise FileToolError("WHOLE_FILE_REPLACEMENT_NOT_ALLOWED",
+                    "Incremental compilation forbids replacing a whole existing file. "
+                    "Use a smaller unique span and preserve earlier requirements, registrations and state.", path)
             first = current.find(old_content)
             count = 0 if first < 0 else (2 if current.find(old_content, first + 1) >= 0 else 1)
             if count != 1:
@@ -90,5 +94,4 @@ def edit_file(files, path, operation, new_content, old_content=""):
         result["requested_path"] = requested
         result["notice"] = "Adapted to this task's required destination; use path in future calls and imports"
     return result
-
 

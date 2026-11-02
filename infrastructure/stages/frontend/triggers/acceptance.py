@@ -34,7 +34,9 @@ For required rejection-without-writes, verify the relevant persisted result is u
 Prefer user-visible outcomes over unspecified cookie/hash encodings or storage strategies.
 There is no arbitrary test-count quota: cover the few important outcomes for this task.
 
-Seed minimal valid Given records using the documented database/test utilities. Application
+The database fixture restores requirement-defined startup data before each test. Reuse
+those records when required; do not assume an empty database or insert duplicate identities.
+Seed additional minimal valid Given records using the documented database/test utilities. Application
 sources, shared fixtures, original requirements and other suites are not editable.
 During generation only TypeScript is checked; missing application behavior is a useful
 acceptance failure, never a reason to weaken assertions. Use edit_file to create or repair only test_path under frontend/tests/e2e/acceptance.'''

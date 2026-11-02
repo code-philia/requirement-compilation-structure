@@ -4,7 +4,7 @@ import { initializeDatabase } from "./initialize.js";
 const connection = createDatabaseClient();
 try {
   initializeDatabase(connection);
-  console.log("Database tables initialized.");
+  console.log("Database tables and required startup data initialized.");
 } finally {
   connection.close();
 }

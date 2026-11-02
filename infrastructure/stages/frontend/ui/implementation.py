@@ -24,7 +24,9 @@ component Page accepting UiPageProps, imported from frontend/src/ui-runtime.ts u
 a relative import. The compiler owns routing and shared runtime interfaces.
 Variables and their types/constraints are declared in element.data. Implement requirement-based
 state initialization in task.state_module, exporting createInitialState(): Record<string, unknown>.
-Preserve previously implemented state. Initialize unloaded remote results safely without
+Extend the existing createInitialState implementation; never replace its returned object
+with only this page's keys. Preserve previously implemented state and other pages' controls.
+Initialize unloaded remote results safely without
 inventing selected records or marking an unread result ready. Apply explicit requirement
 defaults; reference-image example content is not a production default. The compiler creates
 an empty state module only when absent and never regenerates its implementation.

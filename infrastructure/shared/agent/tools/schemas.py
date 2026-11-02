@@ -17,9 +17,9 @@ TOOL_REGISTRY = {
             "end_line": {"type": "integer", "minimum": 1}}, ["path"]), "read"),
     "edit_file": (edit_file, definition("edit_file", "Create a new file, replace one unique exact text span, "
         "or prepend/append to an existing file. Paths are relative to the project working directory. "
-        "replace needs old_content copied from supplied/read source; it need not be the whole file.",
+        "replace needs a local old_content span copied from supplied/read source. "
+        "Never replace a whole existing file; preserve all earlier requirements and extend shared code incrementally.",
         {"path": STRING, "operation": {"type": "string", "enum": ["create", "replace", "prepend", "append"]},
             "old_content": STRING, "new_content": STRING}, ["path", "operation", "new_content"]), "write"),
 }
-
 

@@ -1,4 +1,4 @@
-"""Step 05: implement SQLite tables and repair real initialization/startup failures."""
+"""Step 05: implement SQLite tables, required startup data and real initialization."""
 
 import json
 from contextlib import ExitStack
@@ -17,7 +17,7 @@ from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.shared.agent.discovery import project_index
 from infrastructure.utils.files import save_text
 from infrastructure.shared.project.git import checkpoint
-from infrastructure.stages.database.implementation import verify_database_runtime
+from infrastructure.stages.database.implementation import implement_startup_data, verify_database_runtime
 from infrastructure.utils.files import read_source
 
 
@@ -135,6 +135,8 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
     checkpoint(output_dir, stage="05", task="database initializer", action="Publish ordered SQL initialization",
         details={"table_order": order, "published_tables": list(implementations)})
     print(f"Database initialization wired: {initializer}", flush=True)
+    if order:
+        implement_startup_data(arc_dir, schema, model, console, failures, max_attempts)
     with failures.task("database runtime"):
         verified = verify_database_runtime(arc_dir, schema, model, console, max_turns)
         # The runtime owner can repair tables whose initial generation failed.
@@ -151,8 +153,8 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
 
 
 def main() -> None:
-    parser = create_parser("Step 05: Implement DB Tables")
-    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per table; including the first proposal (default: 10)")
+    parser = create_parser("Step 05: Implement DB Tables and Required Startup Data")
+    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per table or startup-data requirement (default: 10)")
     parser.add_argument("--max-turns", type=int, default=10, help="Maximum real database/startup repair rounds")
     args = parser.parse_args()
     with ExitStack() as stack:

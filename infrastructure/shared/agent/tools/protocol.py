@@ -15,11 +15,25 @@ missing definitions or relevant nearby lines. Use semantic discovery to find unk
 symbols/paths rather than guessing or loading global inventories. Query results replace
 previous results; relevant pinned files remain. Reading does not make protected files writable.
 
+INCREMENTAL COMPILATION IS MANDATORY
+Each task extends the application already compiled for earlier requirements. The current
+requirement and supplied excerpts are a partial view, never a replacement specification
+for the entire application. Earlier behavior remains required even when omitted here.
+Read the relevant existing code and make local additions or corrections. Never rewrite
+an existing file from scratch, replace its full contents, empty a shared function and
+rebuild it for only this requirement, or delete earlier code to make room for new code.
+Preserve earlier imports, exports, functions, routes, request cases, state keys, seed
+records and test coverage. Extend existing shared functions/maps instead of replacing
+them with a collection containing only the newest requirement. Corrections may change
+the responsible local logic, but must preserve all previously required behavior.
+This applies equally to application sources, shared wiring, initialization and tests.
+
 edit_file is the only source-writing tool:
 - create: new_content is complete new code; the file must not exist.
 - replace: old_content is nonempty and occurs exactly once. Copy it exactly from supplied
   content or read_file, including whitespace/newlines. new_content replaces that span;
-  empty new_content deletes it. Expand the matching context only to make it unique.
+  empty new_content deletes that local span only when correcting the relevant behavior.
+  Whole-file replacement is forbidden. Expand matching context only to make it unique.
 - prepend/append: insert new_content at an existing file boundary, preserving everything else.
 For create/prepend/append, omit old_content or use an empty string. Include needed newlines.
 A fragment read is sufficient for a unique replacement; no full-file read is required.
