@@ -1,4 +1,5 @@
 """Discovery is bounded, exact reads are current, and queries do not publish edits."""
+from tool_fixtures import propose_files
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,7 +7,7 @@ from unittest.mock import Mock, patch
 from infrastructure.shared.agent.discovery import ContextIndex, DiscoverySession, DiscoveryStalled
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.shared.agent.files import FileWorkspace
+from infrastructure.shared.agent.tools import FileTools
 
 
 class ContextDiscovery(unittest.TestCase):
@@ -44,10 +45,10 @@ class ContextDiscovery(unittest.TestCase):
             (root / path).write_text('broken')
             model = Mock()
             model.generate_json.side_effect = [
-                {'context_request': {'kind': 'file', 'ids': [path]}},
-                {'edits': [{'path': path, 'content': 'fixed'}]}]
+                {'tool_calls': [{'tool': 'read_file', 'arguments': {'path': path}}]},
+                propose_files(root, [{'path': path, 'content': 'fixed'}])]
             gate = Mock(return_value={})
-            run_file_agent(model, '', {}, FileWorkspace(root, []), gate, 1, Mock(), 'test')
+            run_file_agent(model, '', {}, FileTools(root, allow_write=lambda path: path.startswith(('frontend/src/', 'backend/src/'))), gate, 1, Mock(), 'test')
             self.assertEqual((root / path).read_text(), 'fixed')
             gate.assert_called_once()
 
@@ -91,10 +92,10 @@ class ContextDiscovery(unittest.TestCase):
             paths = [f'frontend/src/helper{i}.ts' for i in range(7)]
             for number, path in enumerate(paths):
                 (root / path).write_text(f'export const value{number} = {number};')
-            responses = [{'context_request': {'kind': 'file', 'ids': [path]}} for path in paths]
-            responses.append({'edits': [{'path': paths[-1], 'content': 'fixed'}]})
+            responses = [{'tool_calls': [{'tool': 'read_file', 'arguments': {'path': path}}]} for path in paths]
+            responses.append(propose_files(root, [{'path': paths[-1], 'content': 'fixed'}]))
             model = Mock(generate_json=Mock(side_effect=responses))
-            result = run_file_agent(model, '', {'requirement': 'x' * 190000}, FileWorkspace(root, []),
+            result = run_file_agent(model, '', {'requirement': 'x' * 190000}, FileTools(root, allow_write=lambda path: path.startswith(('frontend/src/', 'backend/src/'))),
                 Mock(return_value={}), 1, Mock(), 'current task')
             self.assertEqual(result['turns'], 1)
             self.assertEqual((root / paths[-1]).read_text(), 'fixed')
@@ -121,7 +122,7 @@ class ContextDiscovery(unittest.TestCase):
             self.assertEqual(index.query({'kind': 'file', 'ids': ['../unknown'],
                 'start_line': 1})['missing'], ['../unknown'])
 
-    def test_excerpt_does_not_silently_supply_whole_file_or_allow_replacement(self):
+    def test_excerpt_can_be_replaced_without_loading_the_whole_file(self):
         from copy import deepcopy
         from infrastructure.utils.files import save_text
         with tempfile.TemporaryDirectory() as directory:
@@ -130,21 +131,18 @@ class ContextDiscovery(unittest.TestCase):
             save_text(root / path, 'secret first line\nvisible middle\nsecret last line\n')
             requests = []
             responses = [
-                {'context_request': {'kind': 'file', 'ids': [path], 'start_line': 2, 'end_line': 2}},
-                {'edits': [{'path': path, 'content': 'truncated'}]},
-                {'context_request': {'kind': 'file', 'ids': [path]}},
-                {'edits': [{'path': path, 'content': 'first\nupdated\nlast\n'}]}]
+                {'tool_calls': [{'tool': 'read_file', 'arguments': {'path': path, 'start_line': 2, 'end_line': 2}}]},
+                {'tool_calls': [{'tool': 'edit_file', 'arguments': {'path': path, 'operation': 'replace',
+                    'old_content': 'visible middle', 'new_content': 'updated middle'}}]}]
             def generate(_, payload):
                 requests.append(deepcopy(payload))
                 return responses[len(requests) - 1]
             gate = Mock(return_value={})
-            run_file_agent(Mock(generate_json=generate), '', {}, FileWorkspace(root, []),
-                gate, 2, Mock(), 'wiring')
+            run_file_agent(Mock(generate_json=generate), '', {}, FileTools(root, allow_write=lambda name: name == path),
+                gate, 1, Mock(), 'wiring')
             excerpt_request = requests[1]
             self.assertNotIn(path, excerpt_request['files'])
-            self.assertEqual(excerpt_request['context_result']['records'][path]['content'], 'visible middle\n')
+            self.assertEqual(excerpt_request['context_result']['tool_results'][0]['result']['content'], 'visible middle\n')
             self.assertNotIn('secret', str(excerpt_request))
-            self.assertIn('not writable', requests[2]['feedback'][0]['error'])
-            self.assertTrue(requests[3]['files'][path]['writable'])
             gate.assert_called_once()
-            self.assertEqual((root / path).read_text(), 'first\nupdated\nlast\n')
+            self.assertEqual((root / path).read_text(), 'secret first line\nupdated middle\nsecret last line\n')

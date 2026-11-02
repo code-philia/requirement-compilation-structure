@@ -11,7 +11,8 @@ from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.logging import console_log
-from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.loop import run_file_agent
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.shared.agent.discovery import project_index
 from infrastructure.utils.files import save_text
@@ -21,11 +22,13 @@ from infrastructure.utils.files import read_source
 
 
 # --- Extension point 05A: SQL lowering policy ---------------------------------
-# The model writes DDL; Python publishes it at the supplied table path.
+# The model writes DDL through the shared edit_file tool at the supplied table path.
 # The real initializer and compiled startup are checked and repaired in this pass.
 INSTRUCTIONS = """Implement entity as SQLite DDL for the compiler-selected output_path.
-Return {"content": "complete SQL file contents"}. The compiler writes output_path.
-The content string contains SQL text without Markdown fences.
+Use edit_file to create output_path under backend/src/db/tables, or replace exact
+existing SQL when rerunning. This task owns this one fixed SQL path. Read the supplied
+related SQL first; use read_file only for missing relevant evidence. The compiler adapts
+an unambiguous misplaced creation to output_path and reports the actual path.
 
 Create the current entity with CREATE TABLE IF NOT EXISTS, preserving its entity and
 field names and quoting identifiers with double quotes. Implement the supplied keys,
@@ -99,17 +102,25 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                 expected_path = f"backend/src/db/tables/{name}.sql"
                 request = {
                     "entity_name": name, "entity": entity, "output_path": expected_path,
-                    "referenced_tables": referenced,
+                    "referenced_tables": {target: {**record, "implementation":
+                        {"path": record["implementation"]["path"]} if record["implementation"] else None}
+                        for target, record in referenced.items()},
                 }
-                content, _ = propose_json(model, INSTRUCTIONS, request,
-                    lambda response: response["content"].rstrip() + "\n", console,
-                    f"SQL implementation {name}", max_attempts, context_index=project_index(arc_dir.parent))
+                related_files = [f"backend/src/db/tables/{target}.sql" for target in dependencies[name]
+                    if (output_dir / f"backend/src/db/tables/{target}.sql").is_file()]
+                tools = FileTools.for_target(output_dir, "db", name, fixed_path=expected_path,
+                    references=related_files)
+
+                def generated_table():
+                    if not (output_dir / expected_path).is_file():
+                        raise ValueError("Create the current SQL output_path with edit_file")
+                    return {"path": expected_path, "status": "GENERATED"}
+
+                run_file_agent(model, INSTRUCTIONS, request, tools, generated_table,
+                    max_attempts, console, f"SQL implementation {name}", context_index=project_index(output_dir))
+                content = read_source(output_dir / expected_path)
                 proposal = {"path": expected_path, "content": content}
-                console.show(f"{label} | 3. Model file proposal", expected_path + "\n\n" + content)
                 target = output_dir / expected_path
-                if not target.resolve().is_relative_to(output_dir):
-                    raise ValueError(f"Implementation path escapes the output directory: {expected_path}")
-                save_text(target, content)
                 implementations[name] = proposal
                 console.show(f"{label} | 4. Table implementation saved", (
                     f"{target}\n\nSQL proposal saved. This pass checks real initialization and startup next."

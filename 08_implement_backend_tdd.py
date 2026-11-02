@@ -25,7 +25,7 @@ TEST_INSTRUCTIONS = """Write one canonical test suite for task.api, whose contra
 implementing the API. Base expected outcomes on the requirement scenarios, API I/O,
 preconditions, postconditions and DB effects. Use db_schema and supplied SQL for fixtures.
 
-Create a .test.ts file using task.new_file, or update test_path. Use node:test with
+Use edit_file to create a .test.ts file under backend/tests using task.file_target, or update test_path. Use node:test with
 {test}, node:assert/strict as assert, and async test callbacks. Import the function
 named api.signature.name from api_module; the compiler maps it to the API implementation.
 Its signature is (request: ApiRequest, connection) => Promise<ApiResponse>.
@@ -67,7 +67,7 @@ behavior is expected RED; fix test/fixture errors without deleting that behavior
 """
 
 IMPLEMENT_INSTRUCTIONS = """Implement task.api according to its canonical contract against its generated tests.
-Create the task.new_file target or update implementation_path. Export:
+Use edit_file to create task.file_target under backend/src or repair implementation_path. Export:
 export async function handle(request: ApiRequest, connection: Database.Database): Promise<ApiResponse>.
 The export is always handle; api.signature.name is the compiler-provided business alias
 used by test bindings. Import ApiRequest and ApiResponse from backend/src/api/types.ts
@@ -92,8 +92,8 @@ regenerate these files. Preserve all existing routes and middleware; insert/upda
 API without replacing unrelated registrations or introducing duplicate routes. Translate
 contract path placeholders (including {name}) to syntax accepted by the installed router;
 pass concrete parameter names and values to handle. Preserve cookies and error handling.
-Use exact file queries, optionally line ranges, to inspect related wiring; read the whole
-file before a whole-file replacement. Do not start the production server in source code.
+Use read_file with optional line ranges, to inspect related wiring; read only the relevant missing
+lines and use a unique exact edit_file replacement. Do not start the production server in source code.
 Preserve unrelated behavior when repairing other supplied writable backend sources.
 Generated tests can be corrected against requirement and API evidence when their
 expectations or fixtures are wrong or overly strict. Preserve required success and

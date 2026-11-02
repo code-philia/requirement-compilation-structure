@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from infrastructure.shared.agent.tasks import StageIncomplete
 from infrastructure.utils.files import save_json
 from test_schema_evolution import field
+from tool_fixtures import propose_files
 
 
 class DesignContinuation(unittest.TestCase):
@@ -78,9 +79,9 @@ class DesignContinuation(unittest.TestCase):
             save_json(arc / 'db_schema.json', schema)
             calls = []
             def proposal(_, request):
-                name = request['entity_name']
+                name = request['task']['entity_name']
                 calls.append(name)
-                return {} if name == 'Note' else {'content': 'CREATE TABLE Other (id TEXT);'}
+                return {} if name == 'Note' else propose_files(output, [{'path': request['task']['output_path'], 'content': 'CREATE TABLE Other (id TEXT);'}])
             with patch.object(stage, 'TextModel', return_value=Mock(generate_json=proposal)), \
                     patch.object(stage, 'verify_database_runtime', side_effect=ValueError('Incomplete table implementations')), \
                     patch.object(stage, 'DemoConsole', return_value=Mock()):

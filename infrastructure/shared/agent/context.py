@@ -5,7 +5,8 @@ import posixpath
 import re
 
 from infrastructure.shared.agent.feedback import compact_feedback
-from infrastructure.shared.agent.files import API_WIRING, FileWorkspace, editable_sources, source_paths
+from infrastructure.shared.agent.files import API_WIRING, editable_application_path, editable_sources, source_paths
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.utils.files import read_source
 
@@ -72,8 +73,9 @@ class SourceFiles:
         self.sources.update(source_paths(self.output, self.root))
         self.editable.update(editable_sources(self.output, self.root))
         self.tests.update(source_paths(self.output, self.tests_root))
-        workspace = (FileWorkspace.for_target(self.output, *target, existing=existing)
-            if target else FileWorkspace(self.output, ()))
+        workspace = (FileTools.for_target(self.output, *target, existing=existing)
+            if target else FileTools(self.output, ()))
+        workspace.allow_write = lambda path: editable_application_path(self.output, path)
         paths = set(paths) | self.paths("trigger", triggers)
         paths.update(workspace.writable)
         # New handlers may have been created since this catalogue was built.
@@ -119,7 +121,7 @@ class SourceFiles:
         workspace.files = {path for path in workspace.files if not path.startswith(self.layer + "/")} | base_files
         workspace.writable = {path for path in workspace.writable if not path.startswith(self.layer + "/")} | base_writable
         if workspace.target:
-            path = selected_path(self.output, *workspace.target)
+            path = selected_path(self.output, workspace.target.kind, workspace.target.identity)
             if path:
                 workspace.files.add(path)
                 workspace.writable.add(path)

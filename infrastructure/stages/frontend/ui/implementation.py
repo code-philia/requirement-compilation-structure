@@ -19,7 +19,7 @@ from infrastructure.utils.files import save_json, save_text
 from infrastructure.shared.project.git import checkpoint
 
 INSTRUCTIONS = """Implement the current page from its UI/data design, requirement uses and visual_references.
-Create the task.new_file target or update implementation_path. Export a named React
+Use edit_file to create task.file_target under frontend/src or repair implementation_path. Export a named React
 component Page accepting UiPageProps, imported from frontend/src/ui-runtime.ts using
 a relative import. The compiler owns routing, initial data and display fixtures.
 

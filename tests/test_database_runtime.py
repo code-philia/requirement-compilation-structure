@@ -1,4 +1,5 @@
 """Real SQLite/startup failures must be repaired by the database-owning task."""
+from tool_fixtures import propose_files
 
 from contextlib import redirect_stdout
 from importlib import import_module
@@ -12,7 +13,8 @@ from unittest.mock import Mock, patch
 
 from infrastructure.shared.agent.tasks import StageIncomplete
 from infrastructure.shared.project.initialize import initialize_project
-from infrastructure.stages.database.implementation import DatabaseWorkspace, verify_database_runtime
+from infrastructure.shared.agent.tools import FileTools
+from infrastructure.stages.database.implementation import verify_database_runtime
 from infrastructure.stages.database.runtime import initializer_source
 from infrastructure.stages.database.testing import DatabaseChecks
 from infrastructure.utils.files import save_json, save_text
@@ -57,9 +59,10 @@ class DatabaseRepairProtocol(unittest.TestCase):
                     self.assertNotIn(other, payload['files'])
                     self.assertIn('Note', payload['task']['entities'])
                     self.assertIn('backend/src/db/tables/Note.sql', payload['files'])
-                    return {'context_request': {'kind': 'file', 'ids': [other]}}
-                self.assertTrue(payload['files'][other]['writable'])
-                return {'edits': [{'path': other, 'content': SQL.replace('Note', 'Audit')}]}
+                    return {'tool_calls': [{'tool': 'read_file', 'arguments': {'path': other}}]}
+                self.assertNotIn(other, payload['files'])
+                self.assertTrue(payload['context_result']['tool_results'][0]['result']['writable'])
+                return propose_files(output, [{'path': other, 'content': SQL.replace('Note', 'Audit')}])
             checks = Mock()
             checks.run.side_effect = [{'returncode': 1, 'error': 'Missing table: Note\n at initialize'},
                 {'returncode': 0, 'status': 'GREEN'}]
@@ -74,10 +77,10 @@ class DatabaseRepairProtocol(unittest.TestCase):
             output = Path(temporary)
             path = 'backend/src/db/tables/Note.sql'
             save_text(output / path, BAD_SQL)
-            workspace = DatabaseWorkspace(output, [], [path])
+            workspace = FileTools(output, allow_write=lambda candidate: candidate == path)
             workspace.files.add(path)
             self.assertTrue(workspace.state()[path]['writable'])
-            workspace.apply({'edits': [{'path': path, 'content': SQL}]})
+            workspace.execute(propose_files(output, [{'path': path, 'content': SQL}])["tool_calls"])
             from infrastructure.shared.agent.context import SourceFiles
             ordinary = SourceFiles(output, root='backend/src', tests_root='backend/tests').workspace(references=[path])
             self.assertFalse(ordinary.state()[path]['writable'])
@@ -147,9 +150,8 @@ class RealDatabaseRuntime(unittest.TestCase):
                     self.assertIn('repeated initialization', json.dumps(payload['feedback']))
                 self.assertTrue(payload['files']['backend/src/db/tables/Note.sql']['writable'])
                 self.assertTrue(payload['files']['backend/src/db/initialize.ts']['writable'])
-                return {'diagnosis': {'cause': 'implementation', 'reason': 'SQLite rejects subqueries in Note CHECK'},
-                    'edits': [{'path': 'backend/src/db/tables/Note.sql',
-                        'content': SQL.replace('IF NOT EXISTS ', '') if len(requests) == 1 else SQL}]}
+                return propose_files(output, [{'path': 'backend/src/db/tables/Note.sql',
+                        'content': SQL.replace('IF NOT EXISTS ', '') if len(requests) == 1 else SQL}], diagnosis={'cause': 'implementation', 'reason': 'SQLite rejects subqueries in Note CHECK'})
             report = verify_database_runtime(arc, schema(), Mock(generate_json=repair), Mock(), max_turns=2)
             self.assertEqual(report['status'], 'GREEN')
             self.assertEqual(report['repair_turns'], 2)
@@ -164,7 +166,7 @@ class RealDatabaseRuntime(unittest.TestCase):
             self.assertIn('= [];', (output / path).read_text())
             def repair(instructions, payload):
                 self.assertIn('Missing table: Note', json.dumps(payload['feedback']))
-                return {'edits': [{'path': path, 'content': initializer_source({'Note': {'path': 'Note.sql'}})}]}
+                return propose_files(output, [{'path': path, 'content': initializer_source({'Note': {'path': 'Note.sql'}})}])
             report = verify_database_runtime(arc, schema(), Mock(generate_json=repair), Mock(), max_turns=1)
             self.assertEqual(report['status'], 'GREEN')
             self.assertIn('Note.sql', (output / path).read_text())
@@ -178,7 +180,7 @@ class RealDatabaseRuntime(unittest.TestCase):
             def repair(instructions, payload):
                 self.assertIn('fresh server startup', json.dumps(payload['feedback']))
                 self.assertTrue(payload['files'][path]['writable'])
-                return {'edits': [{'path': path, 'content': source}]}
+                return propose_files(output, [{'path': path, 'content': source}])
             report = verify_database_runtime(arc, schema(), Mock(generate_json=repair), Mock(), max_turns=1)
             self.assertEqual(report['status'], 'GREEN')
 
@@ -187,7 +189,7 @@ class RealDatabaseRuntime(unittest.TestCase):
         with TemporaryDirectory() as directory, redirect_stdout(StringIO()):
             output, arc = self.workspace(directory)
             def response(instructions, payload):
-                return {'content': BAD_SQL} if 'entity_name' in payload else {'edits': []}
+                return propose_files(output, [{'path': payload['task']['output_path'], 'content': BAD_SQL}]) if 'entity_name' in payload['task'] else propose_files(output, [])
             with patch.object(stage, 'TextModel', return_value=Mock(generate_json=response)):
                 with self.assertRaises(StageIncomplete):
                     stage.implement_db(arc, max_attempts=1, max_turns=1)
@@ -204,13 +206,13 @@ class RealDatabaseRuntime(unittest.TestCase):
             path = 'backend/src/db/tables/Note.sql'
             (output / path).unlink()
             def response(instructions, payload):
-                if 'entity_name' in payload:
+                if 'entity_name' in payload['task']:
                     return {}
                 self.assertIn('Note', payload['task']['entities'])
                 self.assertIsNone(payload['files'][path]['content'])
-                return {'edits': [{'path': path, 'content': SQL},
+                return propose_files(output, [{'path': path, 'content': SQL},
                     {'path': 'backend/src/db/initialize.ts',
-                        'content': initializer_source({'Note': {'path': 'Note.sql'}})}]}
+                        'content': initializer_source({'Note': {'path': 'Note.sql'}})}])
             with patch.object(stage, 'TextModel', return_value=Mock(generate_json=response)):
                 result = stage.implement_db(arc, max_attempts=1, max_turns=1)
             self.assertEqual(result['Note']['content'].strip(), SQL)

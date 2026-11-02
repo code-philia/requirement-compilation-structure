@@ -1,1 +1,1 @@
-"""Scoped file contexts, whole-file JSON edits and bounded repair loops."""
+"""Task-local source context, shared file tools and bounded repair loops."""

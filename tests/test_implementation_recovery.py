@@ -1,4 +1,5 @@
 """Failed tasks leave evidence, restore sources, and do not stop independent work."""
+from tool_fixtures import propose_files
 
 from contextlib import redirect_stdout
 from importlib import import_module
@@ -11,7 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from infrastructure.compiler import Compiler
-from infrastructure.shared.agent.files import FileWorkspace
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import AgentExhausted, run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks
 from infrastructure.shared.project.entrypoints import remember_path, selected_path
@@ -28,13 +29,13 @@ class ImplementationRecovery(unittest.TestCase):
             save_bytes(root / 'backend/src/shared.ts', original)
             remember_path(root, 'api', 'ACCEPTED', 'backend/src/shared.ts')
             index = (root / '.arc/implementation_paths.json').read_bytes()
-            workspace = FileWorkspace.for_target(root, 'api', 'FAILED', writable=['backend/src/shared.ts'])
+            workspace = FileTools.for_target(root, 'api', 'FAILED', writable=['backend/src/shared.ts'])
             entry = {'status': 'IMPLEMENTING'}
             model = Mock()
             model.generate_json.side_effect = [
-                {'edits': [{'path': 'backend/src/broken.ts', 'content': 'syntax error'},
-                    {'path': 'backend/src/shared.ts', 'content': 'regression'}]},
-                {'edits': [{'path': 'backend/src/broken.ts', 'content': 'still broken'}]}]
+                propose_files(root, [{'path': 'backend/src/broken.ts', 'content': 'syntax error'},
+                    {'path': 'backend/src/shared.ts', 'content': 'regression'}]),
+                propose_files(root, [{'path': 'backend/src/broken.ts', 'content': 'still broken', 'old_content': 'syntax error'}])]
             gate = Mock(side_effect=ValueError('Real compiler failure'))
             with implementation_task(root, entry, Mock(), '08 / FAILED'):
                 run_file_agent(model, 'Implement', {}, workspace, gate, 2, Mock(), 'FAILED')
@@ -83,7 +84,7 @@ class ImplementationRecovery(unittest.TestCase):
             def generate(instructions, payload):
                 pid = payload['task']['page']['id']
                 calls.append(pid)
-                return {'edits': [{'path': f'frontend/src/pages/{pid}.tsx', 'content': pid}]}
+                return propose_files(root, [{'path': f'frontend/src/pages/{pid}.tsx', 'content': pid}])
             green = {'returncode': 0, 'passed': 1, 'failed': 0, 'output': 'passed'}
             red = {'returncode': 1, 'passed': 0, 'failed': 1, 'output': 'assertion failure',
                 'errors': [], 'skipped': 0, 'flaky': 0, 'failures': ['Error: expect(locator).toBeVisible()']}

@@ -18,8 +18,8 @@ For schema, read Entity.field for a narrow field definition; for large pages rea
 ui_element IDs. kind=file supports exact relative paths or keyword discovery.
 For a file excerpt, supply "start_line": 10 and "end_line": 40 alongside ids.
 Lines are 1-based and inclusive; end_line may be omitted to read through EOF.
-Excerpts return content, start_line, end_line and total_lines. They are read-only;
-before replacing a file, read its full contents by omitting both line fields.
+Excerpts return content, start_line, end_line and total_lines. File-writing agents use
+read_file instead of kind=file exact reads; semantic design tasks may use these excerpts.
 kind=requirement reads original requirement scenarios; kind=test_requirement with a
 test file path as an ID finds its original requirement owner IDs. Read the relevant requirement before
 changing a regression test; never infer its intended behavior from implementation. Query results replace
@@ -47,17 +47,21 @@ class DiscoverySession:
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
             result = {'error': str(error), 'context_kinds': list(self.index.records()),
                 'notice': 'Correct the query or return the normal stage output.'}
+        return self.observe(result)
+
+    def observe(self, result):
+        """Apply the same no-progress feedback to semantic queries and file reads."""
         fingerprint = json.dumps(result, sort_keys=True, ensure_ascii=False)
         count = self.results.get(fingerprint, 0) + 1
         self.results[fingerprint] = count
         if count >= 3:
             raise DiscoveryStalled('Discovery returned the same evidence repeatedly. '
-                'Read specific candidate IDs, change the evidence sought, or return the normal stage output. '
-                'The query count is not limited; this search is making no progress.')
+                'Read different relevant evidence or return the task output.')
         if count == 2:
             result = {**result, 'next_action': 'These results were already supplied. '
-                'Read exact candidate IDs instead of repeating searches, or produce the stage output.'}
+                'Read different evidence or produce the task output.'}
         return result
+
 
 
 class ContextIndex:

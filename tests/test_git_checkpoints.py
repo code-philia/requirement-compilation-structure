@@ -1,4 +1,5 @@
 """Real Git history preserves accepted work, rejected edits, and honest final reports."""
+from tool_fixtures import propose_files
 
 from contextlib import redirect_stdout
 from io import StringIO
@@ -10,7 +11,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from infrastructure.compiler import Compiler
-from infrastructure.shared.agent.files import FileWorkspace
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task
 from infrastructure.shared.agent.tasks import StageIncomplete, TaskFailures
@@ -96,10 +97,9 @@ class GitCheckpoints(unittest.TestCase):
             save_text(root / path, 'accepted baseline')
             checkpoint(root, stage='08', task='baseline', action='Save accepted source')
             entry = {'status': 'IMPLEMENTING'}
-            model = Mock(generate_json=Mock(return_value={'diagnosis': {'cause': 'implementation', 'reason': 'Missing result'},
-                'edits': [{'path': path, 'content': 'rejected implementation'}]}))
+            model = Mock(generate_json=Mock(return_value=propose_files(root, [{'path': path, 'content': 'rejected implementation'}], diagnosis={'cause': 'implementation', 'reason': 'Missing result'})))
             with implementation_task(root, entry, Mock(), '08 / API-NOTE'):
-                run_file_agent(model, '', {}, FileWorkspace(root, [path]),
+                run_file_agent(model, '', {}, FileTools(root, [path]),
                     Mock(side_effect=ValueError('Business result is wrong')), 1, Mock(), 'API-NOTE')
             self.assertEqual(entry['status'], 'FAILED')
             self.assertEqual((root / path).read_text(), 'accepted baseline')
@@ -145,8 +145,8 @@ class GitCheckpoints(unittest.TestCase):
                 root = Path(temporary)
                 path = 'backend/src/accepted.ts'
                 save_text(root / path, 'before')
-                model = Mock(generate_json=Mock(return_value={'edits': [{'path': path, 'content': 'after'}]}))
-                accepted = run_file_agent(model, '', {}, FileWorkspace(root, [path]),
+                model = Mock(generate_json=Mock(return_value=propose_files(root, [{'path': path, 'content': 'after'}])))
+                accepted = run_file_agent(model, '', {}, FileTools(root, [path]),
                     Mock(return_value={'returncode': 0}), 1, Mock(), 'implementation')
                 self.assertEqual(accepted['checks']['returncode'], 0)
                 self.assertEqual((root / path).read_text(), 'after')

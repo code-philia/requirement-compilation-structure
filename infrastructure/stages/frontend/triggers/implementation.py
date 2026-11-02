@@ -66,7 +66,7 @@ workflow may include navigation and reload when those are part of this requireme
 Destination pages and their mount triggers are supporting context, not instructions
 to test other requirements' registration, login or logout workflows in this suite.
 
-Create the .spec.ts target using task.new_file or update test_path. Import test and
+Use edit_file to create the .spec.ts target under frontend/tests/e2e using task.file_target or update test_path. Import test and
 expect from frontend/tests/e2e/support/context.ts with a relative .js import. Tests use
 async ({page,database}) callbacks. Use the supplied test utility definitions and actual
 backend source to understand fixture signatures and stored-data conventions. The fixture
@@ -94,7 +94,7 @@ The task supplies the current requirement's triggers, supporting page-entry beha
 actual frontend/backend source files. Application sources are writable according to
 files; shared runtime interfaces and schema are references. Generated tests can be corrected against
 the requirement when their expectations, fixtures or selectors are wrong or too strict. You may update multiple
-pages, API handlers and helpers in the same edits list. Complete the functional path:
+pages, API handlers and helpers in the same edit_file batch. Complete the functional path:
 UI event -> frontend values -> API params/query/body -> real backend response -> shared
 frontend state -> visible result and navigation. Use the actual supplied source and API
 contract to resolve field names, types, status branches and stored-data conventions.
@@ -105,14 +105,15 @@ params/query/body/headers, credentials and response status/body/headers. Resolve
 placeholders with encoded parameter values; do not send literal {name} or :name.
 Handle empty responses and browser-managed cookies correctly. The compiler only creates
 an empty client when absent and never overwrites your wiring. Backend registry/app/server
-can also be read and repaired through exact file queries when HTTP failures require it.
-Read full contents before replacing a shared file; line-range queries are for inspection.
+can also be read and repaired through read_file and edit_file when HTTP failures require it.
+Read only relevant missing shared-file lines; edit_file replaces a unique exact span.
 Implement this requirement's behavior; supporting page context does not require building
 unrelated workflows early. Keep responses short by editing only files that need changes.
 implementation_paths maps each trigger to its supplied writable file; null file content
-means that file must be created. Return all required implementations in one edits list.
+means that file must be created. Use edit_file calls for all required implementations in one tool_calls batch.
 Export handle(context: UiTriggerContext): void | Promise<void> from
-one source file per trigger, importing UiTriggerContext from frontend/src/ui-runtime.ts.
+one source file per trigger at implementation_paths (under frontend/src), using edit_file
+for both creation and local repair, importing UiTriggerContext from frontend/src/ui-runtime.ts.
 Ordinary helper functions may be shared through supplied writable sources.
 
 The compiler captures native events, synchronizes UI input, registers handlers, owns

@@ -1,4 +1,5 @@
 """Independent tests cannot be rewritten by the application repair task."""
+from tool_fixtures import propose_files
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,8 +31,8 @@ class IndependentAcceptance(unittest.TestCase):
                 self.assertNotIn('file', payload['context_kinds'])
                 self.assertNotIn('triggers', task)
                 if payload['feedback']:
-                    return {'diagnosis': {'cause': 'implementation', 'reason': 'Required result is missing'}, 'edits': []}
-                return {'edits': [{'path': task['test_path'], 'content': 'original requirement assertions'}]}
+                    return propose_files(root, [], diagnosis={'cause': 'implementation', 'reason': 'Required result is missing'})
+                return propose_files(root, [{'path': task['test_path'], 'content': 'original requirement assertions'}])
             checks = Mock()
             checks.typecheck.return_value = {'returncode': 0}
             failure = {'returncode': 1, 'passed': 0, 'failed': 1, 'failures': ['wrong account']}
@@ -57,8 +58,7 @@ class IndependentAcceptance(unittest.TestCase):
             checks.tests.side_effect = [failure, green, green, green]
             def generate(prompt, payload):
                 corrected = bool(payload['feedback'])
-                return {'diagnosis': {'cause': 'test_overconstraint', 'reason': 'Selector contradicts original label'},
-                    'edits': [{'path': payload['task']['test_path'], 'content': 'correct selector' if corrected else 'initial suite'}]}
+                return propose_files(root, [{'path': payload['task']['test_path'], 'content': 'correct selector' if corrected else 'initial suite'}], diagnosis={'cause': 'test_overconstraint', 'reason': 'Selector contradicts original label'})
             with patch('infrastructure.stages.frontend.triggers.acceptance.E2EChecks', return_value=checks):
                 report = run_independent_acceptance(input_dir, root / '.arc', {'entities': {}}, backend, ui,
                     triggers, Mock(generate_json=generate), Mock())

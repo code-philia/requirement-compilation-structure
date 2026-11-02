@@ -1,4 +1,5 @@
 """Portable I/O and process regressions; run with unittest on Linux or Windows."""
+from tool_fixtures import propose_files
 
 import json
 from contextlib import redirect_stdout, redirect_stderr
@@ -13,7 +14,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from infrastructure.shared.agent.files import FileWorkspace
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.project.entrypoints import import_path
 from infrastructure.shared.project.initialize import initialize_project
 from infrastructure.utils.files import read_artifact, read_source, save_json, save_text
@@ -50,12 +51,12 @@ class PortableFiles(unittest.TestCase):
         target = self.root / relative
         target.parent.mkdir(parents=True)
         target.write_bytes(b"export const a = 1;\r\n\r\nexport const b = 2;\r\n")
-        workspace = FileWorkspace(self.root, {relative})
+        workspace = FileTools(self.root, {relative})
         original = workspace.state()[relative]["content"]
         self.assertNotIn("\r", original)
-        workspace.apply({"edits": [{"path": relative, "content": original.replace("a = 1", "a = 3")}]})
+        workspace.execute(propose_files(self.root, [{"path": relative, "content": original.replace("a = 1", "a = 3")}])["tool_calls"])
         workspace.state()
-        workspace.apply({"edits": [{"path": relative, "content": read_source(target) + "export const c = 4;\r\n"}]})
+        workspace.execute(propose_files(self.root, [{"path": relative, "content": read_source(target) + "export const c = 4;\r\n"}])["tool_calls"])
         self.assertEqual(target.read_bytes(), b"export const a = 3;\n\nexport const b = 2;\nexport const c = 4;\n")
 
     def test_failed_batch_restores_exact_original_bytes(self):
@@ -66,15 +67,15 @@ class PortableFiles(unittest.TestCase):
         original = b"\xef\xbb\xbfexport const a = 1;\r\n"
         target.write_bytes(original)
         second = "backend/src/second.ts"
-        workspace = FileWorkspace(self.root, {relative, second})
+        workspace = FileTools(self.root, {relative, second})
         workspace.state()
         def write(path, content):
             if path.name == "second.ts":
                 raise OSError("Simulated write failure")
             save_text(path, content)
-        with patch("infrastructure.shared.agent.files.save_text", side_effect=write):
+        with patch("infrastructure.shared.agent.tools.save_text", side_effect=write):
             with self.assertRaisesRegex(OSError, "Simulated write"):
-                workspace.apply({"edits": [{"path": relative, "content": "changed"}, {"path": second, "content": "new"}]})
+                workspace.execute(propose_files(self.root, [{"path": relative, "content": "changed"}, {"path": second, "content": "new"}])["tool_calls"])
         self.assertEqual(target.read_bytes(), original)
         self.assertFalse((self.root / second).exists())
 
@@ -91,7 +92,7 @@ class PortableFiles(unittest.TestCase):
                 relative_path(name)
         relative_path("backend/src/My Source \u793a\u4f8b.ts")
         save_text(self.root / "backend/src/Auth.ts", "// canonical\n")
-        tools = FileWorkspace(self.root, set())
+        tools = FileTools(self.root, set())
         with self.assertRaisesRegex(ValueError, "case"):
             tools.path("backend/src/auth.ts")
 
@@ -111,7 +112,7 @@ class PortableFiles(unittest.TestCase):
         target = self.root / relative
         target.parent.mkdir(parents=True)
         target.write_bytes(b"\xef\xbb\xbfexport const ready = true;\r\n")
-        tools = FileWorkspace(self.root, set(), references=[relative])
+        tools = FileTools(self.root, set(), references=[relative])
         state = tools.state()
         self.assertEqual(state, {relative: {"content": "export const ready = true;\n", "writable": False}})
         self.assertNotIn(str(self.root), json.dumps(state))

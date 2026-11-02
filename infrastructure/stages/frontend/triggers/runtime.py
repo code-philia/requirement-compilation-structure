@@ -16,7 +16,7 @@ API_CLIENT = "frontend/src/ui-api.ts"
 
 
 def prepare_trigger_paths(output, identities):
-    """Reserve writable targets so one edits list can implement a complete requirement."""
+    """Reserve writable targets so one edit_file batch can implement a complete requirement."""
     paths = {}
     for tid in sorted(identities):
         relative = selected_path(output, "trigger", tid)

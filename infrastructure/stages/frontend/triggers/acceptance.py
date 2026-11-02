@@ -3,7 +3,7 @@
 from hashlib import sha256
 import yaml
 
-from infrastructure.shared.agent.files import FileWorkspace
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.discovery import ContextIndex
 from infrastructure.shared.agent.conventions import task_conventions
@@ -37,14 +37,14 @@ There is no arbitrary test-count quota: cover the few important outcomes for thi
 Seed minimal valid Given records using the documented database/test utilities. Application
 sources, shared fixtures, original requirements and other suites are not editable.
 During generation only TypeScript is checked; missing application behavior is a useful
-acceptance failure, never a reason to weaken assertions. Return ordinary file edits.'''
+acceptance failure, never a reason to weaken assertions. Use edit_file to create or repair only test_path under frontend/tests/e2e/acceptance.'''
 
 REVIEW_INSTRUCTIONS = '''Review this independent acceptance test against the original requirement.
 This is a separate test review, not implementation repair. Actual failure evidence is
 provided. Diagnose test_requirement_mismatch, test_overconstraint, environment, or
 implementation. Change ONLY test_path if specific original requirement or fixture evidence
 shows the test is wrong. Preserve every required business outcome. If the implementation
-or environment is wrong, return edits=[] and explain it; the failed acceptance remains
+or environment is wrong, return tool_calls=[] and explain it; the failed acceptance remains
 failed. Compilation passing is enough to finish this review; you are NOT asked to turn a
 business failure GREEN. Never adjust expected values just to match observed wrong behavior.
 Use original requirements as authority; no application source or process tests are available.'''
@@ -96,7 +96,9 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
             # This restricted index cannot reveal implementation or process-test source.
             index = ContextIndex({'requirement': {rid: task['original_requirement']},
                 'schema': task['schema'], 'api': task['api_interfaces']})
-            workspace = FileWorkspace(output, [path], references=[FIXTURE, 'backend/tests/support/context.ts'])
+            workspace = FileTools.for_target(output, 'acceptance_test', rid, fixed_path=path,
+                references=[FIXTURE, 'backend/tests/support/context.ts'],
+                readable=[path, FIXTURE, 'backend/tests/support/context.ts'])
 
             def compile_suite():
                 if not (output / path).is_file():

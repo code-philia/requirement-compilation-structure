@@ -1,4 +1,5 @@
 """Repair generated tests against requirements and keep UI smoke checks minimal."""
+from tool_fixtures import propose_files
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -42,7 +43,7 @@ class TestRepair(unittest.TestCase):
             workspace = selection.workspace(paths=[source], references=[suite, support])
             console = Mock()
             diagnosis = {'cause': 'test_overconstraint', 'reason': 'The requirement allows soft invalidation; the test requires physical deletion.'}
-            model = Mock(generate_json=Mock(return_value={'diagnosis': diagnosis, 'edits': [{'path': suite, 'content': 'observable required outcome'}]}))
+            model = Mock(generate_json=Mock(return_value=propose_files(root, [{'path': suite, 'content': 'observable required outcome'}], diagnosis=diagnosis)))
             gate = Mock(return_value={'passed': True})
             result = run_file_agent(model, 'Implement required behavior.', {'requirement': 'Invalidate the session.'},
                 workspace, gate, 1, console, 'Registration', feedback={'error': 'wrong assertion'})
@@ -72,9 +73,8 @@ class TestRepair(unittest.TestCase):
             checks.build.return_value = {'returncode': 0, 'output': 'built'}
             def generate(instructions, payload):
                 self.assertTrue(payload['files']['frontend/tests/ui/editor.spec.ts']['writable'])
-                return {'diagnosis': {'cause': 'test_requirement_mismatch', 'reason': 'A select option object was used as a string locator.'},
-                    'edits': [{'path': 'frontend/src/editor.tsx', 'content': 'export function Page() { return null; }'},
-                        {'path': 'frontend/tests/ui/editor.spec.ts', 'content': 'correct presence assertions'}]}
+                return propose_files(root, [{'path': 'frontend/src/editor.tsx', 'content': 'export function Page() { return null; }'},
+                        {'path': 'frontend/tests/ui/editor.spec.ts', 'content': 'correct presence assertions'}], diagnosis={'cause': 'test_requirement_mismatch', 'reason': 'A select option object was used as a string locator.'})
             model = Mock(generate_json=generate)
             with patch.object(implementation, 'install_dependencies'), patch.object(implementation, 'FrontendChecks', return_value=checks):
                 result = implementation.implement_ui(root / '.arc', ui, model, Mock(), {'pages': {}}, max_turns=1)

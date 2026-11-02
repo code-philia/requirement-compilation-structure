@@ -1,11 +1,13 @@
 """Regression checks for scoped file edits, repair feedback and model-owned API wiring."""
+from tool_fixtures import propose_files
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock
 
-from infrastructure.shared.agent.files import FileWorkspace, source_paths, editable_sources
+from infrastructure.shared.agent.tools import FileTools
+from infrastructure.shared.agent.files import source_paths, editable_sources
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.project.entrypoints import remember_path, selected_path
 from infrastructure.shared.project.initialize import initialize_project
@@ -25,20 +27,20 @@ class FileAgentTests(unittest.TestCase):
         writable, reference = "src/current.ts", "src/frozen.ts"
         save_text(self.root / writable, "original")
         save_text(self.root / reference, "frozen")
-        workspace = FileWorkspace(self.root, {writable}, [reference])
+        workspace = FileTools(self.root, {writable}, [reference])
         workspace.state()
         for invalid in (reference, "src/unlisted.ts", "../escape.ts"):
             with self.subTest(path=invalid), self.assertRaises(ValueError):
-                workspace.apply({"edits": [{"path": writable, "content": "changed"},
-                    {"path": invalid, "content": "invalid"}]})
+                workspace.execute(propose_files(self.root, [{"path": writable, "content": "changed"},
+                    {"path": invalid, "content": "invalid"}])["tool_calls"])
             self.assertEqual(read_source(self.root / writable), "original")
             self.assertEqual(read_source(self.root / reference), "frozen")
-        workspace.apply({"edits": [{"path": writable, "content": "one"},
-            {"path": writable, "content": "two", "explanation": "allowed metadata"}]})
+        workspace.execute(propose_files(self.root, [{"path": writable, "content": "one"},
+            {"path": writable, "content": "two", "explanation": "allowed metadata"}])["tool_calls"])
         self.assertEqual(read_source(self.root / writable), "two")
         save_text(self.root / writable, "external change")
-        with self.assertRaisesRegex(ValueError, "changed since"):
-            workspace.apply({"edits": [{"path": writable, "content": "stale"}]})
+        with self.assertRaisesRegex(ValueError, "found 0"):
+            workspace.execute(propose_files(self.root, [{"path": writable, "content": "stale", "old_content": "two"}])["tool_calls"])
 
     def test_symlink_parent_is_rejected(self):
         with TemporaryDirectory() as outside:
@@ -47,21 +49,21 @@ class FileAgentTests(unittest.TestCase):
             except (OSError, NotImplementedError):
                 self.skipTest("Symlink creation is unavailable")
             with self.assertRaisesRegex(ValueError, "Symlink"):
-                FileWorkspace(self.root, {"linked/source.ts"})
+                FileTools(self.root, {"linked/source.ts"})
 
     def test_empty_edits_run_checks_and_failures_refresh_files(self):
         relative = "src/new.ts"
-        workspace = FileWorkspace(self.root, {relative})
+        workspace = FileTools(self.root, {relative})
         model = Mock()
         model.generate_json.side_effect = [
-            {"edits": []}, {"edits": [{"path": relative, "content": "bad"}]},
-            {"edits": [{"path": relative, "content": "good"}]}]
+            propose_files(self.root, []), propose_files(self.root, [{"path": relative, "content": "bad"}]),
+            propose_files(self.root, [{"path": relative, "content": "good", "old_content": "bad"}])]
         gate = Mock(side_effect=[ValueError("Missing implementation"), ValueError("Behavior failed"), {"green": True}])
         result = run_file_agent(model, "Implement the task", {"id": "example"}, workspace,
             gate, 3, Mock(), "example", feedback={"initial": "RED"})
         self.assertEqual(result, {"turns": 3, "checks": {"green": True}})
         requests = [call.args[1] for call in model.generate_json.call_args_list]
-        self.assertEqual(set(requests[0]), {"task", "files", "feedback", "context_kinds"})
+        self.assertEqual(set(requests[0]), {"task", "files", "feedback", "context_kinds", "tools"})
         self.assertEqual(requests[0]["files"][relative], {"content": None, "writable": True})
         self.assertEqual(requests[2]["files"][relative]["content"], "bad")
         self.assertEqual(requests[2]["feedback"], [{"error": "Behavior failed"}])
@@ -71,12 +73,12 @@ class FileAgentTests(unittest.TestCase):
     def test_malformed_edit_records_receive_original_response_feedback(self):
         relative = "src/current.ts"
         save_text(self.root / relative, "original")
-        workspace = FileWorkspace(self.root, {relative})
+        workspace = FileTools(self.root, {relative})
         model = Mock()
-        malformed = [{"edit": []}, {"edits": None},
-            {"edits": [{"path": relative, "content": []}]}]
+        malformed = [{"edit": []}, propose_files(self.root, None),
+            propose_files(self.root, [{"path": relative, "content": []}])]
         model.generate_json.side_effect = [*malformed,
-            {"edits": [{"path": relative, "content": "fixed"}]}]
+            propose_files(self.root, [{"path": relative, "content": "fixed"}])]
         gate = Mock(return_value={"green": True})
         result = run_file_agent(model, "Implement", {}, workspace, gate, 4, Mock(), "Example")
         self.assertEqual(result["turns"], 4)
@@ -118,25 +120,25 @@ class FileAgentTests(unittest.TestCase):
 
 
     def test_model_selects_new_path_and_repairs_it_without_response_metadata(self):
-        workspace = FileWorkspace.for_target(self.root, "api", "API-CREATE")
+        workspace = FileTools.for_target(self.root, "api", "API-CREATE")
         model = Mock()
         relative = "backend/src/account/register-user.ts"
         model.generate_json.side_effect = [
-            {"edits": [{"path": relative, "content": "first version"}]},
-            {"edits": [{"path": relative, "content": "repaired version"}]},
+            propose_files(self.root, [{"path": relative, "content": "first version"}]),
+            propose_files(self.root, [{"path": relative, "content": "repaired version", "old_content": "first version"}]),
         ]
         gate = Mock(side_effect=[ValueError("Behavior failed"), {"green": True}])
         result = run_file_agent(model, "Implement the API", {"api_id": "API-CREATE"}, workspace,
             gate, 2, Mock(), "Create API")
         requests = [call.args[1] for call in model.generate_json.call_args_list]
         self.assertEqual(requests[0]["files"], {})
-        self.assertEqual(requests[0]["task"]["new_file"]["target"], "API-CREATE")
-        self.assertNotIn("new_file", requests[1]["task"])
+        self.assertEqual(requests[0]["task"]["file_target"]["id"], "API-CREATE")
+        self.assertEqual(requests[1]["task"]["file_target"]["path"], relative)
         self.assertTrue(requests[1]["files"][relative]["writable"])
         self.assertEqual(selected_path(self.root, "api", "API-CREATE"), relative)
         self.assertEqual(result["turns"], 2)
-        resumed = FileWorkspace.for_target(self.root, "api", "API-CREATE")
-        self.assertEqual(resumed.creation_task(), {})
+        resumed = FileTools.for_target(self.root, "api", "API-CREATE")
+        self.assertFalse(resumed.pending_target)
         self.assertEqual(resumed.state()[relative]["content"], "repaired version")
 
     def test_retry_refreshes_target_path_hints_for_all_model_created_files(self):
@@ -149,17 +151,17 @@ class FileAgentTests(unittest.TestCase):
         ]
         for kind, identity, relative, task, key in cases:
             with self.subTest(kind=kind):
-                workspace = FileWorkspace.for_target(self.root, kind, identity)
+                workspace = FileTools.for_target(self.root, kind, identity)
                 model = Mock()
                 model.generate_json.side_effect = [
-                    {"edits": [{"path": relative, "content": "first version"}]},
-                    {"edits": [{"path": relative, "content": "repaired version"}]},
+                    propose_files(self.root, [{"path": relative, "content": "first version"}]),
+                    propose_files(self.root, [{"path": relative, "content": "repaired version", "old_content": "first version"}]),
                 ]
                 gate = Mock(side_effect=[ValueError("Acceptance failed"), {"green": True}])
                 run_file_agent(model, "Implement target", task, workspace, gate, 2, Mock(), identity)
                 first, retry = [call.args[1] for call in model.generate_json.call_args_list]
-                self.assertIn("new_file", first["task"])
-                self.assertNotIn("new_file", retry["task"])
+                self.assertIsNone(first["task"]["file_target"]["path"])
+                self.assertEqual(retry["task"]["file_target"]["path"], relative)
                 self.assertEqual(retry["task"][key], {identity: relative} if kind == "trigger" else relative)
                 self.assertEqual(first["task"][key], {identity: None} if kind == "trigger" else None)
                 self.assertEqual(task[key], {identity: None} if kind == "trigger" else None)
@@ -168,15 +170,15 @@ class FileAgentTests(unittest.TestCase):
 
     def test_empty_creation_response_requests_creation_without_running_gate(self):
         relative = "backend/src/created.ts"
-        workspace = FileWorkspace.for_target(self.root, "api", "API-CREATE")
+        workspace = FileTools.for_target(self.root, "api", "API-CREATE")
         model = Mock()
-        model.generate_json.side_effect = [{"edits": []}, {"edits": [{"path": relative, "content": "created"}]}]
+        model.generate_json.side_effect = [propose_files(self.root, []), propose_files(self.root, [{"path": relative, "content": "created"}])]
         gate = Mock(return_value={"green": True})
         run_file_agent(model, "Create target", {}, workspace, gate, 2, Mock(), "Create")
         gate.assert_called_once()
         retry = model.generate_json.call_args_list[1].args[1]
-        self.assertIn("new_file", retry["task"])
-        self.assertIn("Create the target file", retry["feedback"][0]["error"])
+        self.assertIn("file_target", retry["task"])
+        self.assertIn("Create task.file_target", retry["feedback"][0]["error"])
 
     def test_test_generation_can_repair_application_sources_but_not_frozen_files(self):
         initialize_project(self.root)
@@ -186,13 +188,13 @@ class FileAgentTests(unittest.TestCase):
         save_text(self.root / page, "broken page")
         save_text(self.root / previous, "accepted assertions")
         save_text(self.root / "frontend/src/ui-runtime.ts", "compiler runtime")
-        workspace = FileWorkspace.for_target(self.root, "e2e_test", "REQ-CURRENT",
+        workspace = FileTools.for_target(self.root, "e2e_test", "REQ-CURRENT",
             references=[*source_paths(self.root, "frontend/src"), previous],
             writable=editable_sources(self.root, "frontend/src"))
         model = Mock()
         model.generate_json.side_effect = [
-            {"edits": [{"path": current, "content": "new assertions"}]},
-            {"edits": [{"path": page, "content": "fixed page"}]},
+            propose_files(self.root, [{"path": current, "content": "new assertions"}]),
+            propose_files(self.root, [{"path": page, "content": "fixed page"}]),
         ]
         def gate():
             if read_source(self.root / page) != "fixed page":
@@ -221,15 +223,15 @@ class FileAgentTests(unittest.TestCase):
     def test_creation_rejects_overwrite_and_rolls_back_failed_registration(self):
         frozen = "backend/src/compiler.ts"
         save_text(self.root / frozen, "compiler-owned")
-        workspace = FileWorkspace.for_target(self.root, "api", "API-CREATE", references=[frozen])
+        workspace = FileTools.for_target(self.root, "api", "API-CREATE", references=[frozen])
         workspace.state()
-        for invalid in (frozen, "frontend/src/other.ts", "../escape.ts"):
+        for invalid in (frozen, "../escape.ts"):
             with self.subTest(path=invalid), self.assertRaises(ValueError):
-                workspace.apply({"edits": [{"path": invalid, "content": "new"}]})
+                workspace.execute(propose_files(self.root, [{"path": invalid, "content": "new"}])["tool_calls"])
         from unittest.mock import patch
-        with patch("infrastructure.shared.agent.files.remember_path", side_effect=OSError("Disk failure")):
+        with patch("infrastructure.shared.agent.targets.remember_path", side_effect=OSError("Disk failure")):
             with self.assertRaisesRegex(OSError, "Disk failure"):
-                workspace.apply({"edits": [{"path": "backend/src/new.ts", "content": "new"}]})
+                workspace.execute(propose_files(self.root, [{"path": "backend/src/new.ts", "content": "new"}])["tool_calls"])
         self.assertFalse((self.root / "backend/src/new.ts").exists())
         self.assertEqual(read_source(self.root / frozen), "compiler-owned")
         self.assertIsNone(selected_path(self.root, "api", "API-CREATE"))
@@ -242,9 +244,9 @@ class FileAgentTests(unittest.TestCase):
             "page": ("PAGE-CUSTOM", "frontend/src/screens/account.tsx", "export function Page() {}"),
             "trigger": ("TR-CUSTOM", "frontend/src/behavior/account/load.ts", "export function handle() {}")}
         for kind, (identity, path, content) in paths.items():
-            workspace = FileWorkspace.for_target(self.root, kind, identity)
+            workspace = FileTools.for_target(self.root, kind, identity)
             workspace.state()
-            workspace.apply({"edits": [{"path": path, "content": content}]})
+            workspace.execute(propose_files(self.root, [{"path": path, "content": content}])["tool_calls"])
         sync_implementations(self.root, api)
         self.assertIn("../../src/features/account/read.js", read_source(self.root / "backend/tests/support/apis.ts"))
         ui = {"pages": {"PAGE-CUSTOM": {"route": "/", "root": "UI-ROOT"}}, "bindings": {}, "elements": {}}
@@ -265,7 +267,7 @@ class FileAgentTests(unittest.TestCase):
         backend = SourceFiles(self.root, root="backend/src", tests_root="backend/tests")
         workspace = backend.workspace(paths=[registry])
         workspace.state()
-        workspace.apply({"edits": [{"path": registry, "content": source}]})
+        workspace.execute(propose_files(self.root, [{"path": registry, "content": source}])["tool_calls"])
         # Reading the shared registry must not bring every registered handler into context.
         queried = backend.workspace(paths=[registry])
         self.assertNotIn(handler, queried.files)
@@ -276,16 +278,16 @@ class FileAgentTests(unittest.TestCase):
         sync_triggers(self.root, empty_ui, {"triggers": {}}, {"apis": {}}, [])
         frontend = SourceFiles(self.root).workspace(paths=[client])
         frontend.state()
-        frontend.apply({"edits": [{"path": client, "content": "// Model-maintained HTTP calls"}]})
+        frontend.execute(propose_files(self.root, [{"path": client, "content": "// Model-maintained HTTP calls"}])["tool_calls"])
         sync_triggers(self.root, empty_ui, {"triggers": {}}, {"apis": {}}, [])
         self.assertEqual(read_source(self.root / client), "// Model-maintained HTTP calls")
 
     def test_new_test_file_paths_are_chosen_by_model(self):
         from infrastructure.stages.frontend.triggers.testing import test_path
         relative = "frontend/tests/e2e/accounts/register-flow.spec.ts"
-        workspace = FileWorkspace.for_target(self.root, "e2e_test", "REQ-REGISTER")
+        workspace = FileTools.for_target(self.root, "e2e_test", "REQ-REGISTER")
         workspace.state()
-        workspace.apply({"edits": [{"path": relative, "content": "test source"}]})
+        workspace.execute(propose_files(self.root, [{"path": relative, "content": "test source"}])["tool_calls"])
         self.assertEqual(test_path("REQ-REGISTER", self.root), relative)
 
 

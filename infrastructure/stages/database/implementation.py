@@ -5,7 +5,7 @@ import re
 
 from infrastructure.shared.agent.discovery import ContextIndex, project_index
 from infrastructure.shared.agent.feedback import CheckFailure, compact_feedback
-from infrastructure.shared.agent.files import FileWorkspace
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.project.dependencies import install_dependencies
@@ -23,7 +23,7 @@ WIRING = (
 
 REPAIR_INSTRUCTIONS = '''Repair the actual database implementation and its startup wiring.
 The compiler has already generated SQL and executed real checks; feedback contains
-actual build, SQLite initialization or server startup failures. Return ordinary edits.
+actual build, SQLite initialization or server startup failures. Use edit_file for repairs.
 
 Use the canonical schema as authority. Repair the responsible SQL table files, related
 foreign-key tables, initializer, client, setup/server entry point or SQL build-copy wiring.
@@ -39,24 +39,12 @@ Do not replace the canonical schema with a test-only database, omit a failing ta
 catch an error and pretend startup succeeded, disable constraints to hide a failure,
 change the schema artifact, weaken checks, or add mocks. Do not drop existing user data.
 This task owns database SQL and the supplied startup wiring; later API/UI tasks do not.
-The files map is authoritative. Query kind=file or kind=schema for more evidence;
-queried database-owned files become editable. Return only changed complete file contents.
+Use the supplied files first. Read missing related SQL/startup lines with read_file;
+query kind=schema for definitions. Use edit_file/replace for exact local repairs or
+edit_file/create for a missing canonical SQL file under backend/src/db/tables.
 The compiler rebuilds, initializes/reinitializes real databases, restores a missing table,
 starts/restarts the compiled backend and initializes backend/data/app.db after every edit.
 '''
-
-
-class DatabaseWorkspace(FileWorkspace):
-    """Give only this owner task edit permission for queried SQL and startup files."""
-
-    def __init__(self, output, paths, allowed):
-        self.allowed = set(allowed)
-        super().__init__(output, paths)
-
-    def state(self):
-        self.writable.intersection_update(self.allowed)
-        self.writable.update(self.files & self.allowed)
-        return super().state()
 
 
 def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
@@ -91,7 +79,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
 
     sql_paths = {name: f"backend/src/db/tables/{name}.sql" for name in schema["entities"]}
     allowed = {*WIRING, *sql_paths.values()}
-    workspace = DatabaseWorkspace(output, WIRING, allowed)
+    workspace = FileTools(output, WIRING, allow_write=lambda path: path in allowed)
     task = {"table_order": [name for group in implementation_groups(schema) for name in group],
         "database_path": "backend/data/app.db", "entities": {}}
     dependencies = table_dependencies(schema)

@@ -102,7 +102,7 @@ class TextModel:
             raise ValueError(
                 f"Model output was truncated (finish_reason=length). The output budget is "
                 f"{self.max_output_tokens} tokens including reasoning; this is not an input-length error. "
-                "Return a complete JSON object with only necessary edits; omit unchanged files. "
+                "Return a complete JSON object with only necessary changes/tool calls; omit unchanged files. "
                 "Do not spend the entire budget restating the task.")
         if response.choices and getattr(response.choices[0].message, "refusal", None):
             raise ValueError(f"Text model refused the request: {response.choices[0].message.refusal}")

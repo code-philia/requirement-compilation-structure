@@ -1,4 +1,5 @@
 """Exercise model-edited HTTP wiring after normal compiler refreshes."""
+from tool_fixtures import propose_files
 
 import json
 import os
@@ -51,7 +52,7 @@ export function registerApis(app: Express, db: Database.Database) {
 '''
             workspace = SourceFiles(output, root='backend/src', tests_root='backend/tests').workspace(
                 target=('api', 'API-READ'), paths=[registry])
-            response = {'edits': [{'path': handler, 'content': implementation}, {'path': registry, 'content': wiring}]}
+            response = propose_files(output, [{'path': handler, 'content': implementation}, {'path': registry, 'content': wiring}])
             run_file_agent(Mock(generate_json=Mock(return_value=response)), '', {}, workspace,
                 Mock(return_value={}), 1, Mock(), 'Backend wiring')
             ui = {'pages': {'PAGE-BOOKS': {'route': '/', 'root': 'UI-BOOKS'}}, 'elements': {}, 'bindings': {}}
@@ -65,7 +66,7 @@ export async function callApi(id: string, request: UiApiRequest = {}): Promise<U
 }
 '''
             workspace = SourceFiles(output).workspace(paths=[client])
-            run_file_agent(Mock(generate_json=Mock(return_value={'edits': [{'path': client, 'content': client_source}]})),
+            run_file_agent(Mock(generate_json=Mock(return_value=propose_files(output, [{'path': client, 'content': client_source}]))),
                 '', {}, workspace, Mock(return_value={}), 1, Mock(), 'Frontend wiring')
             # The compiler must preserve both ends, including when preparation is repeated.
             prepare_runtime(output, apis)
