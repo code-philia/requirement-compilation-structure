@@ -54,6 +54,8 @@ def test_run_status(result):
     """Pass every real failure to repair; do not guess its cause from error text."""
     try:
         require_green(result)
+        if result.get("skipped") or result.get("flaky"):
+            return "REPAIR_REQUIRED"
         return "GREEN"
     except ValueError:
         return "REPAIR_REQUIRED"
@@ -73,7 +75,7 @@ to test other requirements' registration, login or logout workflows in this suit
 Use concrete URLs and object identities from the requirement's workflow and actual
 application routing. A route pattern containing :id or {id} is not a literal URL.
 Do not prescribe a component API, event dispatcher or routing library in the tests.
-For a workflow that requires one state-changing operation, observe its relevant HTTP
+For a user action that requires one API operation, especially a mutation, observe its relevant HTTP
 method/endpoint during that When action and check that it is not submitted twice. Also
 check the required business outcome. Count only that operation, not page-entry reads,
 unrelated calls, or retries/repeated operations explicitly required by the requirement.
@@ -304,7 +306,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                             raise ValueError(result[kind]["output"])
                     if "backend_tests" in result:
                         require_backend_green(result["backend_tests"])
-                    require_green(result["e2e"])
+                    if test_run_status(result["e2e"]) != "GREEN":
+                        raise ValueError("Functional scenarios require passing, unskipped and stable results")
                     if "ui" in result:
                         require_green(result["ui"])
                 except ValueError as error:

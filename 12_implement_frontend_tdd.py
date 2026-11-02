@@ -5,7 +5,7 @@ from pathlib import Path
 
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.stages.frontend.triggers.context import load_e2e_context
-from infrastructure.stages.frontend.triggers.implementation import run_trigger_tdd
+from infrastructure.stages.frontend.triggers.implementation import run_trigger_tdd, verify_frontend
 from infrastructure.stages.frontend.triggers.acceptance import run_independent_acceptance
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
@@ -30,7 +30,9 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
         result = run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
             contexts, model, DemoConsole(pause), report, max_turns, max_tests)
         acceptance = run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, interactions,
-            model or TextModel(json_mode=False), DemoConsole(pause), max_turns)
+            model or TextModel(json_mode=False), DemoConsole(pause), max_turns, process_report=result)
+        if any(entry.get("repair_checks") for entry in acceptance["requirements"].values()):
+            result = verify_frontend(arc_dir, tree, backend, ui, DemoConsole(pause), result)
         result["verification"]["independent_acceptance"] = {"status": "GREEN" if acceptance["status"] == "GREEN" else "FAILED",
             "report": ".arc/independent_acceptance.json"}
         if acceptance["status"] != "GREEN":

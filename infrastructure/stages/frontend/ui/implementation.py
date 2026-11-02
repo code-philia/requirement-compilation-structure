@@ -46,6 +46,8 @@ Render real layout, labels, controls and conditional content with original text 
 data-testid=ELEMENT_ID selectors. Use the installed dependencies and configured styles.
 This stage builds presentation, native editing and navigation, not business API operations,
 session restoration or later requirements' workflows. Step 12 adds those interactions.
+Keep one clear owner for each native form/navigation action. Later implementation must
+extend that existing handler, not add another independently firing click/submit listener.
 
 Preserve the presentation-test adapter in frontend/src/ui-runtime.ts. Call presentationData
 with this page ID and a projection of the actual declared frontend values when rendering.

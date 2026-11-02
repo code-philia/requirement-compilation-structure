@@ -6,12 +6,20 @@ import yaml
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.conventions import task_conventions
+from infrastructure.shared.agent.context import SourceFiles
+from infrastructure.shared.agent.discovery import project_index
+from infrastructure.shared.agent.recovery import implementation_task
+from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.backend.context import requirement_context, related_schema
+from infrastructure.stages.backend.testing import BackendChecks, require_green as require_backend_green
 from infrastructure.stages.requirements.tree import RequirementTree
-from infrastructure.stages.frontend.triggers.implementation import scenario_context
+from infrastructure.stages.frontend.triggers.implementation import scenario_context, IMPLEMENT_INSTRUCTIONS, editable_runtime_path, test_run_status
 from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE
-from infrastructure.stages.frontend.triggers.testing import E2EChecks
-from infrastructure.stages.frontend.ui.testing import require_green
+from infrastructure.stages.frontend.triggers.testing import E2EChecks, test_path
+from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure
+from infrastructure.stages.frontend.triggers.design import api_ids
+from infrastructure.stages.frontend.ui.runtime import APPLICATION_ENTRYPOINTS
+from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
 from infrastructure.utils.files import save_json
 from infrastructure.shared.project.git import checkpoint
 
@@ -31,6 +39,10 @@ Use two distinct identities where identity isolation matters; a test that only c
 one account cannot reject an implementation returning the first account for everyone.
 For required rejection-without-writes, verify the relevant persisted result is unchanged.
 Prefer user-visible outcomes over unspecified cookie/hash encodings or storage strategies.
+For a When action requiring one API operation, also observe its relevant method/endpoint and
+reject duplicate submissions when the requirement expects one operation. Start observing
+before the action, wait for its response and business completion, and exclude unrelated
+page-entry calls or explicitly required retries. Do not count all requests globally.
 There is no arbitrary test-count quota: cover the few important outcomes for this task.
 
 The database fixture restores requirement-defined startup data before each test. Reuse
@@ -72,10 +84,23 @@ def original_requirements(input_dir):
     return RequirementTree(yaml.safe_load(path.read_text(encoding='utf-8-sig')))
 
 
-def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, model, console, max_turns=10):
+def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, model, console,
+        max_turns=10, *, process_report):
     output = arc_dir.parent.resolve()
     tree = original_requirements(input_dir)
     checks = E2EChecks(output)
+    ui_checks = FrontendChecks(output)
+    backend_checks = BackendChecks(output)
+    selection = SourceFiles(output, ui)
+    backend_selection = SourceFiles(output, root='backend/src', tests_root='backend/tests')
+    context_index = project_index(output,
+        kinds=('schema', 'api', 'page', 'ui_element', 'ui_data', 'trigger', 'requirement',
+            'test_requirement', 'convention', 'file'),
+        file_roots=('frontend/src', 'frontend/tests', 'backend/src', 'backend/tests'))
+    accepted = []
+    verified_process = set()
+    pending_verification = any(check['status'] == 'FAILED'
+        for check in process_report.get('verification', {}).values())
     report = {'status': 'RUNNING', 'requirements': {}}
     save_json(arc_dir / 'independent_acceptance.json', report)
     for rid in tree.leaves:
@@ -85,7 +110,9 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
         label = 'Independent acceptance / ' + rid
         try:
             context = scenario_context(ui, design, rid)
-            aids = backend['requirements'].get(rid, [])
+            aids = set(backend['requirements'].get(rid, []))
+            for trigger in context['triggers'].values():
+                aids.update(api_ids(trigger))
             apis = {aid: backend['apis'][aid] for aid in aids}
             task = {'original_requirement': requirement_context(tree, rid), 'test_path': path,
                 'ui_interfaces': {pid: {key: page[key] for key in ('route', 'root', 'elements')}
@@ -129,8 +156,89 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                 entry['review_turns'] = review['turns']
                 result = checks.tests([path])
                 entry["result"] = result
-                require_acceptance(result)
+            if test_run_status(result) != 'GREEN' or pending_verification:
+                entry['status'] = 'REPAIRING'
+                process_ids = [key for key, value in process_report['requirements'].items()
+                    if pending_verification or value.get('status') == 'GREEN' or key == rid]
+                process_files = [test_path(key, output) for key in process_ids
+                    if (output / test_path(key, output)).is_file()]
+                acceptance_files = [acceptance_path(key) for key in [*accepted, rid]]
+                ui_files = [ui_test_path(pid) for pid in ui['pages']
+                    if (output / ui_test_path(pid)).is_file()]
+                repair_task = {**task, **context, 'requirement': task['original_requirement'],
+                    'backend_apis': apis, 'target_trigger_ids': sorted(context['triggers']),
+                    'repair_reason': 'final_verification_and_acceptance' if pending_verification else 'independent_acceptance',
+                    'application_entrypoints': list(APPLICATION_ENTRYPOINTS),
+                    'backend_entrypoints': {'registry': 'backend/src/api/register.ts',
+                        'app': 'backend/src/app.ts', 'server': 'backend/src/server.ts'}}
+                repair_workspace = selection.workspace(
+                    paths=selection.paths('page', context['page_subtrees']),
+                    references=[path, *ui_files, FIXTURE, 'frontend/src/ui-runtime.ts',
+                        *APPLICATION_ENTRYPOINTS, 'frontend/package.json', 'frontend/tsconfig.json'])
+                repair_workspace.allow_write = lambda relative: editable_runtime_path(output, relative)
+                backend_selection.include(repair_workspace, backend_selection.paths('api', aids))
+
+                def repair_gate():
+                    evidence = {}
+                    try:
+                        evidence['typecheck'] = checks.typecheck([*process_files, *acceptance_files])
+                        if evidence['typecheck']['returncode']:
+                            raise ValueError(evidence['typecheck']['output'])
+                        evidence['acceptance'] = checks.tests(acceptance_files)
+                        require_acceptance(evidence['acceptance'])
+                        if process_files:
+                            evidence['smoke'] = checks.tests(process_files)
+                            require_acceptance(evidence['smoke'])
+                        if ui_files:
+                            evidence['ui'] = ui_checks.tests(ui_files)
+                            require_green(evidence['ui'])
+                        if pending_verification or any(relative.startswith('backend/') for relative in repair_workspace.changed_paths):
+                            evidence['backend_typecheck'] = backend_checks.typecheck()
+                            if evidence['backend_typecheck']['returncode']:
+                                raise ValueError(evidence['backend_typecheck']['output'])
+                            suites = [selected for aid in backend['apis']
+                                if (selected := selected_path(output, 'backend_test', aid))
+                                and (output / selected).is_file()]
+                            if suites:
+                                evidence['backend'] = backend_checks.tests(suites)
+                                require_backend_green(evidence['backend'])
+                        evidence['build'] = checks.build()
+                        if evidence['build']['returncode']:
+                            raise ValueError(evidence['build']['output'])
+                    except (ValueError, RuntimeError) as error:
+                        raise TriggerCheckFailure(str(error), evidence) from error
+                    return evidence
+
+                def repair_feedback(value):
+                    return selection.feedback(repair_workspace, backend_selection.feedback(repair_workspace, value))
+
+                with implementation_task(output, entry, console, label + ' / Repair'):
+                    repair = run_file_agent(model, IMPLEMENT_INSTRUCTIONS + '\n\n'
+                        'Independent acceptance suites are read-only for implementation repair. '
+                        'Preserve their original requirement outcomes and repair the real application. '
+                        'Test review has already been performed separately. Failures in supplied final '
+                        'regression/build checks are also repair targets: retrieve the failing requirement '
+                        'and source evidence on demand, and preserve other accepted behavior.',
+                        repair_task, repair_workspace, repair_gate, max_turns, console,
+                        label + ' / Repair', feedback={'acceptance': result,
+                            'verification': process_report.get('verification', {}) if pending_verification else {}},
+                        feedback_filter=repair_feedback,
+                        context_index=context_index)
+                    entry.update(status='GREEN', repair_turns=repair['turns'],
+                        result=repair['checks']['acceptance'], repair_checks=repair['checks'])
+                if entry['status'] == 'FAILED':
+                    continue
+                result = entry['result']
+                verified_process.update(key for key in process_ids if test_path(key, output) in process_files)
+                pending_verification = False
+            require_acceptance(result)
+            process_entry = process_report['requirements'].get(rid)
+            if process_entry and process_entry.get('status') == 'FAILED' and rid in verified_process:
+                process_entry['previous_failure'] = dict(process_entry)
+                process_entry.update(status='GREEN', recovery='independent_acceptance_repair')
+                save_json(arc_dir / 'frontend_e2e.json', process_report)
             entry.update(status='GREEN', result=result)
+            accepted.append(rid)
         except (ValueError, RuntimeError) as error:
             entry.update(status='FAILED', error=str(error))
         finally:

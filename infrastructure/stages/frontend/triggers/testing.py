@@ -1,8 +1,7 @@
-"""Real-app browser checks and executable E2E RED/GREEN gates."""
+"""Real-app browser checks with executable acceptance and repair evidence."""
 
 from hashlib import sha256
 import os
-from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
 
@@ -33,7 +32,7 @@ class E2EChecks(FrontendChecks):
             source_files=("src/**/*.ts", "src/**/*.tsx") if full_source else ())
 
     def tests(self, files):
-        """Run only selected E2E specs with an owned temporary database, clean it up, ."""
+        """Run selected E2E specs and keep startup/runner failures available for repair."""
         if not files:
             raise ValueError("Do not run empty E2E suites")
         for relative in files:
@@ -44,7 +43,11 @@ class E2EChecks(FrontendChecks):
         with TemporaryDirectory(prefix="arc-e2e-owner-") as temporary:
             env = {**os.environ, "ARC_E2E_TEMP_ROOT": temporary}
             print("Playwright E2E | real backend + isolated database | " + ", ".join(files), flush=True)
-            result = self.execute([RUNNER, *files], env=env)
+            try:
+                result = self.execute([RUNNER, *files], env=env)
+            except (ValueError, RuntimeError, OSError) as error:
+                return {"returncode": 1, "output": str(error), "errors": [str(error)],
+                    "passed": 0, "failed": 0, "files": {}}
         try:
             return parse_playwright_result(result, include_files=True)
         except ValueError as error:
