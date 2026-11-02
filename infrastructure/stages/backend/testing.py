@@ -41,9 +41,8 @@ class BackendChecks:
         """Compile selected backend tests with TypeScript, using and cleaning a temporary test configuration."""
         if files is None:
             return self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "-p", "backend/tsconfig.test.json"])
-        # Imported API modules and helpers are included by TypeScript. Future
-        # requirements' tests and the global registry must not enter this gate.
-        includes = []
+        # Compile the complete real-server source tree and only the selected suites.
+        includes = ["src/**/*.ts"]
         for relative in dict.fromkeys(files):
             path = (self.output / relative).resolve()
             if not path.is_relative_to(self.output / "backend/tests"):
@@ -58,16 +57,23 @@ class BackendChecks:
             temporary.unlink(missing_ok=True)
 
     def tests(self, files: list[str]) -> dict:
-        """Run selected API test files with the fixed Node test command and parse its TAP counts."""
+        """Start the real backend through the owned HTTP runner and parse test TAP counts."""
         if not files:
             return {"returncode": 0, "output": "No tests for this empty API set.", "tests": 0, "pass": 0, "fail": 0}
-        result = self.execute(["--import", "tsx", "--test", "--test-reporter=tap", *files])
+        try:
+            captured = capture_process([self.node, "backend/scripts/test-api.mjs", *files],
+                cwd=self.output, timeout=self.timeout)
+        except subprocess.TimeoutExpired as error:
+            raise ValueError(f"Backend HTTP checks timed out after {self.timeout}s") from error
+        result = {"returncode": captured["returncode"], "output": captured["output"]}
+        # Parse complete test stdout so backend stderr cannot hide TAP results.
+        tap = captured["stdout"]
         for kind in ("tests", "pass", "fail", "skipped", "todo"):
-            found = re.search(rf"^# {kind} (\d+)\s*$", result["output"], re.MULTILINE)
+            found = re.search(rf"^# {kind} (\d+)\s*$", tap, re.MULTILINE)
             result[kind] = int(found.group(1)) if found else 0
         # TAP diagnostic blocks contain the assertion, stack and source location.
         # Successful subtests remain in the saved tool report, not repair context.
-        failures = re.findall(r"(?m)^\s*not ok[^\n]*\n(?:[ \t]+[^\n]*\n)*", result["output"])
+        failures = re.findall(r"(?m)^\s*not ok[^\n]*\n(?:[ \t]+[^\n]*\n)*", tap)
         if failures:
             result["failures"] = failures
         return result
@@ -75,12 +81,24 @@ class BackendChecks:
 
 def require_green(report: dict) -> None:
     """Reject a test report unless the selected suite passed."""
-    if report["returncode"] != 0 or not report.get("tests") or report.get("fail"):
+    if report["returncode"] != 0 or not report.get("pass") or report.get("fail") or report.get("skipped") or report.get("todo"):
         raise CheckFailure("Tests are not GREEN", report)
 
 
 def require_red(report: dict) -> None:
     """Require failing assertions and reject infrastructure errors, skipped tests, or an already passing suite."""
     infrastructure_errors = ("SyntaxError", "ERR_MODULE_NOT_FOUND", "Cannot find module", "ERR_UNKNOWN_FILE_EXTENSION", "ERR_DLOPEN_FAILED")
-    if not report["returncode"] or not report.get("tests") or not report.get("fail") or "ERR_ASSERTION" not in report["output"] or any(error in report["output"] for error in infrastructure_errors):
+    evidence = "\n".join(report.get("failures", [])) + "\n" + report["output"]
+    if not report["returncode"] or not report.get("tests") or not report.get("fail") or report.get("skipped") or report.get("todo") or "ERR_ASSERTION" not in evidence or any(error in evidence for error in infrastructure_errors):
         raise ValueError(f"Expected assertion-based RED, not an infrastructure error or a vacuous test: {report}")
+
+
+def test_run_status(report: dict) -> str:
+    """Keep real GREEN/RED results; transfer server lifecycle failures to implementation."""
+    if report["returncode"] == 0:
+        require_green(report)
+        return "GREEN"
+    if re.search(r"^BACKEND_(STARTUP|RUNTIME)_ERROR:", report["output"], re.MULTILINE):
+        return "REPAIR_REQUIRED"
+    require_red(report)
+    return "RED_CONFIRMED"

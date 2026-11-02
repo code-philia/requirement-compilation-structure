@@ -1,4 +1,4 @@
-"""Step 08: TDD-driven enforcement of P, Q, and Dataflow Obligations."""
+"""Step 08: implement backend APIs against real-server HTTP acceptance suites."""
 
 import json
 from contextlib import ExitStack
@@ -11,72 +11,74 @@ from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses, supplied_sources, related_schema
 from infrastructure.utils.files import read_artifact
-from infrastructure.stages.backend.runtime import REGISTER_PATH, TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
-from infrastructure.stages.backend.testing import BackendChecks, require_green, require_red
+from infrastructure.stages.backend.runtime import REGISTER_PATH, TEST_RUNNER_PATH, TEST_SUPPORT_PATH, prepare_runtime, test_path
+from infrastructure.stages.backend.testing import BackendChecks, require_green, test_run_status
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.project.dependencies import install_dependencies
-from infrastructure.utils.files import save_bytes, save_json, save_text
+from infrastructure.utils.files import save_json
 from infrastructure.shared.project.git import checkpoint
 
 
-TEST_INSTRUCTIONS = """Write one canonical test suite for task.api, whose contract covers its shared uses, before
-implementing the API. Base expected outcomes on the requirement scenarios, API I/O,
-preconditions, postconditions and DB effects. Use db_schema and supplied SQL for fixtures.
+TEST_INSTRUCTIONS = """Write one HTTP acceptance suite for task.api before implementing it.
+Derive expected outcomes from the requirement scenarios, API method/path, I/O, P/Q and DB
+changes. Use edit_file to create the .test.ts target under backend/tests or update test_path.
+Use { test } from node:test and assert from node:assert/strict with async test callbacks.
+Import { createApiTest, fixturePasswordHash } as needed from task.support_module with a
+relative .js ESM path. Do not import handlers, createApp, server or test aliases.
 
-Use edit_file to create a .test.ts file under backend/tests using task.file_target, or update test_path. Use node:test with
-{test}, node:assert/strict as assert, and async test callbacks. Import the function
-named api.signature.name from api_module; the compiler maps it to the API implementation.
-Its signature is (request: ApiRequest, connection) => Promise<ApiResponse>.
-Requests have params, query, body and headers; responses have status, body and optional
-headers. They are plain transport objects, not Express request/response objects.
-Compute relative .js imports to api_module and support_module from the chosen test path.
+At the start of each test call const { database, baseURL } = createApiTest(t).
+The compiler owns a real backend process running backend/src/server.ts, its assigned port
+and its temporary on-disk database. The helper restores prerequisite data before each case
+and opens that SAME database for Given setup and SQL observations. Test files/cases run
+sequentially. Do not start a server, choose a port, create a separate database, run tests
+concurrently, mock HTTP or call business functions directly.
 
-Use createTestDatabase(t) and request(partial) from support_module. Each test receives
-a fresh real SQLite database. Seed Given state directly with parameterized SQL, supplying
-required columns; do not invoke another API to manufacture fixtures. Bind booleans as 0/1.
-Use the supplied test utility definitions for function signatures and fixture data
-conventions. Construct fixtures compatible with those conventions and the API contract;
-do not guess helper arguments or substitute arbitrary encoded values. Database initialization
-also runs backend/src/db/seed.ts, which loads backend/src/db/seeds/ENTITY.sql. Read the
-relevant insertion files when needed; reuse existing prerequisite records rather than
-assuming an empty database or inserting duplicate identities. For creation/rejection cases
-requiring absence or a different Given state, arrange only those records in the isolated
-test database before invoking the operation. Do not rely on another API's implementation.
+Exercise EVERY success/rejection case through real HTTP:
+const response = await fetch(new URL('/api/example', baseURL), {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ example: 'value' }), redirect: 'manual'
+});
+assert.equal(response.status, expectedStatus);
+const body = await response.json();
+Adapt the example to the canonical contract. Substitute encoded concrete route parameter
+values, construct query strings and JSON bodies, and verify actual status/body/headers.
+For 204 or other empty responses use text() or skip JSON parsing. Use redirect:'manual'
+when validating status/Location. Node fetch does not maintain browser cookies: obtain
+required cookies from real responses using headers.getSetCookie(), strip attributes and
+send them in a Cookie header for subsequent requests when this API requires it. Supply
+only contract-required authentication; do not test another requirement's login flow as
+an incidental dependency. Necessary existing sessions/accounts can be prepared via SQL.
 
-Within max_tests, prioritize meaningful success and requirement-defined rejection
-branches. Combine related assertions rather than generating a separate case for each
-condition or input variation. Assert response status, required fields/headers, persisted
-results and forbidden writes. Verify DB outcomes with SQL, not source-code scans or
-test-title labels. Treat R/W as possible effects; rejection need not perform them all.
-Do not assert random IDs/hashes/timestamps or exact wording absent from the contract.
-Cast response.body from unknown as needed. HTTP 501 is not a successful business result.
+Seed only required Given state directly through database with parameterized SQL and valid
+values; use 0/1 booleans. Read the actual shared helper/SQL definitions rather than guessing
+fixture arguments or password encodings. Initialization loads db/seeds/ENTITY.sql; reuse
+existing prerequisites instead of assuming empty tables or duplicating identities. Arrange
+scenario-specific absence/conflicting states in this isolated database. Do not invoke
+another requirement's registration/creation API to manufacture Given data.
 
-Use real API functions and SQLite, without mocks, skipped/focused tests or extra libraries.
-Keep direct function assertions so the test-only 501 stub establishes RED. Also include
-at least one meaningful HTTP success case within max_tests using the same real fixtures:
-import { createApp } from task.app_module with a relative .js ESM path, call createApp(connection),
-listen on port 0 at 127.0.0.1, await the listening event, then use fetch against its
-actual port. Register asynchronous server.close cleanup with t.after. Verify the real
-status, response and DB effects; use concrete URL parameter values, not literal contract
-placeholders. This checks Express registration, parameter extraction and response headers.
-Do not start the production server or open a second database. Read app_module if needed.
-Cross-API browser workflows belong to frontend E2E tests. Generated tests are repairable against requirement evidence;
-shared test utilities and infrastructure follow the files map. During test generation, repair
-supplied writable sources only to restore existing behavior or compilation, not to
-implement the new operation. The compiler compiles generated tests and runs accepted
-API regressions, then establishes assertion RED against a 501 stub before implementation.
-When repairing tests, preserve requirement-defined cases and assertions. Missing API
-behavior is expected RED; fix test/fixture errors without deleting that behavioral coverage.
+Within max_tests cover meaningful success and critical requirement-defined rejection.
+Assert relevant persisted results/forbidden writes with SQL where needed; HTTP is the
+only way to execute the operation. Do not assert unspecified wording, random identifiers,
+hashes or timestamps. Do not inspect source text, add mocks, skip/focus tests or hardcode
+success. Browser workflows belong to frontend E2E. Missing routes/behavior should fail real
+assertions; do not expect 404/501 merely because this API is not implemented yet.
+
+The compiler compiles the suite, runs accepted HTTP regressions, then runs this suite
+against the actual backend. Assertion RED establishes missing behavior. Existing behavior
+may already be GREEN; no stub replaces it. Backend startup failures are implementation
+feedback, not proof the test is wrong. During generation repair test syntax/fixtures and
+existing compilation problems, not the new operation. Generated tests remain correctable
+against requirement evidence; preserve valid success/rejection coverage and previous tests.
 """
 
 IMPLEMENT_INSTRUCTIONS = """Implement task.api according to its canonical contract against its generated tests.
 Use edit_file to create task.file_target under backend/src or repair implementation_path. Export:
 export async function handle(request: ApiRequest, connection: Database.Database): Promise<ApiResponse>.
-The export is always handle; api.signature.name is the compiler-provided business alias
-used by test bindings. Import ApiRequest and ApiResponse from backend/src/api/types.ts
+The export is always handle; signature.name identifies the business operation.
+Tests exercise the operation through HTTP, not through an exported test alias. Import ApiRequest and ApiResponse from backend/src/api/types.ts
 using a relative .js ESM import. Return status/body/optional headers, not Express objects.
 
 Implement request validation, API preconditions, success/rejection responses and DB
@@ -90,7 +92,7 @@ Preserve required comparison rules and shared credential/header conventions.
 
 Do not start a server, open another database, change schema or seed production data.
 Use installed dependencies and Node standard modules. Implement the operation directly;
-no DB-access primitive layer is generated. Test aliases are compiler-owned.
+no DB-access primitive layer is generated. The compiler owns the HTTP test runner and fixture.
 Predefined credentials in seeds/*.sql use seed_password_hash; its scrypt encoding is
 defined in backend/src/db/seed.ts and must remain readable by credential handlers.
 Read and edit task.api_wiring.registry to import this handle and register its actual
@@ -109,7 +111,7 @@ Generated tests can be corrected against requirement and API evidence when their
 expectations or fixtures are wrong or overly strict. Preserve required success and
 rejection coverage; do not weaken a valid assertion to accept broken behavior.
 SQL, designs, test utilities and compiler infrastructure remain references.
-The compiler runs TypeScript and current/accepted API tests. Repair implementation
+The compiler starts the real server and runs current/accepted HTTP API suites after TypeScript checks. Repair implementation
 failures without weakening assertions or detecting tests to fake business behavior.
 """
 
@@ -127,12 +129,12 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     for name in schema["entities"]:
         if not (output / f"backend/src/db/tables/{name}.sql").is_file():
             raise ValueError(f"Missing implemented SQL for {name}; run step 05")
-    prepare_runtime(output, contracts["apis"])
+    prepare_runtime(output)
     console = DemoConsole(pause)
     console.show("TDD preparation | Install dependencies", f"Workspace: {output}\nCommand: npm install --include=dev --no-audit --no-fund")
     install_dependencies(output)
     checkpoint(output, stage="08", task="runtime", action="Prepare backend wiring and dependencies",
-        details={"api_ids": list(contracts["apis"]), "test_bindings": TEST_BINDINGS_PATH})
+        details={"api_ids": list(contracts["apis"]), "http_test_runner": TEST_RUNNER_PATH})
     if not contracts["apis"]:
         report = {"status": "NO_APIS", "tests": {}, "red": {}, "green": {}, "agents": {}, "summary": {"tests": 0, "pass": 0, "fail": 0}}
         save_json(arc_dir / "backend_tdd.json", report)
@@ -186,37 +188,31 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         targets[aid] = chosen
                         files_by_api[aid] = [chosen]
                         generation_files = [targets[key] for key in [*accepted, aid]]
-                        sync_implementations(output, contracts["apis"])
                         compiled = checks.typecheck(generation_files)
                         if compiled["returncode"]:
                             raise ValueError(f"Test TypeScript compilation failed: {compiled['output']}")
                         if accepted:
                             require_green(checks.tests([targets[key] for key in accepted]))
-                        binding_source = (output / TEST_BINDINGS_PATH).read_bytes()
-                        try:
-                            save_text(output / TEST_BINDINGS_PATH,
-                                test_bindings_source(output, contracts["apis"], stubbed=[aid]))
-                            result = checks.tests(files_by_api[aid])
-                            require_red(result)
+                        result = checks.tests(files_by_api[aid])
+                        status = test_run_status(result)
+                        if status == "RED_CONFIRMED":
                             report["red"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}
-                            console.show(f"{aid} | RED: contract assertions fail against the test stub", result["output"])
-                        finally:
-                            save_bytes(output / TEST_BINDINGS_PATH, binding_source)
+                        entry["test_status"] = status
+                        console.show(f"{aid} | HTTP tests: {status}", result["output"])
                         save_json(arc_dir / "backend_tdd.json", report)
-                        checkpoint(output, stage="08", task=aid, action="Confirm assertion RED against the API stub",
-                            status="RED_CONFIRMED", details={"test_path": chosen, "checks": result})
-                        return compiled
+                        checkpoint(output, stage="08", task=aid, action="Run HTTP tests before implementation",
+                            status=status, details={"test_path": chosen, "checks": result})
+                        return {"typecheck": compiled, "tests": result, "status": status}
 
                     context = {
                         "api_id": aid, "api": api,
                         "requirement": requirement_context(tree, rid),
                         "db_schema": related_schema(schema, [api]), "test_path": relative if (output / relative).is_file() else None,
                         "max_tests": max_tests,
-                        "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
-                        "app_module": "backend/src/app.ts",
+                        "support_module": TEST_SUPPORT_PATH,
                     }
                     workspace = selection.workspace(target=("backend_test", aid), existing=relative,
-                        references=["backend/src/app.ts", *supplied_sources(output, api, schema)])
+                        references=[*supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation",
                         feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
@@ -234,7 +230,6 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     regression_files = [relative for key in [*accepted, aid] for relative in files_by_api[key]]
 
                     def implementation_checks():
-                        sync_implementations(output, contracts["apis"])
                         compiled = checks.typecheck(regression_files)
                         if compiled["returncode"]:
                             return {"typecheck": compiled, "tests": None}
@@ -249,7 +244,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         return result
 
                     api_entry = selected_path(output, "api", aid)
-                    current = implementation_checks() if api_entry and (output / api_entry).is_file() else None
+                    current = implementation_checks() if api_entry and (output / api_entry).is_file() else agent["checks"]
                     context = {
                         "api_id": aid, "api": api, "db_schema": related_schema(schema, [api]),
                         "requirement": requirement_context(tree, rid),
