@@ -36,10 +36,11 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
     discovery, context_result = DiscoverySession(index), None
     read_files = {}
     feedback = [] if feedback is None else [feedback_filter(feedback) if feedback_filter else feedback]
+    check_feedback = list(feedback)
     for turn in range(1, max_turns + 1):
         console.show(f"{label} | Edit round {turn}/{max_turns}",
             "Generate file edits, then run the stage's compilation and test acceptance checks.")
-        response, applied = None, False
+        response, applied, checking = None, False, False
         try:
             def request_model():
                 # Gates may regenerate wiring outside edit_file; discard stale excerpts too.
@@ -81,26 +82,24 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     query = response["context_request"]
                     console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                     if isinstance(query, dict) and query.get("kind") == "file" and "ids" in query:
-                        context_result = discovery.observe({"error": "Use read_file for file content; context_request discovers semantic records or file candidates."})
+                        raise ValueError('Use read_file for file content, for example '
+                            '{"tool_calls":[{"tool":"read_file","path":"backend/src/db/initialize.ts"}]}. '
+                            'context_request discovers semantic records or file candidates.')
                     else:
                         context_result = discovery.resolve(query)
                 elif "tool_calls" in response and files.effect(response["tool_calls"]) == "read":
                     calls = response["tool_calls"]
-                    console.show(label + " | Read files", str([call.get("arguments", {}).get("path") for call in calls]))
-                    try:
-                        results = files.execute(calls)
-                        observation = {"tool_results": results}
-                        for item in results:
-                            record = item["result"]
-                            excerpts = read_files.setdefault(record["path"], [])
-                            # Keep distinct ranges; a wider read replaces excerpts it covers.
-                            excerpts[:] = [old for old in excerpts if not (
-                                record["start_line"] <= old["start_line"] and record["end_line"] >= old["end_line"])]
-                            excerpts.append(record)
-                        context_result = {"read_paths": [item["result"]["path"] for item in results]}
-                    except (*RESPONSE_ERRORS, OSError) as error:
-                        context_result = {"tool_results": [{"error": getattr(error, "feedback", {"message": str(error)})}]}
-                        observation = context_result
+                    console.show(label + " | Read files", str([call["path"] for call in calls]))
+                    results = files.execute(calls)
+                    observation = {"tool_results": results}
+                    for item in results:
+                        record = item["result"]
+                        excerpts = read_files.setdefault(record["path"], [])
+                        # Keep distinct ranges; a wider read replaces excerpts it covers.
+                        excerpts[:] = [old for old in excerpts if not (
+                            record["start_line"] <= old["start_line"] and record["end_line"] >= old["end_line"])]
+                        excerpts.append(record)
+                    context_result = {"read_paths": [item["result"]["path"] for item in results]}
                     observed = discovery.observe(observation)
                     if observed.get("next_action"):
                         context_result["next_action"] = observed["next_action"]
@@ -130,6 +129,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             checkpoint(files.output, task=label, action=f"Apply file edits in round {turn}", status="PROPOSED",
                 details={"round": turn, "files": [change["path"] for change in files.last_changes],
                     "diagnosis": response.get("diagnosis")})
+            checking = True
             checks = gate()
             checkpoint(files.output, task=label, action=f"Accept edit round {turn}",
                 details={"round": turn, "checks": checks})
@@ -141,7 +141,12 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 else response_feedback(error, response))
             if isinstance(response, dict) and response.get("diagnosis") and isinstance(rejected, dict):
                 rejected = {**rejected, "previous_diagnosis": response["diagnosis"]}
-            feedback = [feedback_filter(rejected) if feedback_filter else rejected]
+            rejected = feedback_filter(rejected) if feedback_filter else rejected
+            if checking:
+                check_feedback = [rejected]
+                feedback = list(check_feedback)
+            else:
+                feedback = [*check_feedback, rejected]
             checkpoint(files.output, task=label, action=f"Reject edit round {turn}", status="REJECTED",
                 details={"round": turn, "applied": applied, "feedback": feedback})
     raise AgentExhausted(label, max_turns, feedback)

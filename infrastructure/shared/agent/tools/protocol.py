@@ -1,8 +1,26 @@
 """Shared model instructions for the executable file-tool registry."""
 
-FILE_TOOL_RULES = '''Use the file tools declared in input.tools. Return JSON:
-{"tool_calls":[{"tool":"edit_file","arguments":{"path":"backend/src/example.ts",
-"operation":"replace","old_content":"exact original text","new_content":"replacement text"}}]}.
+FILE_TOOL_RULES = '''Use the file tools declared in input.tools. Return one JSON object with tool_calls.
+Each call is FLAT: tool, path and all other parameters are sibling fields.
+Do not nest parameters inside arguments, parameters or function.
+
+Read a whole file:
+{"tool_calls":[{"tool":"read_file","path":"backend/src/db/initialize.ts"}]}.
+Read an inclusive 1-based line range:
+{"tool_calls":[{"tool":"read_file","path":"backend/src/db/initialize.ts","start_line":1,"end_line":40}]}.
+Omit end_line to read through EOF. Read contents appear in input.read_files[path] as
+excerpts with path, content, start_line, end_line, total_lines and writable.
+context_result.read_paths lists the files just read; use retained excerpts for their content.
+
+Replace a local span:
+{"tool_calls":[{"tool":"edit_file","path":"backend/src/example.ts",
+"operation":"replace","old_content":"exact original text","new_content":"replacement text"}]}.
+Create a new file:
+{"tool_calls":[{"tool":"edit_file","path":"backend/src/new-helper.ts",
+"operation":"create","new_content":"export const value = 1;\\n"}]}.
+Append to an existing file:
+{"tool_calls":[{"tool":"edit_file","path":"backend/src/example.ts",
+"operation":"append","new_content":"\\n// Additional implementation\\n"}]}.
 Use read_file calls when evidence is missing, and edit_file calls when ready to change code.
 The compiler executes calls and returns tool_results; tools are not prose instructions.
 Do not return legacy edits/content proposals, shell commands, Markdown or OS-specific paths.
@@ -56,6 +74,8 @@ by the stage's real compilation/tests; passing tools do not mean the task passed
 An empty tool_calls list runs acceptance checks; it cannot finish a missing target.
 After a failed check, edits remain available for repair. Tool errors explain failed exact
 matches, paths and destinations; inspect only needed evidence and retry.
+Earlier compilation/test failures remain unresolved until checks run again. A tool-call
+format error does not prove the application correct or replace the last check result.
 
 When feedback is present, add diagnosis before choosing changes:
 {"diagnosis":{"cause":"implementation","reason":"Evidence and proposed repair"},"tool_calls":[...]}.

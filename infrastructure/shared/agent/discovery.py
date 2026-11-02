@@ -55,8 +55,9 @@ class DiscoverySession:
         try:
             result = self.index.query(query)
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
-            result = {'error': str(error), 'context_kinds': list(self.index.records()),
-                'notice': 'Correct the query or return the normal stage output.'}
+            raise ValueError(f'Invalid context_request {query!r}: {error}. '
+                f'Available kinds: {list(self.index.records())}. '
+                'Correct the query or return the normal stage output.') from error
         kind = result.get('kind')
         for candidate in result.get('candidates', []):
             if candidate['id'] not in self.evidence.get(kind, {}):

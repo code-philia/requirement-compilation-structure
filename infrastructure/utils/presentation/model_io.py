@@ -203,11 +203,8 @@ def _structured_output_view(content, usage, elapsed):
         for call in value["tool_calls"][:16]:
             if not isinstance(call, dict):
                 continue
-            arguments = call.get("arguments", {})
-            if not isinstance(arguments, dict):
-                continue
-            detail = arguments.get("operation", f"{arguments.get('start_line', 1)}..{arguments.get('end_line', 'EOF')}")
-            calls.add_row(text(call.get("tool", "?")), text(arguments.get("path", "?")), text(detail))
+            detail = call.get("operation", f"{call.get('start_line', 1)}..{call.get('end_line', 'EOF')}")
+            calls.add_row(text(call.get("tool", "?")), text(call.get("path", "?")), text(detail))
         views.append(calls)
     elif isinstance(value, dict) and isinstance(value.get("edits"), list):
         edits = table("File edits", "Source lines")
