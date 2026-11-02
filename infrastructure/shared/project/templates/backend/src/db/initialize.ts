@@ -8,7 +8,11 @@ export function initializeDatabase(connection: Database.Database): void {
   connection.pragma("foreign_keys = ON");
   connection.transaction(() => {
     for (const filename of tableFiles) {
-      connection.exec(readFileSync(new URL(`./tables/${filename}`, import.meta.url), "utf8"));
+      try {
+        connection.exec(readFileSync(new URL(`./tables/${filename}`, import.meta.url), "utf8"));
+      } catch (cause) {
+        throw new Error(`Database initialization failed for ${filename}`, { cause });
+      }
     }
     if (connection.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Foreign-key validation failed");
   })();

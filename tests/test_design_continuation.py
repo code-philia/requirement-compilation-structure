@@ -82,6 +82,7 @@ class DesignContinuation(unittest.TestCase):
                 calls.append(name)
                 return {} if name == 'Note' else {'content': 'CREATE TABLE Other (id TEXT);'}
             with patch.object(stage, 'TextModel', return_value=Mock(generate_json=proposal)), \
+                    patch.object(stage, 'verify_database_runtime', side_effect=ValueError('Incomplete table implementations')), \
                     patch.object(stage, 'DemoConsole', return_value=Mock()):
                 with self.assertRaises(StageIncomplete):
                     stage.implement_db(arc, max_attempts=1)

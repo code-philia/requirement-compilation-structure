@@ -35,6 +35,8 @@ class PipelineContinuation(unittest.TestCase):
                 stack.enter_context(patch.object(import_module('09_design_ui'), 'TextModel',
                     return_value=Mock(generate_json=Mock(return_value={
                         'pages': {}, 'elements': {}, 'bindings': {}, 'requirement_ui': [], 'step_ui': {}}))))
+                stack.enter_context(patch.object(import_module('05_implement_db'), 'verify_database_runtime',
+                    return_value={'status': 'GREEN'}))
                 compiler.compile()
             self.assertEqual(calls, ['BAD'] * 10 + ['GOOD'])
             self.assertEqual(len(compiler.report['stages']), 13)

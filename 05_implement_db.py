@@ -1,4 +1,4 @@
-"""Step 05: implement one SQLite CREATE TABLE file per schema entity."""
+"""Step 05: implement SQLite tables and repair real initialization/startup failures."""
 
 import json
 from contextlib import ExitStack
@@ -16,11 +16,13 @@ from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.shared.agent.discovery import project_index
 from infrastructure.utils.files import save_text
 from infrastructure.shared.project.git import checkpoint
+from infrastructure.stages.database.implementation import verify_database_runtime
+from infrastructure.utils.files import read_source
 
 
 # --- Extension point 05A: SQL lowering policy ---------------------------------
 # The model writes DDL; Python publishes it at the supplied table path.
-# Executable behavior is exercised by later application tests.
+# The real initializer and compiled startup are checked and repaired in this pass.
 INSTRUCTIONS = """Implement entity as SQLite DDL for the compiler-selected output_path.
 Return {"content": "complete SQL file contents"}. The compiler writes output_path.
 The content string contains SQL text without Markdown fences.
@@ -48,7 +50,9 @@ SQL files in a transaction. Preserve existing data through IF NOT EXISTS.
 """
 
 
-def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10) -> dict:
+def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max_turns: int = 10) -> dict:
+    if max_turns < 1:
+        raise ValueError("--max-turns must be positive")
     source = arc_dir / "db_schema.json"
     if not source.is_file():
         raise ValueError("Run 02_build_db_schema.py first to create .arc/db_schema.json")
@@ -108,10 +112,10 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10) -> 
                 save_text(target, content)
                 implementations[name] = proposal
                 console.show(f"{label} | 4. Table implementation saved", (
-                    f"{target}\n\nSQL proposal saved. Executable behavior is checked by application tests."
+                    f"{target}\n\nSQL proposal saved. This pass checks real initialization and startup next."
                     + "\nValue CHECK constraints and application-only rules remain available for semantic review."
                 ))
-    # --- Pass boundary: activate only a completely validated table set --------
+    # --- Pass boundary: wire candidates, then execute and repair them ----------
     # The executable loader is the order registry; no extra manifest is retained.
     initializer = output_dir / "backend/src/db/initialize.ts"
     if not initializer.resolve().is_relative_to(output_dir):
@@ -120,6 +124,17 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10) -> 
     checkpoint(output_dir, stage="05", task="database initializer", action="Publish ordered SQL initialization",
         details={"table_order": order, "published_tables": list(implementations)})
     print(f"Database initialization wired: {initializer}", flush=True)
+    with failures.task("database runtime"):
+        verified = verify_database_runtime(arc_dir, schema, model, console, max_turns)
+        # The runtime owner can repair tables whose initial generation failed.
+        for name in order:
+            relative = f"backend/src/db/tables/{name}.sql"
+            implementations[name] = {"path": relative, "content": read_source(output_dir / relative)}
+            entry = failures.report["tasks"].get(name)
+            if entry and entry["status"] == "FAILED":
+                failures.report["tasks"][name] = {"status": "GREEN", "initial_failure": entry,
+                    "recovered_by": "database runtime repair"}
+        console.show("Database runtime | GREEN", json.dumps(verified, ensure_ascii=False, indent=2))
     failures.finish()
     return implementations
 
@@ -127,12 +142,13 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10) -> 
 def main() -> None:
     parser = create_parser("Step 05: Implement DB Tables")
     parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per table; including the first proposal (default: 10)")
+    parser.add_argument("--max-turns", type=int, default=10, help="Maximum real database/startup repair rounds")
     args = parser.parse_args()
     with ExitStack() as stack:
         try:
             _, output_dir = resolve_directories(args)
             stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            implement_db(output_dir / ".arc", args.pause, args.max_attempts)
+            implement_db(output_dir / ".arc", args.pause, args.max_attempts, args.max_turns)
         except (OSError, ValueError, RuntimeError) as error:
             parser.exit(1, f"Execution failed: {error}\n")
 

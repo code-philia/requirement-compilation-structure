@@ -124,6 +124,8 @@ class CompilerPipeline(unittest.TestCase):
                     model.return_value.generate_json.return_value = proposal
                     models.append(model)
                 install = stack.enter_context(patch.object(import_module('08_implement_backend_tdd'), 'install_dependencies'))
+                stack.enter_context(patch.object(import_module('05_implement_db'), 'verify_database_runtime',
+                    return_value={'status': 'GREEN'}))
                 compiler.compile()
             install.assert_called_once_with(compiler.output_dir)
             self.assertEqual(sum(model.return_value.generate_json.call_count for model in models), 4)
