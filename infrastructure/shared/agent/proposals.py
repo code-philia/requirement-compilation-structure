@@ -3,6 +3,7 @@
 import json
 
 from infrastructure.shared.agent.discovery import DISCOVERY_RULES, DiscoverySession
+from infrastructure.shared.project.git import checkpoint
 
 
 RESPONSE_ERRORS = (ValueError, KeyError, TypeError, AttributeError, IndexError)
@@ -53,10 +54,14 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
                 console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                 request["context_result"] = discovery.resolve(query)
                 response = model.generate_json(prompt, request)
-            return accept(response), response
+            accepted = accept(response)
+            checkpoint(task=label, action=f"Accept design proposal {attempt}",
+                details={"attempt": attempt, "sections": list(response) if isinstance(response, dict) else []})
+            return accepted, response
         except RESPONSE_ERRORS as error:
             feedback = response_feedback(error, response)
             feedback["failed_attempt"] = attempt
+            checkpoint(task=label, action=f"Reject design proposal {attempt}", status="REJECTED", details=feedback)
             console.show(f"{label} | Repair feedback", json.dumps(feedback, ensure_ascii=False, indent=2))
             if attempt >= max_attempts:
                 raise RuntimeError(f"{label} exhausted {max_attempts} proposals: {feedback['error']}") from error

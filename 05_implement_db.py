@@ -15,6 +15,7 @@ from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.shared.agent.discovery import project_index
 from infrastructure.utils.files import save_text
+from infrastructure.shared.project.git import checkpoint
 
 
 # --- Extension point 05A: SQL lowering policy ---------------------------------
@@ -116,6 +117,8 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10) -> 
     if not initializer.resolve().is_relative_to(output_dir):
         raise ValueError("DB initializer path escapes the output directory")
     save_text(initializer, initializer_source(implementations))
+    checkpoint(output_dir, stage="05", task="database initializer", action="Publish ordered SQL initialization",
+        details={"table_order": order, "published_tables": list(implementations)})
     print(f"Database initialization wired: {initializer}", flush=True)
     failures.finish()
     return implementations

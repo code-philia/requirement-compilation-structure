@@ -23,6 +23,7 @@ from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, m
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
+from infrastructure.shared.project.git import checkpoint
 
 
 def scenario_context(ui, design, rid):
@@ -151,6 +152,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     install_dependencies(output)
     checks = E2EChecks(output, max_tests)
     checks.install_browser()
+    checkpoint(output, stage="12", task="runtime", action="Prepare real-app E2E host and isolated database fixtures",
+        details={"pages": list(ui["pages"]), "trigger_ids": list(design["triggers"])})
     accepted, implemented = [], set()
     ui_checks = FrontendChecks(output)
     selection = SourceFiles(output, ui)
@@ -269,6 +272,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             current = {"typecheck": generated["typecheck"], "e2e": generated["behavior"]}
             report["requirements"][rid]["status"] = generated["status"]
             save_json(arc_dir / "frontend_e2e.json", report)
+            checkpoint(output, stage="12", task=rid, action="Publish functional smoke tests before implementation",
+                status=generated["status"], details={"test_path": relative, "checks": generated})
             # Reuse passing smoke results when test generation did not change application sources.
             if not missing and not application_changed and not ui_files and generated["status"] == "GREEN":
                 agent = {"turns": 0, "checks": current}

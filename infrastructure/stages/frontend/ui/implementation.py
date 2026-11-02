@@ -16,6 +16,7 @@ from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pag
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_suite, require_green, test_path
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
+from infrastructure.shared.project.git import checkpoint
 
 INSTRUCTIONS = """Implement the current page from its UI/data design, requirement uses and visual_references.
 Create the task.new_file target or update implementation_path. Export a named React
@@ -62,6 +63,8 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     install_dependencies(output)
     checks = FrontendChecks(output)
     checks.install_browser()
+    checkpoint(output, stage="10", task="runtime", action="Prepare presentation host and browser tests",
+        details={"pages": list(design["pages"])})
     accepted = []
     selection = SourceFiles(output, design)
     report["status"] = "IMPLEMENTING"
@@ -75,6 +78,9 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         report["pages"][pid] = {"status": "TESTS_READY", "requirements": uses, "test_path": relative}
         save_json(arc_dir / "ui_checks.json", report)
         label = f"UI {number}/{len(design['pages'])} {pid}"
+        checkpoint(output, stage="10", task=pid, action="Publish UI existence suite before implementation",
+            status="TESTS_READY", details={"test_path": relative, "requirements": uses,
+                "display_states": list(design["pages"][pid]["fixtures"])})
         console.show(label + " | Existence tests before implementation", (output / relative).read_text(encoding="utf-8"))
         files = [test_path(key) for key in [*accepted, pid]]
 

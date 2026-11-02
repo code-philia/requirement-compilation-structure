@@ -18,6 +18,7 @@ from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_bytes, save_json, save_text
+from infrastructure.shared.project.git import checkpoint
 
 
 TEST_INSTRUCTIONS = """Write one canonical test suite for task.api, whose contract covers its shared uses, before
@@ -103,6 +104,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     console = DemoConsole(pause)
     console.show("TDD preparation | Install dependencies", f"Workspace: {output}\nCommand: npm install --include=dev --no-audit --no-fund")
     install_dependencies(output)
+    checkpoint(output, stage="08", task="runtime", action="Prepare backend wiring and dependencies",
+        details={"api_ids": list(contracts["apis"]), "test_bindings": TEST_BINDINGS_PATH})
     if not contracts["apis"]:
         report = {"status": "NO_APIS", "tests": {}, "red": {}, "green": {}, "agents": {}, "summary": {"tests": 0, "pass": 0, "fail": 0}}
         save_json(arc_dir / "backend_tdd.json", report)
@@ -165,6 +168,9 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                             console.show(f"{aid} | RED: contract assertions fail against the test stub", result["output"])
                         finally:
                             save_bytes(output / TEST_BINDINGS_PATH, binding_source)
+                        save_json(arc_dir / "backend_tdd.json", report)
+                        checkpoint(output, stage="08", task=aid, action="Confirm assertion RED against the API stub",
+                            status="RED_CONFIRMED", details={"test_path": chosen, "checks": result})
                         return compiled
 
                     context = {

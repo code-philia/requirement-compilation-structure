@@ -14,6 +14,7 @@ from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE
 from infrastructure.stages.frontend.triggers.testing import E2EChecks
 from infrastructure.stages.frontend.ui.testing import require_green
 from infrastructure.utils.files import save_json
+from infrastructure.shared.project.git import checkpoint
 
 INSTRUCTIONS = '''Write independent final acceptance tests for ONE original requirement.
 Derive expected results from original_requirement and its Given/When/Then scenarios.
@@ -117,6 +118,9 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                 # A separate, requirement-grounded review may correct the test, but its
                 # gate intentionally does not demand behavioral GREEN.
                 entry['initial_failure'] = result
+                save_json(arc_dir / 'independent_acceptance.json', report)
+                checkpoint(output, stage="12", task=rid, action="Record independent acceptance before test review",
+                    status="FAILED", details={"test_path": path, "checks": result})
                 review = run_file_agent(model, REVIEW_INSTRUCTIONS, task, workspace, compile_suite,
                     max_turns, console, label + ' / Test review', feedback=result, context_index=index)
                 entry['review_turns'] = review['turns']
@@ -128,8 +132,12 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
             entry.update(status='FAILED', error=str(error))
         finally:
             save_json(arc_dir / 'independent_acceptance.json', report)
+            checkpoint(output, stage="12", task=rid, action="Publish independent requirement acceptance",
+                status=entry['status'], details=entry)
             console.show(label + ' | ' + entry['status'], entry.get('error', 'Real acceptance checks completed'))
     report['status'] = 'GREEN' if report['requirements'] and all(
         entry['status'] == 'GREEN' for entry in report['requirements'].values()) else 'COMPLETED_WITH_FAILURES'
     save_json(arc_dir / 'independent_acceptance.json', report)
+    checkpoint(output, stage="12", task="independent acceptance", action="Publish final independent acceptance report",
+        status=report['status'], details=report)
     return report

@@ -9,6 +9,7 @@ from infrastructure.shared.agent.conventions import task_conventions
 from infrastructure.shared.agent.files import FileWorkspace
 from infrastructure.shared.agent.protocol import FILE_EDIT_RULES
 from infrastructure.shared.agent.proposals import RESPONSE_ERRORS, response_feedback
+from infrastructure.shared.project.git import checkpoint
 
 
 class AgentExhausted(ValueError):
@@ -77,7 +78,13 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
                 raise ValueError("Create the target file in the first edit before running acceptance checks")
             console.show(f"{label} | Edit round {turn}/{max_turns}",
                 str([edit["path"] for edit in response["edits"]]))
-            return {"turns": turn, "checks": gate()}
+            checkpoint(files.output, task=label, action=f"Apply file edits in round {turn}", status="PROPOSED",
+                details={"round": turn, "files": [edit["path"] for edit in response["edits"]],
+                    "diagnosis": response.get("diagnosis")})
+            checks = gate()
+            checkpoint(files.output, task=label, action=f"Accept edit round {turn}",
+                details={"round": turn, "checks": checks})
+            return {"turns": turn, "checks": checks}
         except (*RESPONSE_ERRORS, RuntimeError) as error:
             message = str(error)
             console.show(f"{label} | Repair feedback", message)
@@ -86,4 +93,6 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
             if isinstance(response, dict) and response.get("diagnosis") and isinstance(rejected, dict):
                 rejected = {**rejected, "previous_diagnosis": response["diagnosis"]}
             feedback = [feedback_filter(rejected) if feedback_filter else rejected]
+            checkpoint(files.output, task=label, action=f"Reject edit round {turn}", status="REJECTED",
+                details={"round": turn, "applied": applied, "feedback": feedback})
     raise AgentExhausted(label, max_turns, feedback)

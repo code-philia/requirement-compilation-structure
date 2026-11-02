@@ -7,6 +7,7 @@ import traceback
 from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
+from infrastructure.shared.project.git import checkpoint
 
 
 class Compiler:
@@ -35,6 +36,8 @@ class Compiler:
             self.report["status"] = "INTERRUPTED"
             self.report["stages"][module] = {"status": "INTERRUPTED", "error": str(error)}
             save_json(self.arc_dir / "compilation.json", self.report)
+            checkpoint(self.output_dir, stage=module, task="stage report", action="Record interrupted pass",
+                status="INTERRUPTED", details=self.report["stages"][module])
             raise
         except Exception as error:
             result = {"status": "FAILED", "error": str(error),
@@ -50,6 +53,8 @@ class Compiler:
                 if key in result:
                     self.report["stages"][module][key] = result[key]
         save_json(self.arc_dir / "compilation.json", self.report)
+        checkpoint(self.output_dir, stage=module, task="stage report", action="Publish pass result",
+            status=status, details=self.report["stages"][module])
         return result
 
     def compile(self) -> Path:
@@ -89,6 +94,8 @@ class Compiler:
             if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
         self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
         save_json(self.arc_dir / "compilation.json", self.report)
+        checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
+            status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete})
         show_panel("[DONE] Requirement compilation | " + self.report["status"],
             f"Application: {self.output_dir}\nReport: {self.arc_dir / 'compilation.json'}"
             + ("\nIncomplete stages: " + ", ".join(incomplete) if incomplete else ""),
