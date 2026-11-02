@@ -38,7 +38,8 @@ class TextModel:
     def __init__(self, *, json_mode: bool = True) -> None:
         """Read compiler/.env and configure the text model client; reject missing credentials or model name."""
         load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
-        self.name = os.getenv("MODEL")
+        # self.name = os.getenv("MODEL")
+        self.name = "deepseek-flash"
         api_key = os.getenv("OPENAI_API_KEY")
         if not self.name or not api_key:
             raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env")
