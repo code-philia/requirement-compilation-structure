@@ -1,27 +1,19 @@
-"""Step 10 lowering: generate UI types, page wiring, and presence-test setup.
+"""Prepare frontend build tools and the presentation-test adapter.
 
-Compiler-owned TypeScript/configuration strings define a stable host for model-selected React components. This stage exposes UI/data only; business interactions
-are designed in step 11 and installed by the interaction runtime in step 12."""
+Application routes, events, state and component bindings are model-owned code.
+"""
 
 import json
 from pathlib import Path
 import re
 
-from infrastructure.shared.project.entrypoints import import_path, implementation_entrypoint
 from infrastructure.shared.project.initialize import enable_import_case_checks
 from infrastructure.utils.files import save_text
 
 PLAYWRIGHT_VERSION = "1.64.1"
-STATE_PATH = "frontend/src/ui-state.ts"
-STATE_SOURCE = '''// Application implementation tasks initialize state from requirements.
-export function createInitialState(): Record<string, unknown> {
-  return {};
-}
-'''
+APPLICATION_ENTRYPOINTS = ("frontend/src/main.tsx", "frontend/src/App.tsx")
 
-
-UI_RUNTIME = '''// Compiler-owned UI types shared by presentation and interaction stages.
-export interface UiPageProps { data: Readonly<Record<string, unknown>> }
+UI_RUNTIME = '''// Presentation-test adapter only; application behavior is implemented by the model.
 
 declare global {
   interface Window {
@@ -30,35 +22,17 @@ declare global {
   }
 }
 
+export function isPresentationTest(page: string): boolean {
+  const development = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV;
+  return development && window.__ARC_UI_TEST_DATA__?.page === page;
+}
+
 export function presentationData(page: string, state: Record<string, unknown>) {
   const development = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV;
   const testData = development ? window.__ARC_UI_TEST_DATA__ : undefined;
   if (development) window.__ARC_UI_DATA__ = { page, data: state };
   return testData?.page === page ? { ...state, ...testData.data } : state;
 }
-
-export function syncInput(target: EventTarget | null, bindings: Record<string, string[]>, update: (patch: Record<string, unknown>) => void) {
-  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
-  const variables = bindings[target.getAttribute("data-testid") ?? ""] ?? [];
-  const value = target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value;
-  if (variables.length) update(Object.fromEntries(variables.map(name => [name, value])));
-}
-
-export interface UiApiRequest {
-  params?: Record<string, unknown>; query?: Record<string, unknown>;
-  body?: Record<string, unknown>; headers?: Record<string, string>;
-  credentials?: RequestCredentials;
-}
-export interface UiApiResponse { status: number; body: unknown; headers: Record<string, string> }
-export interface UiTriggerContext {
-  readonly data: Readonly<Record<string, unknown>>;
-  readonly input: { value?: string; checked?: boolean; key?: string };
-  readonly trigger: { id: string; source: string; event: string };
-  update(patch: Record<string, unknown>): void;
-  navigate(pageId: string): void;
-  api(apiId: string, request?: UiApiRequest): Promise<UiApiResponse>;
-}
-export type UiTriggerHandler = (context: UiTriggerContext) => void | Promise<void>;
 '''
 
 PLAYWRIGHT_CONFIG = '''// Compiler-owned UI existence tests. No backend is started at this stage.
@@ -115,7 +89,7 @@ def configure_tailwind(output: Path) -> None:
 
 
 def prepare_frontend(output: Path) -> None:
-    """Write compiler-owned UI types, application wiring, and browser-test configuration."""
+    """Prepare build and test infrastructure without generating application behavior."""
     for relative in ("package.json", "frontend/package.json", "frontend/src/main.tsx", "frontend/tsconfig.json", "frontend/vite.config.ts"):
         if not (output / relative).is_file():
             raise ValueError(f"Missing {relative}; run 00_project_initialization.py first")
@@ -129,28 +103,3 @@ def prepare_frontend(output: Path) -> None:
     save_text(path, json.dumps(package, indent=2) + "\n")
     save_text(output / "frontend/playwright.ui.config.ts", PLAYWRIGHT_CONFIG)
     save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
-    if not (output / STATE_PATH).is_file():
-        save_text(output / STATE_PATH, STATE_SOURCE)
-
-
-def sync_pages(output: Path, design: dict) -> None:
-    """Regenerate the page registry from fixed Page exports."""
-    imports, routes = ['import { useState } from "react";', 'import { presentationData, syncInput } from "./ui-runtime";',
-        'import { createInitialState } from "./ui-state";'], []
-    for number, (pid, page) in enumerate(design["pages"].items()):
-        entry = implementation_entrypoint(output, "page", pid)
-        component = f"Page{number}"
-        if entry:
-            imported = import_path("frontend/src/App.tsx", entry["path"], extension="")
-            imports.append(f'import {{ {entry["export"]} as {component} }} from {json.dumps(imported)};')
-            body = f"<{component} data={{data}} />"
-        else:
-            body = '<main><h1>UI implementation pending</h1></main>'
-        routes.append(f'    case {json.dumps(page["route"])}: {{\n'
-            f'      const data = presentationData({json.dumps(pid)}, state);\n'
-            f'      return <div onSubmit={{event => event.preventDefault()}} onInputCapture={{event => syncInput(event.target, inputBindings, update)}} onChangeCapture={{event => syncInput(event.target, inputBindings, update)}}>{body}</div>;\n    }}')
-    source = "// Compiler-owned routes and display data. UI data bindings without business triggers.\n" + "\n".join(imports)
-    source += "\nconst inputBindings: Record<string, string[]> = " + json.dumps({uid: [declaration["var"] for declaration in node["data"]] for uid, node in design["elements"].items() if "user_write" in node.get("mode", []) and node.get("data")}) + ";\n"
-    source += '\nexport function App() {\n  const [state, setState] = useState(createInitialState);\n  const update = (patch: Record<string, unknown>) => setState(current => ({ ...current, ...patch }));\n  switch (window.location.pathname) {\n' + "\n".join(routes)
-    source += '\n    default: return <main><h1>Page not found</h1></main>;\n  }\n}\n'
-    save_text(output / "frontend/src/App.tsx", source)

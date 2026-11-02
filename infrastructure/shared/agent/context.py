@@ -5,7 +5,7 @@ import posixpath
 import re
 
 from infrastructure.shared.agent.feedback import compact_feedback
-from infrastructure.shared.agent.files import API_WIRING, editable_application_path, editable_sources, source_paths
+from infrastructure.shared.agent.files import SHARED_SOURCES, editable_application_path, editable_sources, source_paths
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.utils.files import read_source
@@ -15,8 +15,8 @@ class SourceFiles:
     """Select sources by semantic ownership, imports, and concrete failure feedback.
 
     The available-file catalogue is compiler-only. It is never sent wholesale to
-    the model. All supplied application dependencies stay writable; generated
-    wiring and runtime interfaces stay read-only. Generated test suites can be
+    the model. Application integration stays writable; compiler-owned database
+    and test infrastructure stay read-only. Generated test suites can be
     corrected against requirements; compiler-owned test utilities remain references.
     """
 
@@ -55,7 +55,7 @@ class SourceFiles:
             target = self.output / relative
             # Shared wiring can import the whole application. Supply its
             # interface only; it must not expand the source context transitively.
-            if relative in API_WIRING or relative not in roots or relative not in self.editable or not target.is_file():
+            if relative in SHARED_SOURCES or relative not in roots or relative not in self.editable or not target.is_file():
                 continue
             source = read_source(target)
             imports = re.findall(r'''(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\(\s*)["'](\.[^"']+)["']''', source)
