@@ -13,6 +13,11 @@ current decision; do not search to reconfirm definitions already supplied or ret
 When evidence is missing, return only {"context_request": {"kind": "schema",
 "query": "session credential"}} to discover candidates, or use "ids": ["Account.id"]
 to read exact records. Available kinds are listed in context_kinds.
+context_request is an ordinary JSON field, NOT a native tool. Never serialize it as
+DSML, XML, invoke/parameter tags or a provider tool-call block. For example, when page
+is an advertised kind, search shelves by returning exactly:
+{"context_request":{"kind":"page","query":"shelves"}}
+Do not put this object inside tags, Markdown or a JSON string.
 Only those advertised kinds are supported; examples below do not enable other scopes.
 Search returns IDs/descriptions, not definitions, except requirement searches return complete records.
 Read needed IDs before modifying or calling other kinds of records.

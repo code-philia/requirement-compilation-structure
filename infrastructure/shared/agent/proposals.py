@@ -11,7 +11,10 @@ REPAIR_INSTRUCTIONS = """The previous proposal was rejected. Read correction.err
 in the input and fix that failure. correction.previous_response is the rejected
 answer, not an accepted example. Return a complete replacement JSON object in the
 original output format, including every required top-level section. Do not return
-only the unchanged portion, a partial patch, or the correction metadata itself."""
+only the unchanged portion, a partial patch, or the correction metadata itself.
+DSML/XML tool-call text is forbidden. If requesting context, return the allowed
+context_request JSON object directly, never invoke/parameter tags. Otherwise return
+the complete stage result. invalid_response is rejected data; never copy its format."""
 
 
 def response_feedback(error, response):
@@ -20,6 +23,11 @@ def response_feedback(error, response):
     if isinstance(error, KeyError):
         key = error.args[0] if error.args else "(unknown)"
         message = f"Missing key {key!r} while reading the model response. Return the requested complete records."
+    if isinstance(error, json.JSONDecodeError):
+        message += (" Output must be one valid JSON object, without DSML/XML tool-call tags, "
+            "Markdown or text outside the object. For an allowed context query return "
+            '{"context_request":{"kind":"<advertised kind>","query":"<needed fact>"}}. '
+            "Otherwise return the stage result as JSON. Do not repeat the rejected format.")
     feedback = {"error": message, "error_type": type(error).__name__, "previous_response": response}
     if isinstance(error, json.JSONDecodeError):
         feedback["invalid_response"] = error.doc

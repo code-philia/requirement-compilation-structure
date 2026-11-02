@@ -3,6 +3,8 @@
 FILE_TOOL_RULES = '''Use the file tools declared in input.tools. Return one JSON object with tool_calls.
 Each call is FLAT: tool, path and all other parameters are sibling fields.
 Do not nest parameters inside arguments, parameters or function.
+These are JSON records consumed by this compiler, not provider-native tool invocations.
+Never emit DSML/XML calls, invoke or parameter tags, even for read_file or edit_file.
 
 Read a whole file:
 {"tool_calls":[{"tool":"read_file","path":"backend/src/db/initialize.ts"}]}.
