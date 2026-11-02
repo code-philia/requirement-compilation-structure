@@ -1,7 +1,7 @@
 """Step 12 lowering: bind each DOM trigger to its implementation.
 
-Compiler-owned TypeScript strings provide UI state, canonical API calls, navigation,
-and event registration. The model implements each trigger's business logic; the
+Compiler-owned TypeScript strings provide UI state, navigation,
+and event registration. The model implements HTTP calls and each trigger's business logic; the
 compiler activates only the triggers accepted or currently being implemented."""
 
 from hashlib import sha256
@@ -26,29 +26,11 @@ def prepare_trigger_paths(output, identities):
         paths[tid] = relative
     return paths
 
-CLIENT_SOURCE = '''
-export async function callApi(apiId: string, request: UiApiRequest = {}): Promise<UiApiResponse> {
-  const signature = catalog[apiId];
-  if (!signature) throw new Error(`Unknown backend API: ${apiId}`);
-  const path = signature.path.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_, key: string) => {
-    if (request.params?.[key] == null) throw new Error(`Missing route parameter: ${key}`);
-    return encodeURIComponent(String(request.params[key]));
-  });
-  const url = new URL(path, window.location.origin);
-  for (const [key, value] of Object.entries(request.query ?? {})) {
-    if (value == null) continue;
-    for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item));
-  }
-  const headers = new Headers(request.headers);
-  headers.delete("cookie"); headers.delete("set-cookie");
-  const init: RequestInit = { method: signature.method, credentials: request.credentials ?? "same-origin", headers };
-  if (signature.method !== "GET") {
-    headers.set("content-type", "application/json");
-    init.body = JSON.stringify(request.body ?? {});
-  }
-  const response = await fetch(url, init);
-  const body = response.status === 204 ? null : await response.json();
-  return { status: response.status, body, headers: Object.fromEntries(response.headers.entries()) };
+CLIENT_SOURCE = '''import type { UiApiRequest, UiApiResponse } from "./ui-runtime";
+
+// Requirement implementation tasks maintain HTTP wiring here.
+export async function callApi(apiId: string, _request: UiApiRequest = {}): Promise<UiApiResponse> {
+  throw new Error(`Backend API is not wired: ${apiId}`);
 }
 '''
 
@@ -146,9 +128,8 @@ def sync_triggers(output, ui, design, backend, active_triggers):
     active = set(active_triggers)
     active.intersection_update(design["triggers"])
     save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
-    client = 'import type { UiApiRequest, UiApiResponse } from "./ui-runtime";\n'
-    client += "const catalog: Record<string, { method: string; path: string }> = " + json.dumps({aid: {"method": api["signature"]["method"], "path": api["signature"]["path"]} for aid, api in backend["apis"].items()}) + ";\n"
-    save_text(output / API_CLIENT, client + CLIENT_SOURCE)
+    if not (output / API_CLIENT).is_file():
+        save_text(output / API_CLIENT, CLIENT_SOURCE)
     imports = ['import type { UiTriggerHandler } from "./ui-runtime";']
     registrations = []
     for number, tid in enumerate(sorted(active)):

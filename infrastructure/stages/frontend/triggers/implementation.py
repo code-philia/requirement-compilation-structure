@@ -13,7 +13,7 @@ from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare_e2e
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, require_behavioral_red, test_path
-from infrastructure.stages.frontend.triggers.runtime import sync_triggers, prepare_trigger_paths
+from infrastructure.stages.frontend.triggers.runtime import API_CLIENT, sync_triggers, prepare_trigger_paths
 from infrastructure.stages.frontend.ui.runtime import prepare_frontend
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
 from infrastructure.stages.backend.context import related_schema, supplied_sources
@@ -92,12 +92,21 @@ business result. Compilation and a real browser run check the suite before code 
 IMPLEMENT_INSTRUCTIONS = """Implement the requirement's frontend triggers together against its E2E tests.
 The task supplies the current requirement's triggers, supporting page-entry behavior,
 actual frontend/backend source files. Application sources are writable according to
-files; runtime wiring and schema are references. Generated tests can be corrected against
+files; shared runtime interfaces and schema are references. Generated tests can be corrected against
 the requirement when their expectations, fixtures or selectors are wrong or too strict. You may update multiple
 pages, API handlers and helpers in the same edits list. Complete the functional path:
 UI event -> frontend values -> API params/query/body -> real backend response -> shared
 frontend state -> visible result and navigation. Use the actual supplied source and API
 contract to resolve field names, types, status branches and stored-data conventions.
+Maintain HTTP requests in task.api_wiring.client, which exports
+callApi(apiId, request) => Promise<UiApiResponse>. Read its existing code and preserve
+previous APIs. Implement the current canonical API method/path and serialize actual
+params/query/body/headers, credentials and response status/body/headers. Resolve route
+placeholders with encoded parameter values; do not send literal {name} or :name.
+Handle empty responses and browser-managed cookies correctly. The compiler only creates
+an empty client when absent and never overwrites your wiring. Backend registry/app/server
+can also be read and repaired through exact file queries when HTTP failures require it.
+Read full contents before replacing a shared file; line-range queries are for inspection.
 Implement this requirement's behavior; supporting page context does not require building
 unrelated workflows early. Keep responses short by editing only files that need changes.
 implementation_paths maps each trigger to its supplied writable file; null file content
@@ -289,9 +298,11 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 if needs_implementation:
                     report["requirements"][rid]["status"] = "IMPLEMENTING"
                     task = {**model_context(context),
-                        "implementation_paths": prepare_trigger_paths(output, context_tids)}
+                        "implementation_paths": prepare_trigger_paths(output, context_tids),
+                        "api_wiring": {"client": API_CLIENT, "registry": "backend/src/api/register.ts",
+                            "app": "backend/src/app.ts", "server": "backend/src/server.ts"}}
                     workspace = selection.workspace(triggers=context_tids,
-                        paths=[*selection.paths("page", pages), "frontend/src/style.css"],
+                        paths=[*selection.paths("page", pages), "frontend/src/style.css", API_CLIENT],
                         references=[relative, *ui_files, "backend/tests/support/context.ts",
                             "frontend/src/ui-runtime.ts"])
                     backend_selection.include(workspace, [*backend_selection.paths("api", called),

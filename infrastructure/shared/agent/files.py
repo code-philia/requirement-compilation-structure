@@ -8,6 +8,9 @@ from infrastructure.shared.project.entrypoints import FILE_ROOTS, remember_path,
 
 NEW_FILE_INSTRUCTIONS = "Choose one unused path under directory. Create this target in the first edit; later edits may update supplied writable files."
 
+API_WIRING = {"backend/src/api/register.ts", "backend/src/app.ts", "backend/src/server.ts",
+    "frontend/src/ui-api.ts"}
+
 EXCLUDED = {"node_modules", ".git", ".arc", "dist", "build", "coverage", "__pycache__", ".venv"}
 
 
@@ -22,10 +25,9 @@ def source_paths(output: Path, root: str) -> list[str]:
 def editable_sources(output: Path, root: str) -> list[str]:
     """Allow source repairs across the layer while retaining compiler-owned wiring."""
     templates = Path(__file__).resolve().parents[1] / "project/templates"
-    generated = {"backend/src/api/register.ts", "frontend/src/ui-runtime.ts",
-        "frontend/src/ui-api.ts", "frontend/src/ui-triggers.ts"}
+    generated = {"frontend/src/ui-runtime.ts", "frontend/src/ui-triggers.ts"}
     return [relative for relative in source_paths(output, root)
-        if relative not in generated and not (templates / relative).is_file()
+        if relative not in generated and (relative in API_WIRING or not (templates / relative).is_file())
         and not relative.startswith("backend/src/db/")]
 
 

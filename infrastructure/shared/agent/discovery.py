@@ -16,6 +16,10 @@ Use offset to inspect another search page. A miss is not proof of absence. Searc
 shared concepts before creating new entities/APIs; reuse canonical definitions.
 For schema, read Entity.field for a narrow field definition; for large pages read
 ui_element IDs. kind=file supports exact relative paths or keyword discovery.
+For a file excerpt, supply "start_line": 10 and "end_line": 40 alongside ids.
+Lines are 1-based and inclusive; end_line may be omitted to read through EOF.
+Excerpts return content, start_line, end_line and total_lines. They are read-only;
+before replacing a file, read its full contents by omitting both line fields.
 kind=requirement reads original requirement scenarios; kind=test_requirement with a
 test file path as an ID finds its original requirement owner IDs. Read the relevant requirement before
 changing a regression test; never infer its intended behavior from implementation. Query results replace
@@ -70,6 +74,14 @@ class ContextIndex:
         kind = request['kind']
         records = collections[kind]
         ids = request.get('ids')
+        ranged = 'start_line' in request or 'end_line' in request
+        if ranged:
+            if kind != 'file' or ids is None:
+                raise ValueError('Line ranges require kind=file and exact ids')
+            start, end = request.get('start_line', 1), request.get('end_line')
+            if type(start) is not int or start < 1 or ('end_line' in request and
+                    (type(end) is not int or end < start)):
+                raise ValueError('Line numbers must be positive integers with end_line >= start_line')
         if ids is not None:
             if not isinstance(ids, list) or any(not isinstance(identity, str) for identity in ids):
                 raise ValueError('ids must be an array of strings')
@@ -78,7 +90,17 @@ class ContextIndex:
                 if kind == 'file':
                     if identity not in records:
                         continue
-                    found[identity] = (self.output / identity).read_text(encoding='utf-8-sig')
+                    path = self.output / identity
+                    if path.is_symlink() or not path.resolve().is_relative_to(self.output.resolve()):
+                        raise ValueError('File must be inside the project')
+                    content = path.read_text(encoding='utf-8-sig')
+                    if ranged:
+                        lines = content.splitlines(keepends=True)
+                        last = min(end if end is not None else len(lines), len(lines))
+                        found[identity] = {'content': ''.join(lines[start - 1:last]),
+                            'start_line': start, 'end_line': last, 'total_lines': len(lines)}
+                    else:
+                        found[identity] = content
                 elif kind == 'schema' and '.' in identity:
                     entity, field = identity.split('.', 1)
                     if entity in records and field in records[entity]['fields']:

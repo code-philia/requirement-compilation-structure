@@ -10,7 +10,7 @@ from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses, supplied_sources, related_schema
 from infrastructure.utils.files import read_artifact
-from infrastructure.stages.backend.runtime import TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
+from infrastructure.stages.backend.runtime import REGISTER_PATH, TEST_BINDINGS_PATH, prepare_runtime, sync_implementations, test_bindings_source, test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green, require_red
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
@@ -49,6 +49,14 @@ Do not assert random IDs/hashes/timestamps or exact wording absent from the cont
 Cast response.body from unknown as needed. HTTP 501 is not a successful business result.
 
 Use real API functions and SQLite, without mocks, skipped/focused tests or extra libraries.
+Keep direct function assertions so the test-only 501 stub establishes RED. Also include
+at least one meaningful HTTP success case within max_tests using the same real fixtures:
+import { createApp } from task.app_module with a relative .js ESM path, call createApp(connection),
+listen on port 0 at 127.0.0.1, await the listening event, then use fetch against its
+actual port. Register asynchronous server.close cleanup with t.after. Verify the real
+status, response and DB effects; use concrete URL parameter values, not literal contract
+placeholders. This checks Express registration, parameter extraction and response headers.
+Do not start the production server or open a second database. Read app_module if needed.
 Cross-API browser workflows belong to frontend E2E tests. Generated tests are repairable against requirement evidence;
 shared test utilities and infrastructure follow the files map. During test generation, repair
 supplied writable sources only to restore existing behavior or compilation, not to
@@ -76,7 +84,16 @@ Preserve required comparison rules and shared credential/header conventions.
 
 Do not start a server, open another database, change schema or seed production data.
 Use installed dependencies and Node standard modules. Implement the operation directly;
-no DB-access primitive layer is generated. Routing and test aliases are compiler-owned.
+no DB-access primitive layer is generated. Test aliases are compiler-owned.
+Read and edit task.api_wiring.registry to import this handle and register its actual
+Express route, adapting params/query/body/headers and status/body/headers between HTTP
+and the handler contract. Inspect app/server wiring when needed. The compiler will not
+regenerate these files. Preserve all existing routes and middleware; insert/update this
+API without replacing unrelated registrations or introducing duplicate routes. Translate
+contract path placeholders (including {name}) to syntax accepted by the installed router;
+pass concrete parameter names and values to handle. Preserve cookies and error handling.
+Use exact file queries, optionally line ranges, to inspect related wiring; read the whole
+file before a whole-file replacement. Do not start the production server in source code.
 Preserve unrelated behavior when repairing other supplied writable backend sources.
 Generated tests can be corrected against requirement and API evidence when their
 expectations or fixtures are wrong or overly strict. Preserve required success and
@@ -179,9 +196,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "db_schema": related_schema(schema, [api]), "test_path": relative if (output / relative).is_file() else None,
                         "max_tests": max_tests,
                         "api_module": TEST_BINDINGS_PATH, "support_module": "backend/tests/support/context.ts",
+                        "app_module": "backend/src/app.ts",
                     }
                     workspace = selection.workspace(target=("backend_test", aid), existing=relative,
-                        references=[*supplied_sources(output, api, schema)])
+                        references=["backend/src/app.ts", *supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation",
                         feedback_filter=lambda value: selection.feedback(workspace, value))
@@ -215,19 +233,18 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
 
                     api_entry = selected_path(output, "api", aid)
                     current = implementation_checks() if api_entry and (output / api_entry).is_file() else None
-                    if current and current["tests"] and not current["tests"]["returncode"] and current["tests"]["tests"]:
-                        agent = {"turns": 0, "checks": current}
-                    else:
-                        context = {
-                            "api_id": aid, "api": api, "db_schema": related_schema(schema, [api]),
-                            "requirement": requirement_context(tree, rid),
-                            "implementation_path": selected_path(output, "api", aid),
-                        }
-                        workspace = selection.workspace(target=("api", aid),
-                            references=[*files_by_api[aid], *supplied_sources(output, api, schema)])
-                        agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
-                            implementation_gate, max_turns, console, aid + " / Implementation", feedback=current,
-                            feedback_filter=lambda value: selection.feedback(workspace, value))
+                    context = {
+                        "api_id": aid, "api": api, "db_schema": related_schema(schema, [api]),
+                        "requirement": requirement_context(tree, rid),
+                        "implementation_path": selected_path(output, "api", aid),
+                        "api_wiring": {"registry": REGISTER_PATH, "app": "backend/src/app.ts",
+                            "server": "backend/src/server.ts"},
+                    }
+                    workspace = selection.workspace(target=("api", aid), paths=[REGISTER_PATH],
+                        references=[*files_by_api[aid], *supplied_sources(output, api, schema)])
+                    agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
+                        implementation_gate, max_turns, console, aid + " / Implementation", feedback=current,
+                        feedback_filter=lambda value: selection.feedback(workspace, value))
                     accepted.append(aid)
                     result = agent["checks"]["tests"]
                     report["green"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}

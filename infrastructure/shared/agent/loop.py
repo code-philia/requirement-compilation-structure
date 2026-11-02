@@ -54,7 +54,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileWorkspace, g
                 console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                 context_result = discovery.resolve(query)
                 files.files, files.writable = set(query_files), set(query_writable)
-                if isinstance(query, dict) and query.get("kind") == "file" and query.get("ids") and "records" in context_result:
+                if isinstance(query, dict) and query.get("kind") == "file" and query.get("ids") and "records" in context_result and not any(key in query for key in ("start_line", "end_line")):
                     for layer in ("frontend", "backend"):
                         SourceFiles(files.output, root=layer + "/src", tests_root=layer + "/tests").include(
                             files, [path for path in context_result["records"] if path.startswith(layer + "/")])

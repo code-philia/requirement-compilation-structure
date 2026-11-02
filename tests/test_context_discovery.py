@@ -99,3 +99,52 @@ class ContextDiscovery(unittest.TestCase):
             self.assertEqual(result['turns'], 1)
             self.assertEqual((root / paths[-1]).read_text(), 'fixed')
             self.assertEqual(model.generate_json.call_count, 8)
+
+
+    def test_file_line_ranges_preserve_newlines_and_validate_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = 'file.ts'
+            (root / path).write_text('first\nsecond\nthird\n')
+            index = ContextIndex({'file': {path: {}}}, root)
+            def read(**lines):
+                return index.query({'kind': 'file', 'ids': [path], **lines})['records'][path]
+            self.assertEqual(read(start_line=2, end_line=2), {
+                'content': 'second\n', 'start_line': 2, 'end_line': 2, 'total_lines': 3})
+            self.assertEqual(read(start_line=2, end_line=100)['content'], 'second\nthird\n')
+            self.assertEqual(read(start_line=3)['content'], 'third\n')
+            self.assertEqual(read(), 'first\nsecond\nthird\n')
+            for lines in ({'start_line': 0}, {'start_line': True}, {'start_line': '2'},
+                    {'start_line': 3, 'end_line': 2}, {'end_line': None}):
+                with self.subTest(lines=lines), self.assertRaises(ValueError):
+                    read(**lines)
+            self.assertEqual(index.query({'kind': 'file', 'ids': ['../unknown'],
+                'start_line': 1})['missing'], ['../unknown'])
+
+    def test_excerpt_does_not_silently_supply_whole_file_or_allow_replacement(self):
+        from copy import deepcopy
+        from infrastructure.utils.files import save_text
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = 'backend/src/api/register.ts'
+            save_text(root / path, 'secret first line\nvisible middle\nsecret last line\n')
+            requests = []
+            responses = [
+                {'context_request': {'kind': 'file', 'ids': [path], 'start_line': 2, 'end_line': 2}},
+                {'edits': [{'path': path, 'content': 'truncated'}]},
+                {'context_request': {'kind': 'file', 'ids': [path]}},
+                {'edits': [{'path': path, 'content': 'first\nupdated\nlast\n'}]}]
+            def generate(_, payload):
+                requests.append(deepcopy(payload))
+                return responses[len(requests) - 1]
+            gate = Mock(return_value={})
+            run_file_agent(Mock(generate_json=generate), '', {}, FileWorkspace(root, []),
+                gate, 2, Mock(), 'wiring')
+            excerpt_request = requests[1]
+            self.assertNotIn(path, excerpt_request['files'])
+            self.assertEqual(excerpt_request['context_result']['records'][path]['content'], 'visible middle\n')
+            self.assertNotIn('secret', str(excerpt_request))
+            self.assertIn('not writable', requests[2]['feedback'][0]['error'])
+            self.assertTrue(requests[3]['files'][path]['writable'])
+            gate.assert_called_once()
+            self.assertEqual((root / path).read_text(), 'first\nupdated\nlast\n')

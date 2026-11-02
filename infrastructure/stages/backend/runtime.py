@@ -1,8 +1,4 @@
-"""Step 08 lowering: render backend registration and stable test bindings.
-
-Source strings below are compiler-owned TypeScript templates, not model output.
-Business API implementations use model-selected files and a stable handle export;
-registration imports those files directly instead of creating per-API proxies."""
+"""Prepare backend infrastructure and test aliases; models own HTTP wiring."""
 
 from hashlib import sha256
 import json
@@ -47,64 +43,19 @@ def test_bindings_source(output: Path, apis: dict, stubbed=()) -> str:
 
 
 def sync_implementations(output: Path, apis: dict) -> None:
-    """Register selected API files and refresh test-only bindings."""
-    save_text(output / REGISTER_PATH, register_source(apis, output))
+    """Refresh test-only bindings without overwriting application wiring."""
     save_text(output / TEST_BINDINGS_PATH, test_bindings_source(output, apis))
 
 
-def register_source(apis: dict, output: Path) -> str:
-    """Render Express registration that imports selected implementations directly."""
-    lines = ['import type { Express } from "express";', 'import type Database from "better-sqlite3";',
-        'import type { ApiRequest, ApiResponse } from "./types.js";']
-    for number, (aid, api) in enumerate(apis.items()):
-        entry = api_entrypoint(output, aid)
-        if entry is not None:
-            imported = import_path(REGISTER_PATH, entry["path"])
-            lines.append(f'import {{ {entry["export"]} as handler{number} }} from {json.dumps(imported)};')
-        else:
-            # No per-API placeholder file is created. Unimplemented routes return 501.
-            lines.append(f'const handler{number} = async (_request: ApiRequest, _connection: Database.Database): Promise<ApiResponse> => ({{ status: 501, body: {{ error: "Not implemented" }} }});')
-    lines.append('\nexport function registerApis(app: Express, connection: Database.Database): void {')
-    for number, api in enumerate(apis.values()):
-        signature = api["signature"]
-        lines.extend([
-            f'  app.{signature["method"].lower()}({json.dumps(signature["path"])}, async (req, res, next) => {{',
-            '    try {',
-            f'      const result = await handler{number}({{',
-            '        params: Object.fromEntries(Object.entries(req.params).map(([key, value]) => [key, String(value)])),',
-            '        query: req.query, body: req.body ?? {},',
-            '        headers: Object.fromEntries(Object.entries(req.headers).map(([key, value]) => [key, Array.isArray(value) ? value.join("; ") : value])),',
-            '      }, connection);',
-            '      for (const [key, value] of Object.entries(result.headers ?? {})) res.setHeader(key, value);',
-            '      res.status(result.status).json(result.body);',
-            '    } catch (error) { next(error); }',
-            '  });',
-        ])
-    return "\n".join([*lines, '}', ''])
-
-
 def prepare_runtime(output: Path, apis: dict) -> None:
-    """Write shared backend wiring and fixed test bindings."""
+    """Prepare test bindings and create a registry only when absent."""
     for relative in ("package.json", "backend/package.json", "backend/src/app.ts", "backend/src/server.ts", "backend/src/api/types.ts", "backend/tests/support/context.ts", "backend/tsconfig.test.json"):
         if not (output / relative).is_file():
             raise ValueError(f"Missing {relative}; run 00_project_initialization.py first")
     enable_import_case_checks(output, "backend")
-    # Upgrade the original teaching scaffold through its stable extension seam.
-    # Unknown custom layouts are reported rather than replacing application code.
-    app = output / "backend/src/app.ts"
-    source = app.read_text(encoding="utf-8-sig")
-    if 'import { registerApis }' not in source:
-        marker = '  // Later backend passes add business routes before this API fallback.'
-        if "export function createApp() {" not in source or marker not in source:
-            raise ValueError("Expose createApp(connection) and mount registerApis before the API fallback")
-        source = 'import type Database from "better-sqlite3";\nimport { registerApis } from "./api/register.js";\n' + source
-        source = source.replace("export function createApp() {", "export function createApp(connection?: Database.Database) {")
-        source = source.replace(marker, '  if (connection) registerApis(app, connection);\n' + marker)
-        save_text(app, source)
-    server = output / "backend/src/server.ts"
-    source = server.read_text(encoding="utf-8-sig")
-    if "createApp().listen(" in source:
-        save_text(server, source.replace("createApp().listen(", "createApp(connection).listen("))
+    if not (output / REGISTER_PATH).is_file():
+        template = Path(__file__).resolve().parents[2] / "shared/project/templates" / REGISTER_PATH
+        save_text(output / REGISTER_PATH, template.read_text(encoding="utf-8"))
     sync_implementations(output, apis)
     for relative, name, command in (("package.json", "test:backend", "npm run test -w @arc/backend"), ("backend/package.json", "test", "node scripts/test-api.mjs")):
         path = output / relative

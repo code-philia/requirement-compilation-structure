@@ -5,7 +5,7 @@ import posixpath
 import re
 
 from infrastructure.shared.agent.feedback import compact_feedback
-from infrastructure.shared.agent.files import FileWorkspace, editable_sources, source_paths
+from infrastructure.shared.agent.files import API_WIRING, FileWorkspace, editable_sources, source_paths
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.utils.files import read_source
 
@@ -52,9 +52,9 @@ class SourceFiles:
             if relative in self.editable or self.is_test(relative):
                 workspace.writable.add(relative)
             target = self.output / relative
-            # Compiler-owned wiring can import the whole application. Supply its
+            # Shared wiring can import the whole application. Supply its
             # interface only; it must not expand the source context transitively.
-            if relative not in roots or relative not in self.editable or not target.is_file():
+            if relative in API_WIRING or relative not in roots or relative not in self.editable or not target.is_file():
                 continue
             source = read_source(target)
             imports = re.findall(r'''(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\(\s*)["'](\.[^"']+)["']''', source)
