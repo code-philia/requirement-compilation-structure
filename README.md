@@ -86,10 +86,13 @@ Open `http://localhost:3000` (or the port you selected).
 Models receive the current task, selected dependencies and latest failure evidence.
 Completed requirements and full source inventories are not appended to every prompt.
 The optional `context_request` response discovers candidate IDs or reads exact artifacts
-and files; ordinary changes still use `edits`. Each task allows four discovery queries.
-`ARC_CONTEXT_MAX_CHARS` defaults to 180000 characters. Oversized tasks fail explicitly
-without truncating evidence; automatic decomposition of a single oversized task is not
-implemented. The limit measures input size, not estimated tokens.
+and files; ordinary changes still use `edits`. There is no artificial query-count,
+character-count or exact-ID batch-size cap. `ARC_CONTEXT_MAX_CHARS` is no longer used.
+Query results still replace prior results, and candidate searches remain paginated to
+keep local inputs understandable. Repeated identical evidence prompts the model to read
+exact IDs or produce its stage output; a stalled search enters normal task repair.
+Provider context/output limits still apply. Automatic decomposition of one oversized
+task is not implemented.
 
 Step 06 owns `.arc/shared_conventions.json`. It records concise shared decisions and
 compiler-maintained relevance associations. Implementation tasks read related conventions;

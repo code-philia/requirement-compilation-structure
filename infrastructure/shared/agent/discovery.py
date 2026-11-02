@@ -1,7 +1,6 @@
 """Bounded, on-demand access to compiler-owned global state."""
 
 import json
-import os
 from copy import deepcopy
 
 from infrastructure.shared.agent.files import source_paths
@@ -21,19 +20,40 @@ kind=requirement reads original requirement scenarios; kind=test_requirement wit
 test file path as an ID finds its original requirement owner IDs. Read the relevant requirement before
 changing a regression test; never infer its intended behavior from implementation. Query results replace
 previous results. Return your normal stage output when enough evidence is available.
-Queries have a separate bounded budget; do not guess when it is exhausted.'''
+There is no fixed query-count or character cap. Prefer exact reads after candidate
+searches. Do not repeat searches returning the same candidates: read their IDs, or
+produce the stage output using the available evidence. Query errors are feedback,
+not evidence that an object is absent.'''
 
 
-class ContextLimit(ValueError):
-    """The task must be narrowed instead of silently truncating required evidence."""
+class DiscoveryStalled(ValueError):
+    """Repeated identical results need a proposal or different evidence, not more searches."""
 
 
-def check_budget(value):
-    limit = int(os.environ.get('ARC_CONTEXT_MAX_CHARS', '180000'))
-    size = len(json.dumps(value, ensure_ascii=False))
-    if size > limit:
-        raise ContextLimit(f'Context requires {size} characters; budget is {limit}. '
-            'Split this task or request specific fields/elements/files. No evidence was truncated.')
+class DiscoverySession:
+    """Allow as many useful queries as needed; return malformed queries as feedback."""
+
+    def __init__(self, index):
+        self.index = index
+        self.results = {}
+
+    def resolve(self, query):
+        try:
+            result = self.index.query(query)
+        except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+            result = {'error': str(error), 'context_kinds': list(self.index.records()),
+                'notice': 'Correct the query or return the normal stage output.'}
+        fingerprint = json.dumps(result, sort_keys=True, ensure_ascii=False)
+        count = self.results.get(fingerprint, 0) + 1
+        self.results[fingerprint] = count
+        if count >= 3:
+            raise DiscoveryStalled('Discovery returned the same evidence repeatedly. '
+                'Read specific candidate IDs, change the evidence sought, or return the normal stage output. '
+                'The query count is not limited; this search is making no progress.')
+        if count == 2:
+            result = {**result, 'next_action': 'These results were already supplied. '
+                'Read exact candidate IDs instead of repeating searches, or produce the stage output.'}
+        return result
 
 
 class ContextIndex:
@@ -51,8 +71,8 @@ class ContextIndex:
         records = collections[kind]
         ids = request.get('ids')
         if ids is not None:
-            if not isinstance(ids, list) or not 1 <= len(ids) <= 6:
-                raise ValueError('Read one to six IDs per query')
+            if not isinstance(ids, list) or any(not isinstance(identity, str) for identity in ids):
+                raise ValueError('ids must be an array of strings')
             found = {}
             for identity in ids:
                 if kind == 'file':
@@ -93,7 +113,6 @@ class ContextIndex:
                 candidates.append({'id': key, 'description': str(description)[:300]})
             result = {'candidates': candidates, 'next_offset': offset + 6 if offset + 6 < len(scores) else None,
                 'notice': 'Lexical candidates only. A miss does not establish absence.'}
-        check_budget(result)
         return {'kind': kind, **result}
 
 

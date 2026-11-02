@@ -2,7 +2,7 @@
 
 import json
 
-from infrastructure.shared.agent.discovery import DISCOVERY_RULES, check_budget, ContextLimit
+from infrastructure.shared.agent.discovery import DISCOVERY_RULES, DiscoverySession
 
 
 RESPONSE_ERRORS = (ValueError, KeyError, TypeError, AttributeError, IndexError)
@@ -35,7 +35,7 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
     if context_index is not None:
         instructions += "\n\n" + DISCOVERY_RULES
         request["context_kinds"] = list(context_index.records())
-    queries = 0
+    discovery = DiscoverySession(context_index) if context_index is not None else None
     for attempt in range(1, max_attempts + 1):
         progress = f"{attempt}/{max_attempts}"
         console.show(f"{label} | Model proposal {progress}", "Generate the proposal; response-reading and obligation errors receive repair feedback.")
@@ -47,21 +47,13 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
                 prompt += "\nActual failure: " + correction["error"]
                 if correction.get("details"):
                     prompt += "\nRepair details:\n" + json.dumps(correction["details"], ensure_ascii=False, indent=2)
-            if context_index is not None:
-                check_budget(request)
             response = model.generate_json(prompt, request)
             while context_index is not None and isinstance(response, dict) and "context_request" in response:
-                if queries >= 4:
-                    raise ContextLimit("Context discovery budget exhausted; narrow or split the task")
-                queries += 1
                 query = response["context_request"]
                 console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
-                request["context_result"] = context_index.query(query)
-                check_budget(request)
+                request["context_result"] = discovery.resolve(query)
                 response = model.generate_json(prompt, request)
             return accept(response), response
-        except ContextLimit:
-            raise
         except RESPONSE_ERRORS as error:
             feedback = response_feedback(error, response)
             feedback["failed_attempt"] = attempt
