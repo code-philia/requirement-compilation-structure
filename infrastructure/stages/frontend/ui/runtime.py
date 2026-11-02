@@ -12,23 +12,29 @@ from infrastructure.shared.project.initialize import enable_import_case_checks
 from infrastructure.utils.files import save_text
 
 PLAYWRIGHT_VERSION = "1.64.1"
+STATE_PATH = "frontend/src/ui-state.ts"
+STATE_SOURCE = '''// Application implementation tasks initialize state from requirements.
+export function createInitialState(): Record<string, unknown> {
+  return {};
+}
+'''
+
 
 UI_RUNTIME = '''// Compiler-owned UI types shared by presentation and interaction stages.
 export interface UiPageProps { data: Readonly<Record<string, unknown>> }
 
 declare global {
   interface Window {
-    __ARC_UI_FIXTURE__?: { page: string; data: Record<string, unknown> };
+    __ARC_UI_TEST_DATA__?: { page: string; data: Record<string, unknown> };
     __ARC_UI_DATA__?: { page: string; data: Readonly<Record<string, unknown>> };
   }
 }
 
-export function initialPageData(page: string, defaults: Record<string, unknown>) {
+export function presentationData(page: string, state: Record<string, unknown>) {
   const development = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV;
-  const fixture = development ? window.__ARC_UI_FIXTURE__ : undefined;
-  const data = fixture?.page === page ? { ...defaults, ...fixture.data } : defaults;
-  if (development) window.__ARC_UI_DATA__ = { page, data };
-  return data;
+  const testData = development ? window.__ARC_UI_TEST_DATA__ : undefined;
+  if (development) window.__ARC_UI_DATA__ = { page, data: state };
+  return testData?.page === page ? { ...state, ...testData.data } : state;
 }
 
 export function syncInput(target: EventTarget | null, bindings: Record<string, string[]>, update: (patch: Record<string, unknown>) => void) {
@@ -123,12 +129,14 @@ def prepare_frontend(output: Path) -> None:
     save_text(path, json.dumps(package, indent=2) + "\n")
     save_text(output / "frontend/playwright.ui.config.ts", PLAYWRIGHT_CONFIG)
     save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
+    if not (output / STATE_PATH).is_file():
+        save_text(output / STATE_PATH, STATE_SOURCE)
 
 
 def sync_pages(output: Path, design: dict) -> None:
     """Regenerate the page registry from fixed Page exports."""
-    imports, routes = ['import { useState } from "react";', 'import { initialPageData, syncInput } from "./ui-runtime";'], []
-    defaults = {var: binding["initial"] for var, binding in design["bindings"].items()}
+    imports, routes = ['import { useState } from "react";', 'import { presentationData, syncInput } from "./ui-runtime";',
+        'import { createInitialState } from "./ui-state";'], []
     for number, (pid, page) in enumerate(design["pages"].items()):
         entry = implementation_entrypoint(output, "page", pid)
         component = f"Page{number}"
@@ -139,11 +147,10 @@ def sync_pages(output: Path, design: dict) -> None:
         else:
             body = '<main><h1>UI implementation pending</h1></main>'
         routes.append(f'    case {json.dumps(page["route"])}: {{\n'
-            f'      const data = initialPageData({json.dumps(pid)}, state);\n'
+            f'      const data = presentationData({json.dumps(pid)}, state);\n'
             f'      return <div onSubmit={{event => event.preventDefault()}} onInputCapture={{event => syncInput(event.target, inputBindings, update)}} onChangeCapture={{event => syncInput(event.target, inputBindings, update)}}>{body}</div>;\n    }}')
     source = "// Compiler-owned routes and display data. UI data bindings without business triggers.\n" + "\n".join(imports)
-    source += "\n\nconst defaults: Record<string, unknown> = " + json.dumps(defaults, ensure_ascii=False, indent=2) + ";\n"
-    source += "\nconst inputBindings: Record<string, string[]> = " + json.dumps({uid: node["data"] for uid, node in design["elements"].items() if "user_write" in node.get("mode", []) and node.get("data")}) + ";\n"
-    source += '\nexport function App() {\n  const [state, setState] = useState(defaults);\n  const update = (patch: Record<string, unknown>) => setState(current => ({ ...current, ...patch }));\n  switch (window.location.pathname) {\n' + "\n".join(routes)
+    source += "\nconst inputBindings: Record<string, string[]> = " + json.dumps({uid: [declaration["var"] for declaration in node["data"]] for uid, node in design["elements"].items() if "user_write" in node.get("mode", []) and node.get("data")}) + ";\n"
+    source += '\nexport function App() {\n  const [state, setState] = useState(createInitialState);\n  const update = (patch: Record<string, unknown>) => setState(current => ({ ...current, ...patch }));\n  switch (window.location.pathname) {\n' + "\n".join(routes)
     source += '\n    default: return <main><h1>Page not found</h1></main>;\n  }\n}\n'
     save_text(output / "frontend/src/App.tsx", source)

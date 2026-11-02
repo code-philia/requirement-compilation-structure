@@ -12,7 +12,7 @@ from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.ui.design import owners, page_context
-from infrastructure.stages.frontend.ui.runtime import prepare_frontend, sync_pages
+from infrastructure.stages.frontend.ui.runtime import STATE_PATH, prepare_frontend, sync_pages
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_suite, require_green, test_path
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json, save_text
@@ -21,7 +21,13 @@ from infrastructure.shared.project.git import checkpoint
 INSTRUCTIONS = """Implement the current page from its UI/data design, requirement uses and visual_references.
 Use edit_file to create task.file_target under frontend/src or repair implementation_path. Export a named React
 component Page accepting UiPageProps, imported from frontend/src/ui-runtime.ts using
-a relative import. The compiler owns routing, initial data and display fixtures.
+a relative import. The compiler owns routing and shared runtime interfaces.
+Variables and their types/constraints are declared in element.data. Implement requirement-based
+state initialization in task.state_module, exporting createInitialState(): Record<string, unknown>.
+Preserve previously implemented state. Initialize unloaded remote results safely without
+inventing selected records or marking an unread result ready. Apply explicit requirement
+defaults; reference-image example content is not a production default. The compiler creates
+an empty state module only when absent and never regenerates its implementation.
 
 Render layout, style, labels, controls, lists and conditional content from data[var]
 and static element props. Fixed labels, hints and captions are static props, not
@@ -33,11 +39,14 @@ Use associated labels, specified input types/options, and role="alert" for alert
 Respect prop.visible booleans or variable-equality rules and original visible text.
 
 Use defaultValue/defaultChecked for native editable controls. The host captures native
-input/change events for user_write bindings: checkbox values become booleans and other
+input/change events for user_write elements: checkbox values become booleans and other
 values remain strings. Do not add duplicate input handlers. This presentation task has
 no business API calls, guards, session restoration or state transitions; triggers supply
 those later. Native form submission is suppressed; structural links can use designed hrefs.
-Render fixture data through the ordinary data prop, without inspecting test globals.
+Display tests supply their own data through the ordinary data prop; never inspect test globals or copy test data into application state.
+When a list or conditional view requires representative records, put those values in
+the presence suite's __ARC_UI_TEST_DATA__ setup. Generated presence tests are writable;
+keep their control/data-key assertions and do not preload those records in ui-state.ts.
 
 Repair supplied writable frontend dependencies when needed, preserving other pages
 and behavior. Use the files map for permissions. The compiler runs TypeScript, current
@@ -79,8 +88,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         save_json(arc_dir / "ui_checks.json", report)
         label = f"UI {number}/{len(design['pages'])} {pid}"
         checkpoint(output, stage="10", task=pid, action="Publish UI existence suite before implementation",
-            status="TESTS_READY", details={"test_path": relative, "requirements": uses,
-                "display_states": list(design["pages"][pid]["fixtures"])})
+            status="TESTS_READY", details={"test_path": relative, "requirements": uses})
         console.show(label + " | Existence tests before implementation", (output / relative).read_text(encoding="utf-8"))
         files = [test_path(key) for key in [*accepted, pid]]
 
@@ -115,12 +123,12 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
             if current["tests"] and current["tests"]["returncode"] == 0:
                 agent = {"turns": 0, "checks": current}
             else:
-                context = {"page": page_context(design, pid),
+                context = {"page": page_context(design, pid), "state_module": STATE_PATH,
                     "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"}
                         for rid in uses],
                     "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
                     "implementation_path": selected_path(output, "page", pid)}
-                workspace = selection.workspace(target=("page", pid),
+                workspace = selection.workspace(target=("page", pid), paths=[STATE_PATH],
                     references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json", "frontend/tsconfig.json"])
                 report["pages"][pid]["status"] = "IMPLEMENTING"
                 agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,

@@ -4,6 +4,7 @@ import json
 
 from infrastructure.stages.frontend.triggers.prompts import INSTRUCTIONS
 from infrastructure.stages.frontend.triggers.design import apply_decomposition, empty_triggers, relevant_pages, trigger_obligations, api_ids, validate_coverage
+from infrastructure.stages.frontend.ui.design import data_symbols
 from infrastructure.utils.files import save_json, read_artifact
 from infrastructure.stages.database.obligations.records import normalize_obligations
 from infrastructure.shared.agent.proposals import propose_json
@@ -27,7 +28,6 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
             elements = {uid for page in pages.values() for uid in page["elements"]}
             local_ui = {**ui, "pages": {pid: ui["pages"][pid] for pid in pages},
                 "elements": {uid: ui["elements"][uid] for uid in elements},
-                "bindings": {key: value for page in pages.values() for key, value in page["bindings"].items()},
                 "requirements": {rid: ui["requirements"].get(rid, [])},
                 "steps": {sid: ui["steps"].get(sid, []) for sid in tree.own_steps[rid]}}
             existing = {tid: trigger for tid, trigger in result["triggers"].items() if trigger["source"] in elements}
@@ -48,7 +48,7 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
                 console.show(label + " | Derived DB effects", json.dumps(derived, ensure_ascii=False, indent=2))
                 return updated
 
-            result, _ = propose_json(model, INSTRUCTIONS, request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": backend["apis"], "page": ui["pages"], "ui_element": ui["elements"], "binding": ui["bindings"], "trigger": result["triggers"]}))
+            result, _ = propose_json(model, INSTRUCTIONS, request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": backend["apis"], "page": ui["pages"], "ui_element": ui["elements"], "ui_data": data_symbols(ui["elements"]), "trigger": result["triggers"]}))
             accepted.append(rid)
             console.artifact("frontend_triggers", result, label)
             save_json(arc_dir / "frontend_triggers.json", result)

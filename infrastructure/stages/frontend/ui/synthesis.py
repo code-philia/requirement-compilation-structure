@@ -6,7 +6,7 @@ components. Prompts and design records live in ui/design.py."""
 
 import json
 
-from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, normalize_design, page_context, UIResponseError
+from infrastructure.stages.frontend.ui.design import INSTRUCTIONS, apply_proposal, empty_design, page_elements, normalize_design, page_context, UIResponseError, data_symbols
 from infrastructure.stages.frontend.ui.proposals import INSTRUCTIONS as EXAMPLE_INSTRUCTIONS
 from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
@@ -43,7 +43,7 @@ def bind_requirement_image_pages(design, requirement, rid):
     design["requirements"][rid] = owned
 
 
-def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_fixtures=3, max_attempts=10):
+def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_attempts=10):
     """Design UI/data for all leaf requirements using page-first retrieval.
 
     Show existing/retrieved pages, ask for an incremental proposal, and feed
@@ -70,7 +70,6 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
                 "requirement": requirement, "retrieved_pages": retrieved["pages"],
                 "all_pages": {pid: {key: page[key] for key in ("name", "route", "root", "images")}
                     for pid, page in design["pages"].items() if pid in retrieved["pages"]},
-                "max_fixtures": max_fixtures,
             }
             def accept(proposal):
                 try:
@@ -83,7 +82,7 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
                 return updated
 
             updated, proposal = propose_json(model, INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS,
-                request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"page": design["pages"], "ui_element": design["elements"], "binding": design["bindings"]}))
+                request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"page": design["pages"], "ui_element": design["elements"], "ui_data": data_symbols(design["elements"])}))
             console.show(label + " | 4. Incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
             design = updated
             save_json(arc_dir / "ui_design.json", design)

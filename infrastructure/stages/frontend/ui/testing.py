@@ -11,7 +11,7 @@ import socket
 import subprocess
 import tempfile
 
-from infrastructure.stages.frontend.ui.design import page_elements, visible
+from infrastructure.stages.frontend.ui.design import data_symbols, page_elements, visible
 from infrastructure.utils.processes import capture_process, npm_command
 
 KEY_TYPES = {"page", "form", "input", "checkbox", "select", "button", "heading", "link", "list", "image", "alert", "table", "text"}
@@ -35,23 +35,49 @@ def test_path(pid: str) -> str:
 
 
 def existence_suite(design: dict, pid: str) -> str:
-    """Check element presence per display state and required runtime data keys only."""
+    """Supply test-local display data; check controls and actual application data keys."""
     page = design["pages"][pid]
     elements = page_elements(design, pid)
-    defaults = {var: binding["initial"] for var, binding in design["bindings"].items()}
-    variables = {var for node in elements.values() for var in node.get("data", [])}
-    variables.update(node["prop"]["visible"]["var"] for node in elements.values()
-        if isinstance(node.get("prop", {}).get("visible"), dict) and "var" in node["prop"]["visible"])
-    lines = ['// Compiler-owned existence assertions, generated from the UI/data design.',
+    variables = data_symbols(elements)
+    empty_values = {"string": "", "integer": 0, "number": 0, "boolean": False,
+        "array": [], "object": {}, "null": None}
+    values = {}
+    for name, declaration in variables.items():
+        values[name] = empty_values[declaration["dtype"]]
+
+    # Exercise conditional controls using values owned only by this generated test.
+    states = [values]
+    for uid in elements:
+        overrides = {}
+        current, seen = uid, set()
+        possible = True
+        while current in elements and current not in seen:
+            seen.add(current)
+            node = elements[current]
+            rule = node.get("prop", {}).get("visible", True)
+            if rule is False:
+                possible = False
+                break
+            if isinstance(rule, dict):
+                name, expected = rule["var"], rule["equals"]
+                if name in overrides and overrides[name] != expected:
+                    possible = False
+                    break
+                overrides[name] = expected
+            current = node.get("parent")
+        candidate = {**values, **overrides}
+        if possible and candidate not in states:
+            states.append(candidate)
+
+    lines = ['// Compiler-owned presence tests. Display values belong to this suite only.',
         'import { test, expect } from "@playwright/test";', '']
-    for name, fixture in page["fixtures"].items():
-        values = defaults | fixture
-        lines.append(f'test({json.dumps(pid + " / " + name + " / UI element existence")}, async ({{ page }}) => {{')
+    for number, state in enumerate(states, 1):
+        lines.append(f'test({json.dumps(pid + " / display " + str(number) + " / UI element existence")}, async ({{ page }}) => {{')
         lines.extend([
             '  const runtimeErrors: string[] = [];',
             '  page.on("pageerror", error => runtimeErrors.push(error.message));',
-            '  await page.addInitScript(fixture => { (window as unknown as { __ARC_UI_FIXTURE__: unknown }).__ARC_UI_FIXTURE__ = fixture; }, '
-                + json.dumps({"page": pid, "data": fixture}, ensure_ascii=False) + ');',
+            '  await page.addInitScript(testData => { (window as unknown as { __ARC_UI_TEST_DATA__: unknown }).__ARC_UI_TEST_DATA__ = testData; }, '
+                + json.dumps({"page": pid, "data": state}, ensure_ascii=False) + ');',
             f'  await page.goto({json.dumps(page["route"])});',
             '  if (runtimeErrors.length) throw new Error("UI_RUNTIME_ERROR: " + runtimeErrors.join("\\n"));',
             '  try {',
@@ -61,17 +87,13 @@ def existence_suite(design: dict, pid: str) -> str:
             if kind not in KEY_TYPES:
                 continue
             locator = f"page.getByTestId({json.dumps(uid)})"
-            shown = visible(design, uid, values)
+            shown = visible(design, uid, state)
             lines.append(f"  await expect({locator}){'' if shown else '.not'}.toBeVisible();")
-            if not shown:
-                continue
         lines.extend([
             '  await expect.poll(() => page.evaluate(({ pageId, keys }) => {',
             '    const state = (window as unknown as { __ARC_UI_DATA__?: { page: string; data: Record<string, unknown> } }).__ARC_UI_DATA__;',
             '    return state?.page === pageId && keys.every(key => Object.prototype.hasOwnProperty.call(state.data, key));',
             '  }, ' + json.dumps({"pageId": pid, "keys": sorted(variables)}) + ')).toBe(true);',
-        ])
-        lines.extend([
             '  } catch (error) {',
             '    if (runtimeErrors.length) throw new Error("UI_RUNTIME_ERROR: " + runtimeErrors.join("\\n"));',
             '    throw error;',

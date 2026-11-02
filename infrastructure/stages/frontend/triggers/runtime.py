@@ -7,7 +7,7 @@ compiler activates only the triggers accepted or currently being implemented."""
 from hashlib import sha256
 import json
 
-from infrastructure.stages.frontend.ui.runtime import UI_RUNTIME
+from infrastructure.stages.frontend.ui.runtime import UI_RUNTIME, STATE_PATH, STATE_SOURCE
 from infrastructure.shared.project.entrypoints import import_path, implementation_entrypoint, selected_path, remember_path
 from infrastructure.utils.files import save_text
 
@@ -36,7 +36,7 @@ export async function callApi(apiId: string, _request: UiApiRequest = {}): Promi
 
 APP_SOURCE = '''
 export function App() {
-  const [data, setData] = useState<Record<string, unknown>>(() => ({ ...defaults }));
+  const [data, setData] = useState<Record<string, unknown>>(createInitialState);
   const live = useRef(data);
   const [navigation, setNavigation] = useState(0);
   const entered = useRef("");
@@ -44,8 +44,8 @@ export function App() {
   const route = window.location.pathname;
   const selected = pages.find(page => page.route === route);
   const pageId = selected?.id ?? "";
-  const display = initialPageData(pageId, data);
-  const fixture = display !== data;
+  const display = presentationData(pageId, data);
+  const preview = display !== data;
 
   const update = (patch: Record<string, unknown>) => {
     live.current = { ...live.current, ...patch };
@@ -79,9 +79,9 @@ export function App() {
   };
   const report = (error: unknown) => { setTimeout(() => { throw error; }, 0); };
   const capture = (kind: string, event: SyntheticEvent) => {
-    if (!fixture && (kind === "input" || kind === "change")) syncInput(event.target, inputBindings, update);
+    if (!preview && (kind === "input" || kind === "change")) syncInput(event.target, inputBindings, update);
     if (kind === "submit") event.preventDefault();
-    if (fixture) return;
+    if (preview) return;
     let target = event.target instanceof Element ? event.target : null;
     const sources: string[] = [];
     while (target && target !== event.currentTarget) {
@@ -105,14 +105,14 @@ export function App() {
     return () => window.removeEventListener("popstate", pop);
   }, []);
   useEffect(() => {
-    if (fixture || !selected) return;
+    if (preview || !selected) return;
     const key = `${navigation}:${pageId}`;
     if (entered.current === key) return;
     entered.current = key;
     void (async () => {
       for (const trigger of triggers) if (trigger.source === selected.root && trigger.event === "mount") await invoke(trigger, {});
     })().catch(report);
-  }, [navigation, pageId, fixture]);
+  }, [navigation, pageId, preview]);
   const Component = selected ? components[selected.id] : undefined;
   return <div onClickCapture={event => capture("click", event)} onChangeCapture={event => capture("change", event)}
     onInputCapture={event => capture("input", event)} onSubmitCapture={event => capture("submit", event)}
@@ -128,6 +128,8 @@ def sync_triggers(output, ui, design, backend, active_triggers):
     active = set(active_triggers)
     active.intersection_update(design["triggers"])
     save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
+    if not (output / STATE_PATH).is_file():
+        save_text(output / STATE_PATH, STATE_SOURCE)
     if not (output / API_CLIENT).is_file():
         save_text(output / API_CLIENT, CLIENT_SOURCE)
     imports = ['import type { UiTriggerHandler } from "./ui-runtime";']
@@ -142,7 +144,8 @@ def sync_triggers(output, ui, design, backend, active_triggers):
     imports = ['import { useEffect, useRef, useState } from "react";',
         'import type { ComponentType, SyntheticEvent, KeyboardEvent } from "react";',
         'import type { UiPageProps, UiTriggerContext } from "./ui-runtime";',
-        'import { initialPageData, syncInput } from "./ui-runtime";', 'import { callApi } from "./ui-api";', 'import { handlers } from "./ui-triggers";']
+        'import { presentationData, syncInput } from "./ui-runtime";',
+        'import { createInitialState } from "./ui-state";', 'import { callApi } from "./ui-api";', 'import { handlers } from "./ui-triggers";']
     pages, components = [], []
     for number, (pid, page) in enumerate(ui["pages"].items()):
         entry = implementation_entrypoint(output, "page", pid)
@@ -156,8 +159,7 @@ def sync_triggers(output, ui, design, backend, active_triggers):
         for tid, trigger in design["triggers"].items() if tid in active]
     source = "// Compiler-owned interaction state and trigger registration.\n" + "\n".join(imports) + "\n"
     source += "type Trigger = { id: string; source: string; event: string };\n"
-    source += "const defaults: Record<string, unknown> = " + json.dumps({var: binding["initial"] for var, binding in ui["bindings"].items()}) + ";\n"
-    source += "const inputBindings: Record<string, string[]> = " + json.dumps({uid: node["data"] for uid, node in ui["elements"].items() if "user_write" in node.get("mode", []) and node.get("data")}) + ";\n"
-    source += "const pages = " + json.dumps(pages) + ";\nconst components: Record<string, ComponentType<UiPageProps>> = {" + ", ".join(components) + "};\n"
+    source += "const inputBindings: Record<string, string[]> = " + json.dumps({uid: [declaration["var"] for declaration in node["data"]] for uid, node in ui["elements"].items() if "user_write" in node.get("mode", []) and node.get("data")}) + ";\n"
+    source += "const pages: { id: string; route: string; root: string }[] = " + json.dumps(pages) + ";\nconst components: Record<string, ComponentType<UiPageProps>> = {" + ", ".join(components) + "};\n"
     source += "const triggers: Trigger[] = " + json.dumps(triggers) + ";\n"
     save_text(output / "frontend/src/App.tsx", source + APP_SOURCE)

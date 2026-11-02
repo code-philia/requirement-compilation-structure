@@ -146,13 +146,13 @@ def project_index(output):
     """Rebuild on demand so queries see current accepted artifacts and files."""
     from infrastructure.stages.requirements.tree import RequirementTree
     from infrastructure.stages.backend.context import requirement_context
-    from infrastructure.stages.frontend.ui.design import owners
+    from infrastructure.stages.frontend.ui.design import owners, data_symbols
     def artifact(name, default):
         return read_artifact(output / '.arc', name) if (output / '.arc' / name).is_file() else default
     def records():
         schema = artifact('db_schema.json', {'entities': {}})
         backend = artifact('backend_apis.json', {'apis': {}, 'requirements': {}})
-        ui = artifact('ui_design.json', {'pages': {}, 'elements': {}, 'bindings': {}, 'requirements': {}})
+        ui = artifact('ui_design.json', {'pages': {}, 'elements': {}, 'requirements': {}})
         triggers = artifact('frontend_triggers.json', {'triggers': {}})
         tree = RequirementTree(artifact('requirements.json', {'id': 'ROOT'}))
         requirements = {rid: requirement_context(tree, rid) for rid in tree.requirements}
@@ -167,7 +167,7 @@ def project_index(output):
             test_owners[f'frontend/tests/ui/{pid}.spec.ts'] = [rid for rid in owners(ui, pid) if rid in requirements]
         # Owners can themselves be numerous: search/read individual requirements when necessary.
         return {'schema': schema['entities'], 'api': backend['apis'], 'page': ui['pages'],
-            'ui_element': ui['elements'], 'binding': ui['bindings'], 'trigger': triggers['triggers'],
+            'ui_element': ui['elements'], 'ui_data': data_symbols(ui['elements']), 'trigger': triggers['triggers'],
             'requirement': requirements, 'test_requirement': test_owners,
             'convention': artifact('shared_conventions.json', {}),
             'file': {path: {} for root in ('frontend/src', 'frontend/tests', 'backend/src', 'backend/tests')

@@ -14,7 +14,7 @@ from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare_e2e
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, require_behavioral_red, test_path
 from infrastructure.stages.frontend.triggers.runtime import API_CLIENT, sync_triggers, prepare_trigger_paths
-from infrastructure.stages.frontend.ui.runtime import prepare_frontend
+from infrastructure.stages.frontend.ui.runtime import STATE_PATH, prepare_frontend
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
 from infrastructure.stages.backend.context import related_schema, supplied_sources
 from infrastructure.stages.backend.testing import BackendChecks, require_green as require_backend_green
@@ -107,6 +107,13 @@ Handle empty responses and browser-managed cookies correctly. The compiler only 
 an empty client when absent and never overwrites your wiring. Backend registry/app/server
 can also be read and repaired through read_file and edit_file when HTTP failures require it.
 Read only relevant missing shared-file lines; edit_file replaces a unique exact span.
+Frontend variables are declared inline in element.data; they are not loaded business facts.
+Maintain createInitialState() in task.state_module for genuine requirement-defined defaults
+and safe unloaded state. Obtain real objects through the required interactions/API calls.
+Never initialize a selected record or successful load from reference-image examples or test
+seed values. Keep loaded data associated with the requested object; clear or explicitly
+invalidate stale results on failure or selection change. Build edit drafts from the actual
+loaded object and cancel back to that object's snapshot. Preserve other workflows' state.
 Implement this requirement's behavior; supporting page context does not require building
 unrelated workflows early. Keep responses short by editing only files that need changes.
 implementation_paths maps each trigger to its supplied writable file; null file content
@@ -300,10 +307,11 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     report["requirements"][rid]["status"] = "IMPLEMENTING"
                     task = {**model_context(context),
                         "implementation_paths": prepare_trigger_paths(output, context_tids),
+                        "state_module": STATE_PATH,
                         "api_wiring": {"client": API_CLIENT, "registry": "backend/src/api/register.ts",
                             "app": "backend/src/app.ts", "server": "backend/src/server.ts"}}
                     workspace = selection.workspace(triggers=context_tids,
-                        paths=[*selection.paths("page", pages), "frontend/src/style.css", API_CLIENT],
+                        paths=[*selection.paths("page", pages), "frontend/src/style.css", API_CLIENT, STATE_PATH],
                         references=[relative, *ui_files, "backend/tests/support/context.ts",
                             "frontend/src/ui-runtime.ts"])
                     backend_selection.include(workspace, [*backend_selection.paths("api", called),

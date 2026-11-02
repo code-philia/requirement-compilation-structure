@@ -55,6 +55,11 @@ Reuse trigger IDs where behavior is shared and preserve earlier behavior when up
 requirement_triggers associates this requirement's triggers; step_triggers maps scenario
 EVERY supplied step to trigger lists, using [] for static/native behavior. Non-UI behavior needs no trigger.
 
+Frontend variables are declared in each element.data as {var, dtype, constraints}.
+They are declarations, not initial values or already loaded records. Describe required
+page-entry loading, concrete object identity, success/failure updates and edit/cancel
+behavior from the requirement. Images supply appearance, not preloaded business objects.
+Do not invent production defaults or display fixtures in this stage.
 The read and write arrays name FRONTEND variables, not DB fields. DB effects are derived
 from called APIs. The union of API DB effects for requirement_triggers must equal
 required_obligations. Each step must include calls covering its step_obligations;
