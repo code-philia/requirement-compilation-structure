@@ -33,7 +33,12 @@ specifies otherwise. Do not invent defaults, normalization, cascades or uniquene
 
 Use CHECK for enforceable constraints such as boolean 0/1 or enumerations. Describe
 application-only rules such as password hashing in comments instead of inventing SQL
-checks. This task creates one table, without extra tables, data mutations or application startup code.
+checks. SQLite CHECK expressions must not contain subqueries, SELECT, EXISTS,
+aggregates or window functions. For JSON arrays, use scalar checks such as
+json_valid(field) and json_type(field) = 'array'; validate array element types in
+application code, not with json_each subqueries inside CHECK. Keep constraints
+requiring multi-row or cross-table inspection in application code.
+This task creates one table, without extra tables, data mutations or application startup code.
 referenced_tables provides target definitions and available SQL. A null implementation
 means the target has not been generated yet; SQLite forward references can express
 self-references and cycles. The initializer enables foreign keys and runs the ordered
