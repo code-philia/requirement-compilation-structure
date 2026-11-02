@@ -10,6 +10,7 @@ from infrastructure.shared.agent.files import source_paths, editable_sources
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.shared.agent.context import SourceFiles
+from infrastructure.shared.agent.discovery import project_index
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare_e2e
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, require_behavioral_red, test_path
@@ -182,6 +183,10 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     ui_checks = FrontendChecks(output)
     selection = SourceFiles(output, ui)
     backend_selection = SourceFiles(output, root="backend/src", tests_root="backend/tests")
+    context_index = project_index(output,
+        kinds=("schema", "api", "page", "ui_element", "ui_data", "trigger", "requirement",
+            "test_requirement", "convention", "file"),
+        file_roots=("frontend/src", "frontend/tests", "backend/src", "backend/tests"))
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "frontend_e2e.json", report)
     for number, rid in enumerate(tree.leaves, 1):
@@ -240,7 +245,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     *[f"backend/src/db/tables/{name}.sql" for name in related_schema(schema, context["backend_apis"].values())]])
             agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
                 test_workspace, test_gate, max_turns, console, label + " / Test Generation",
-                feedback_filter=lambda value: selection.feedback(test_workspace, value))
+                feedback_filter=lambda value: selection.feedback(test_workspace, value), context_index=context_index)
             report["requirements"][rid]["test_turns"] = agent["turns"]
             report["requirements"][rid]["test_path"] = relative
 
@@ -329,7 +334,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
                         implementation_gate, max_turns, console, label + " / Trigger Implementation",
                         feedback=feedback,
-                        feedback_filter=repair_feedback)
+                        feedback_filter=repair_feedback, context_index=context_index)
             accepted.append(rid)
             reused = tids & implemented
             implemented.update(targets)

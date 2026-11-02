@@ -5,7 +5,6 @@ import yaml
 
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.shared.agent.discovery import ContextIndex
 from infrastructure.shared.agent.conventions import task_conventions
 from infrastructure.stages.backend.context import requirement_context, related_schema
 from infrastructure.stages.requirements.tree import RequirementTree
@@ -98,9 +97,6 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                 entry.update(status='FAILED', error='No UI interface available for independent requirement acceptance; not verified')
                 continue
             task['shared_conventions'] = task_conventions(output, {'requirement': task['original_requirement']})
-            # This restricted index cannot reveal implementation or process-test source.
-            index = ContextIndex({'requirement': {rid: task['original_requirement']},
-                'schema': task['schema'], 'api': task['api_interfaces']})
             workspace = FileTools.for_target(output, 'acceptance_test', rid, fixed_path=path,
                 references=[FIXTURE, 'backend/tests/support/context.ts'],
                 readable=[path, FIXTURE, 'backend/tests/support/context.ts'])
@@ -115,7 +111,7 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
 
             if not (output / path).is_file():
                 agent = run_file_agent(model, INSTRUCTIONS, task, workspace, compile_suite,
-                    max_turns, console, label + ' / Generation', context_index=index)
+                    max_turns, console, label + ' / Generation')
                 entry['generation_turns'] = agent['turns']
             result = checks.tests([path])
             entry["result"] = result
@@ -129,7 +125,7 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                 checkpoint(output, stage="12", task=rid, action="Record independent acceptance before test review",
                     status="FAILED", details={"test_path": path, "checks": result})
                 review = run_file_agent(model, REVIEW_INSTRUCTIONS, task, workspace, compile_suite,
-                    max_turns, console, label + ' / Test review', feedback=result, context_index=index)
+                    max_turns, console, label + ' / Test review', feedback=result)
                 entry['review_turns'] = review['turns']
                 result = checks.tests([path])
                 entry["result"] = result

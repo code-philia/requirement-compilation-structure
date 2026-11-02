@@ -16,7 +16,7 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
-from infrastructure.shared.agent.discovery import project_index
+from infrastructure.shared.agent.discovery import ContextIndex
 
 
 # --- Extension point 03A: obligation inference policy --------------------------
@@ -104,7 +104,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
                 return inferred, summary
 
             (inferred, summary), _ = propose_json(model, INSTRUCTIONS, request, accept,
-                console, f"Obligation inference {rid}", max_attempts, context_index=project_index(arc_dir.parent))
+                console, f"Obligation inference {rid}", max_attempts, context_index=ContextIndex(lambda: {"schema": schema["entities"]}))
             obligations["requirements"][rid] = inferred["requirement"]
             obligations["steps"].update(inferred["steps"])
             save_json(arc_dir / "db_obligations.json", obligations)

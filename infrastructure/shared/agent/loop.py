@@ -2,13 +2,14 @@
 
 import json
 
-from infrastructure.shared.agent.discovery import project_index, DISCOVERY_RULES, DiscoverySession
+from infrastructure.shared.agent.discovery import DISCOVERY_RULES, DiscoverySession
 from infrastructure.shared.agent.conventions import task_conventions
 
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.tools.protocol import FILE_TOOL_RULES
 from infrastructure.shared.agent.proposals import RESPONSE_ERRORS, response_feedback
 from infrastructure.shared.project.git import checkpoint
+from infrastructure.utils.files import read_source
 
 
 class AgentExhausted(ValueError):
@@ -30,9 +31,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
     """
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
-    index = None
-    if allow_discovery:
-        index = context_index if context_index is not None else project_index(files.output)
+    index = context_index if allow_discovery else None
+    allow_discovery = index is not None
     discovery, context_result = DiscoverySession(index), None
     read_files = {}
     feedback = [] if feedback is None else [feedback_filter(feedback) if feedback_filter else feedback]
@@ -42,12 +42,26 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
         response, applied = None, False
         try:
             def request_model():
+                # Gates may regenerate wiring outside edit_file; discard stale excerpts too.
+                for path, excerpts in list(read_files.items()):
+                    target = files.path(path)
+                    if not target.is_file():
+                        read_files.pop(path)
+                        continue
+                    lines = read_source(target).splitlines(keepends=True)
+                    for excerpt in excerpts:
+                        content = "".join(lines[excerpt["start_line"] - 1:excerpt["end_line"]])
+                        if len(lines) != excerpt["total_lines"] or content != excerpt["content"]:
+                            read_files.pop(path)
+                            break
                 request = {"task": files.task_state(task), "files": files.state(), "feedback": feedback,
                     "context_kinds": list(index.records()) if index is not None else [], "tools": files.schemas()}
                 if read_files:
                     request["read_files"] = read_files
                 if discovery.evidence:
                     request["context_records"] = discovery.evidence
+                if any(discovery.candidates.values()):
+                    request["context_candidates"] = discovery.candidates
                 conventions = task_conventions(files.output, task)
                 if conventions:
                     request["task"]["shared_conventions"] = conventions
@@ -63,7 +77,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             while isinstance(response, dict):
                 if "context_request" in response:
                     if not allow_discovery:
-                        raise ValueError("Semantic discovery is disabled for this task; use supplied requirements and read_file for allowed database files")
+                        raise ValueError("Semantic discovery is disabled for this task; use the supplied task evidence and read_file within its allowed scope")
                     query = response["context_request"]
                     console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                     if isinstance(query, dict) and query.get("kind") == "file" and "ids" in query:

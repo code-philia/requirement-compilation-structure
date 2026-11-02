@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.shared.agent.context import SourceFiles
+from infrastructure.shared.agent.discovery import project_index
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
@@ -140,7 +141,14 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     checks = BackendChecks(output)
     selection = SourceFiles(output, root="backend/src", tests_root="backend/tests")
     model = TextModel() if contracts["apis"] else None
-    owners = {aid: [rid for rid in tree.postorder if aid in contracts["requirements"][rid]] for aid in contracts["apis"]}
+    context_index = project_index(output,
+        kinds=("schema", "api", "requirement", "test_requirement", "convention", "file"),
+        file_roots=("backend/src", "backend/tests"))
+    owners = {}
+    for aid in contracts["apis"]:
+        ids = [rid for rid in tree.leaves if aid in contracts["requirements"].get(rid, [])]
+        if ids:
+            owners[aid] = ids
     targets = {aid: selected_path(output, "backend_test", aid) or test_path(ids[0], aid) for aid, ids in owners.items()}
     report = {"status": "RUNNING", "requirements": {}, "tests": {}, "red": {}, "green": {}, "agents": {}}
     # Publish a current status before work; an old GREEN is never reused as proof.
@@ -148,10 +156,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     try:
         files_by_api = {aid: [relative] for aid, relative in targets.items()}
         accepted, attempted = [], set()
-        for requirement_number, rid in enumerate(tree.postorder, 1):
-            ids = contracts["requirements"][rid]
+        for requirement_number, rid in enumerate(tree.leaves, 1):
+            ids = contracts["requirements"].get(rid, [])
             pending = [aid for aid in ids if aid not in attempted]
-            requirement_label = f"Requirement {requirement_number}/{len(tree.requirements)} {rid}"
+            requirement_label = f"Requirement {requirement_number}/{len(tree.leaves)} {rid}"
             console.show(f"{requirement_label} | Begin requirement TDD", json.dumps(requirement_context(tree, rid), ensure_ascii=False, indent=2))
             report["requirements"][rid] = {"status": "RUNNING", "apis": ids}
             save_json(arc_dir / "backend_tdd.json", report)
@@ -211,7 +219,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         references=["backend/src/app.ts", *supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation",
-                        feedback_filter=lambda value: selection.feedback(workspace, value))
+                        feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
                     for owner in api_owners:
                         report["tests"].setdefault(owner, {})[aid] = targets[aid]
                     report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
@@ -253,7 +261,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         references=[*files_by_api[aid], *supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
                         implementation_gate, max_turns, console, aid + " / Implementation", feedback=current,
-                        feedback_filter=lambda value: selection.feedback(workspace, value))
+                        feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
                     accepted.append(aid)
                     result = agent["checks"]["tests"]
                     report["green"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}

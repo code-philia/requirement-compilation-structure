@@ -51,7 +51,7 @@ class RequirementTree:
             return rid
 
         visit(root)
-        # Only leaves own model-driven business analysis; parents aggregate results.
+        # Only leaves own business analysis; parents organize the requirement tree.
         self.leaves = [rid for rid in self.requirements if not self.children[rid]]
 
     def concatenated_steps(self, requirement_id: str) -> str:

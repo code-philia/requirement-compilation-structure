@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from infrastructure.shared.agent.context import SourceFiles
+from infrastructure.shared.agent.discovery import project_index
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.shared.project.entrypoints import selected_path
@@ -78,6 +79,9 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         details={"pages": list(design["pages"])})
     accepted = []
     selection = SourceFiles(output, design)
+    context_index = project_index(output,
+        kinds=("page", "ui_element", "ui_data", "requirement", "test_requirement", "file"),
+        file_roots=("frontend/src", "frontend/tests"))
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "ui_checks.json", report)
     for number, pid in enumerate(design["pages"], 1):
@@ -135,7 +139,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                 report["pages"][pid]["status"] = "IMPLEMENTING"
                 agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
                     max_turns, console, label + " / Implementation", feedback=current,
-                    feedback_filter=lambda value: selection.feedback(workspace, value))
+                    feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
             accepted.append(pid)
             report["pages"][pid].update({"status": "GREEN", "turns": agent["turns"],
                 "implementation_path": selected_path(output, "page", pid),

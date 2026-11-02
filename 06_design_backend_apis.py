@@ -182,7 +182,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 return updated
 
             updated, _ = propose_json(model, INSTRUCTIONS + "\n\n" + CONVENTION_RULES, request, accept, console,
-                f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.requirements}}))
+                f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.leaves}}))
             design = updated
             save_json(arc_dir / "backend_apis.json", design)
             save_json(arc_dir / "shared_conventions.json", conventions)

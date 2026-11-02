@@ -8,10 +8,13 @@ from infrastructure.shared.rag.bm25 import tokenize
 from infrastructure.utils.files import read_artifact
 
 DISCOVERY_RULES = '''Context contains selected excerpts, never a complete global inventory.
+Use the supplied task records first. Query only a specific missing fact needed for the
+current decision; do not search to reconfirm definitions already supplied or retained.
 When evidence is missing, return only {"context_request": {"kind": "schema",
 "query": "session credential"}} to discover candidates, or use "ids": ["Account.id"]
-to read exact records. Available kinds are listed in context_kinds. Search returns
-IDs/descriptions, not definitions, except requirement searches return complete records.
+to read exact records. Available kinds are listed in context_kinds.
+Only those advertised kinds are supported; examples below do not enable other scopes.
+Search returns IDs/descriptions, not definitions, except requirement searches return complete records.
 Read needed IDs before modifying or calling other kinds of records.
 Each query searches only its named kind; do not search unrelated collections for context.
 Use offset to inspect another search page. A miss is not proof of absence. Search
@@ -25,7 +28,8 @@ read_file instead of kind=file exact reads; semantic design tasks may use these 
 kind=requirement reads original requirement scenarios; kind=test_requirement with a
 test file path as an ID finds its original requirement owner IDs. Read the relevant requirement before
 changing a regression test; never infer its intended behavior from implementation.
-Exact records are retained in context_records for the current task. File-editing tasks
+Exact records are retained in context_records and search candidates in context_candidates
+for the current task. File-editing tasks
 also retain read_file excerpts in read_files. Use retained evidence instead of querying
 it again. Return your normal stage output when enough evidence is available.
 There is no fixed query-count or character cap. Prefer exact reads after candidate
@@ -45,6 +49,7 @@ class DiscoverySession:
         self.index = index
         self.results = {}
         self.evidence = {}
+        self.candidates = {}
 
     def resolve(self, query):
         try:
@@ -52,8 +57,14 @@ class DiscoverySession:
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
             result = {'error': str(error), 'context_kinds': list(self.index.records()),
                 'notice': 'Correct the query or return the normal stage output.'}
+        kind = result.get('kind')
+        for candidate in result.get('candidates', []):
+            if candidate['id'] not in self.evidence.get(kind, {}):
+                self.candidates.setdefault(kind, {})[candidate['id']] = deepcopy(candidate)
         if result.get('records'):
-            self.evidence.setdefault(result['kind'], {}).update(deepcopy(result['records']))
+            self.evidence.setdefault(kind, {}).update(deepcopy(result['records']))
+            for identity in result['records']:
+                self.candidates.get(kind, {}).pop(identity, None)
         return self.observe(result)
 
     def observe(self, result):
@@ -152,34 +163,60 @@ class ContextIndex:
         return {'kind': kind, **result}
 
 
-def project_index(output):
-    """Rebuild on demand so queries see current accepted artifacts and files."""
+def project_index(output, *, kinds, file_roots=()):
+    """Expose only stage-selected collections and source directories, rebuilt on demand."""
     from infrastructure.stages.requirements.tree import RequirementTree
     from infrastructure.stages.backend.context import requirement_context
     from infrastructure.stages.frontend.ui.design import owners, data_symbols
+
     def artifact(name, default):
         return read_artifact(output / '.arc', name) if (output / '.arc' / name).is_file() else default
+
     def records():
-        schema = artifact('db_schema.json', {'entities': {}})
-        backend = artifact('backend_apis.json', {'apis': {}, 'requirements': {}})
-        ui = artifact('ui_design.json', {'pages': {}, 'elements': {}, 'requirements': {}})
-        triggers = artifact('frontend_triggers.json', {'triggers': {}})
-        tree = RequirementTree(artifact('requirements.json', {'id': 'ROOT'}))
-        requirements = {rid: requirement_context(tree, rid) for rid in tree.requirements}
-        paths = artifact('implementation_paths.json', {})
-        test_owners = {}
-        for rid, path in paths.get('e2e_test', {}).items():
-            test_owners[path] = [rid] if rid in requirements else []
-        for aid, path in paths.get('backend_test', {}).items():
-            test_owners[path] = [rid for rid, aids in backend['requirements'].items()
-                if aid in aids and rid in requirements]
-        for pid in ui['pages']:
-            test_owners[f'frontend/tests/ui/{pid}.spec.ts'] = [rid for rid in owners(ui, pid) if rid in requirements]
-        # Owners can themselves be numerous: search/read individual requirements when necessary.
-        return {'schema': schema['entities'], 'api': backend['apis'], 'page': ui['pages'],
-            'ui_element': ui['elements'], 'ui_data': data_symbols(ui['elements']), 'trigger': triggers['triggers'],
-            'requirement': requirements, 'test_requirement': test_owners,
-            'convention': artifact('shared_conventions.json', {}),
-            'file': {path: {} for root in ('frontend/src', 'frontend/tests', 'backend/src', 'backend/tests')
-                for path in source_paths(output, root)}}
+        result = {}
+        backend_tests = 'test_requirement' in kinds and any(root.startswith('backend/') for root in file_roots)
+        frontend_tests = 'test_requirement' in kinds and any(root.startswith('frontend/') for root in file_roots)
+        if 'schema' in kinds:
+            result['schema'] = artifact('db_schema.json', {'entities': {}})['entities']
+        if 'api' in kinds or backend_tests:
+            backend = artifact('backend_apis.json', {'apis': {}, 'requirements': {}})
+            if 'api' in kinds:
+                result['api'] = backend['apis']
+        if any(kind in kinds for kind in ('page', 'ui_element', 'ui_data')) or frontend_tests:
+            ui = artifact('ui_design.json', {'pages': {}, 'elements': {}, 'requirements': {}})
+            if 'page' in kinds:
+                result['page'] = ui['pages']
+            if 'ui_element' in kinds:
+                result['ui_element'] = ui['elements']
+            if 'ui_data' in kinds:
+                result['ui_data'] = data_symbols(ui['elements'])
+        if 'trigger' in kinds:
+            result['trigger'] = artifact('frontend_triggers.json', {'triggers': {}})['triggers']
+        if 'convention' in kinds:
+            result['convention'] = artifact('shared_conventions.json', {})
+        if 'requirement' in kinds or 'test_requirement' in kinds:
+            tree = RequirementTree(artifact('requirements.json', {'id': 'ROOT'}))
+            requirements = {rid: requirement_context(tree, rid) for rid in tree.leaves}
+            if 'requirement' in kinds:
+                result['requirement'] = requirements
+        if 'test_requirement' in kinds:
+            paths = artifact('implementation_paths.json', {})
+            test_owners = {}
+            if backend_tests:
+                for aid, path in paths.get('backend_test', {}).items():
+                    test_owners[path] = [rid for rid, aids in backend['requirements'].items()
+                        if aid in aids and rid in requirements]
+            if frontend_tests:
+                for rid, path in paths.get('e2e_test', {}).items():
+                    test_owners[path] = [rid] if rid in requirements else []
+                for pid in ui['pages']:
+                    path = f'frontend/tests/ui/{pid}.spec.ts'
+                    test_owners[path] = [rid for rid in owners(ui, pid) if rid in requirements]
+            prefixes = tuple(root + '/' for root in file_roots)
+            result['test_requirement'] = {path: ids for path, ids in test_owners.items()
+                if path.startswith(prefixes)}
+        if 'file' in kinds:
+            result['file'] = {path: {} for root in file_roots for path in source_paths(output, root)}
+        return result
+
     return ContextIndex(records, output)
