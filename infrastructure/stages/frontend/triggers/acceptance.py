@@ -67,7 +67,7 @@ def original_requirements(input_dir):
     return RequirementTree(yaml.safe_load(path.read_text(encoding='utf-8-sig')))
 
 
-def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, model, console, max_turns=3):
+def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, model, console, max_turns=10):
     output = arc_dir.parent.resolve()
     tree = original_requirements(input_dir)
     checks = E2EChecks(output)

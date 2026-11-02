@@ -129,6 +129,7 @@ Ctrl+C still interrupts immediately; a workspace that cannot be written cannot r
 save a completion report.
 
 Per-task proposal/edit attempts (normally 10) and actual tool/model timeouts remain finite
-so a broken task does not hang the entire run. Test-count values
+so a broken task does not hang the entire run. Independent acceptance now uses the same
+max-turns value as other stage 12 tasks, without an extra three-turn cap. Test-count values
 are generation hints, not hard acceptance gates. The public CLI retains its established
 zero exit code on completed partial runs; read the structured report for acceptance status.

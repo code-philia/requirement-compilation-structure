@@ -30,7 +30,7 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
         result = run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
             contexts, model, DemoConsole(pause), report, max_turns, max_tests)
         acceptance = run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, interactions,
-            model or TextModel(json_mode=False), DemoConsole(pause), min(max_turns, 3))
+            model or TextModel(json_mode=False), DemoConsole(pause), max_turns)
         result["verification"]["independent_acceptance"] = {"status": "GREEN" if acceptance["status"] == "GREEN" else "FAILED",
             "report": ".arc/independent_acceptance.json"}
         if acceptance["status"] != "GREEN":
