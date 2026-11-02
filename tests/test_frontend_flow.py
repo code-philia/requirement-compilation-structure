@@ -427,7 +427,7 @@ class FrontendFlow(unittest.TestCase):
                 self.assertEqual(set(details["response_template"]),
                     {"pages", "elements", "bindings", "requirement_ui", "step_ui"})
                 self.assertEqual(payload["all_pages"], {})
-                self.assertFalse((self.arc / "ui_design.json").exists())
+                self.assertEqual(json.loads((self.arc / "ui_design.json").read_text())["pages"], {})
             return {"pages": {pid: self.ui["pages"][pid]} if rid != "REQ-B" else {},
                 "elements": context["elements"] if rid != "REQ-B" else {},
                 "bindings": context["bindings"] if rid != "REQ-B" else {},

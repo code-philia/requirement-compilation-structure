@@ -14,6 +14,7 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import apply_patch, check_related_fields
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.shared.agent.discovery import ContextIndex
 
 
@@ -97,54 +98,58 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_atte
     retriever = SchemaRetriever()
     model = TextModel()
     schema = {"entities": {}, "requirements": {}}
+    failures = TaskFailures(arc_dir, "02_build_db_schema", console)
+    save_json(arc_dir / "db_schema.json", schema)
     for index, requirement in enumerate(nodes, 1):
-        label = f"{index}/{len(nodes)} {requirement['id']}"
-        console.show(f"{label} | 1. Current requirement", (
-            f"{requirement['name']}\n\nDescription:\n{requirement['description']}"
-            f"\n\nConcatenated steps:\n{requirement['steps'] or '(No steps on this requirement.)'}"
-        ))
-        console.show(f"{label} | 2. All existing schema (excerpt)", format_schema(schema["entities"], excerpt=True))
+        with failures.task(requirement["id"]):
+            label = f"{index}/{len(nodes)} {requirement['id']}"
+            console.show(f"{label} | 1. Current requirement", (
+                f"{requirement['name']}\n\nDescription:\n{requirement['description']}"
+                f"\n\nConcatenated steps:\n{requirement['steps'] or '(No steps on this requirement.)'}"
+            ))
+            console.show(f"{label} | 2. All existing schema (excerpt)", format_schema(schema["entities"], excerpt=True))
 
-        # --- Key extension point 02C: retrieval / RAG --------------------------
-        # Rewrite query construction here and ranking/candidate selection in
-        # infrastructure/shared/rag/schema.py: BM25, embeddings, hybrid search,
-        # or reranking are possible experiments. Return {matches, entities};
-        # retrieved entity definitions must retain their actual schema names.
-        query = "\n".join(requirement[key] for key in ("name", "description", "steps"))
-        retrieved = retriever.retrieve(query, schema, top_k)
-        ranking = "\n".join(f"{item['symbol']}  BM25={item['score']:.4f}" for item in retrieved["matches"])
-        console.show(f"{label} | 3. Retrieved schema", (
-            (ranking or "No lexical matches (the schema may still be empty).")
-            + "\n\nRetrieved entity definitions:\n"
-            + format_schema(retrieved["entities"])
-        ))
+            # --- Key extension point 02C: retrieval / RAG --------------------------
+            # Rewrite query construction here and ranking/candidate selection in
+            # infrastructure/shared/rag/schema.py: BM25, embeddings, hybrid search,
+            # or reranking are possible experiments. Return {matches, entities};
+            # retrieved entity definitions must retain their actual schema names.
+            query = "\n".join(requirement[key] for key in ("name", "description", "steps"))
+            retrieved = retriever.retrieve(query, schema, top_k)
+            ranking = "\n".join(f"{item['symbol']}  BM25={item['score']:.4f}" for item in retrieved["matches"])
+            console.show(f"{label} | 3. Retrieved schema", (
+                (ranking or "No lexical matches (the schema may still be empty).")
+                + "\n\nRetrieved entity definitions:\n"
+                + format_schema(retrieved["entities"])
+            ))
 
-        # --- Extension point 02D: generation and JSON parse feedback -----------
-        # Change the evidence supplied to the model or its correction strategy.
-        # The name inventory is global; full definitions come from retrieval.
-        # apply_patch() merges the proposed entity and field updates.
-        request = {
-            "requirement": requirement,
-            "symbol_inventory": {name: list(entity["fields"]) for name, entity in retrieved["entities"].items()},
-            "retrieved_schema": {"entities": retrieved["entities"]},
-        }
-        def accept(patch):
-            updated = apply_patch(schema, patch)
-            check_related_fields(updated, patch["related_fields"])
-            updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
-            changes = format_changes(schema, updated)
-            return updated, changes
+            # --- Extension point 02D: generation and JSON parse feedback -----------
+            # Change the evidence supplied to the model or its correction strategy.
+            # The name inventory is global; full definitions come from retrieval.
+            # apply_patch() merges the proposed entity and field updates.
+            request = {
+                "requirement": requirement,
+                "symbol_inventory": {name: list(entity["fields"]) for name, entity in retrieved["entities"].items()},
+                "retrieved_schema": {"entities": retrieved["entities"]},
+            }
+            def accept(patch):
+                updated = apply_patch(schema, patch)
+                check_related_fields(updated, patch["related_fields"])
+                updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
+                changes = format_changes(schema, updated)
+                return updated, changes
 
-        (updated, changes), patch = propose_json(model, INSTRUCTIONS, request, accept,
-            console, f"Schema design {requirement['id']}", max_attempts, context_index=ContextIndex(lambda: {"schema": schema["entities"]}))
-        # --- Pass boundary: publish the schema ----------------------
-        # Subsequent requirements retrieve from this updated graph.
-        save_json(arc_dir / "db_schema.json", updated)
-        console.show(f"{label} | 4. Schema changes (saved)", (
-            changes
-        ))
-        schema = updated
-        console.artifact("db_schema", schema, f"{label} | Accepted schema")
+            (updated, changes), patch = propose_json(model, INSTRUCTIONS, request, accept,
+                console, f"Schema design {requirement['id']}", max_attempts, context_index=ContextIndex(lambda: {"schema": schema["entities"]}))
+            # --- Pass boundary: publish the schema ----------------------
+            # Subsequent requirements retrieve from this updated graph.
+            save_json(arc_dir / "db_schema.json", updated)
+            console.show(f"{label} | 4. Schema changes (saved)", (
+                changes
+            ))
+            schema = updated
+            console.artifact("db_schema", schema, f"{label} | Accepted schema")
+    failures.finish()
     print(f"Schema saved: {arc_dir / 'db_schema.json'}", flush=True)
     return schema
 

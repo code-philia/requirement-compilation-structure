@@ -63,7 +63,7 @@ class SchemaEvolution(unittest.TestCase):
                 if len(requests) == 1:
                     return bad
                 if len(requests) == 2:
-                    self.assertFalse((arc / 'db_schema.json').exists())
+                    self.assertEqual(json.loads((arc / 'db_schema.json').read_text())['entities'], {})
                     self.assertEqual(request['symbol_inventory'], {})
                     self.assertIn('Session.id', request['correction']['error'])
                     self.assertEqual(request['correction']['previous_response'], bad)
@@ -89,8 +89,10 @@ class SchemaEvolution(unittest.TestCase):
             save_json(arc / 'requirements.json', {'id': 'ROOT', 'children': [{'id': 'REQ-1', 'name': 'Home'}]})
             save_json(arc / 'db_schema.json', {'entities': {}, 'requirements': {'REQ-1': ['Session.id']}})
             model = Mock()
-            with patch.object(stage3, 'TextModel', return_value=model), patch.object(stage3, 'DemoConsole', return_value=Mock()), self.assertRaisesRegex(ValueError, 'REQ-1.*Rerun 02_build_db_schema.py'):
+            with patch.object(stage3, 'TextModel', return_value=model), patch.object(stage3, 'DemoConsole', return_value=Mock()), self.assertRaises(RuntimeError) as failure:
                 stage3.infer_db_obligations(arc)
+            self.assertIn('Rerun 02_build_db_schema.py', failure.exception.failures[0]['error'])
+            self.assertEqual(failure.exception.failures[0]['task'], 'REQ-1')
             model.generate_json.assert_not_called()
 
 

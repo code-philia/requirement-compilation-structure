@@ -113,3 +113,22 @@ shared blind spots, not a proof of complete requirement correctness.
 
 Changes to existing generated tests are recorded with before/after content, diagnosis and
 actual feedback in `.arc/test_repairs.jsonl`. No source-text policy scans are introduced.
+
+### Complete the pipeline after local failures
+
+Design tasks (02/03/05/06/09/11), like implementation tasks, attempt their remaining
+requirements/entities after a local proposal fails. Per-task results are saved in
+`.arc/stage_tasks/<stage>.json`; accepted artifacts remain usable. Failed obligations
+stay missing rather than being fabricated as empty R/W records.
+
+The compiler attempts all 13 passes even when a pass raises an ordinary exception.
+A downstream pass lacking prerequisites is reported as failed, while independent passes
+can still run. `.arc/compilation.json` finishes with `COMPLETED_WITH_FAILURES` when any
+pass remains unsuccessful. This does not declare an incomplete application correct.
+Ctrl+C still interrupts immediately; a workspace that cannot be written cannot reliably
+save a completion report.
+
+Per-task proposal/edit attempts (normally 10) and actual tool/model timeouts remain finite
+so a broken task does not hang the entire run. Test-count values
+are generation hints, not hard acceptance gates. The public CLI retains its established
+zero exit code on completed partial runs; read the structured report for acceptance status.

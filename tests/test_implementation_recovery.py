@@ -119,14 +119,14 @@ class ImplementationRecovery(unittest.TestCase):
             self.assertEqual(report['status'], 'COMPLETED_WITH_FAILURES')
             self.assertEqual(report['stages']['08_implement_backend_tdd']['failures'][0]['task'], 'API-A')
             self.assertEqual(report['stages']['12_implement_frontend_tdd']['status'], 'GREEN')
-            # The public CLI signals failure only after it has attempted every pass.
+            # The public CLI completes normally and exposes failures through its report.
             import main
             compiler.input_dir.mkdir()
             (compiler.input_dir / 'requirements.yaml').write_text('id: ROOT\nchildren: []\n')
             calls.clear()
             with patch('infrastructure.compiler.import_module', side_effect=load), patch.object(main, 'Compiler', return_value=compiler), redirect_stdout(StringIO()), patch('sys.stderr', new=StringIO()), self.assertRaises(SystemExit) as exit_status:
                 main.main([str(compiler.input_dir), '-o', str(compiler.output_dir)])
-            self.assertEqual(exit_status.exception.code, 1)
+            self.assertEqual(exit_status.exception.code, 0)
             self.assertEqual(calls, [name for name, _ in PASSES])
 
     def test_trigger_failure_restores_handlers_and_later_requirements_continue(self):
