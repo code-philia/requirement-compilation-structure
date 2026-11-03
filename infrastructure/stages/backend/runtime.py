@@ -24,7 +24,7 @@ def prepare_runtime(output: Path) -> None:
     """Publish fixed test infrastructure without overwriting application wiring."""
     for relative in ("package.json", "backend/package.json", "backend/src/app.ts", "backend/src/server.ts", "backend/src/api/types.ts", "backend/tsconfig.test.json"):
         if not (output / relative).is_file():
-            raise ValueError(f"Missing {relative}; run 00_project_initialization.py first")
+            raise ValueError(f"Missing {relative}; run main.py --stage 00 first")
     enable_import_case_checks(output, "backend")
     templates = Path(__file__).resolve().parents[2] / "shared/project/templates"
     if not (output / REGISTER_PATH).is_file():

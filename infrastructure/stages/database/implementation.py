@@ -94,7 +94,7 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
         if not (output / relative).is_file():
             save_text(output / relative, f"-- Prerequisite rows for {name}; extended incrementally by requirement.\n")
     save_text(output / SEED_PATH, seed_source(order))
-    checkpoint(output, stage="05", task="startup data loader", action="Publish per-table insertion files and loader",
+    checkpoint(output, stage="04", task="startup data loader", action="Publish per-table insertion files and loader",
         details={"insertion_order": order, "insert_files": insert_paths})
 
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
@@ -181,7 +181,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
         result = checks.run()
         report.update(status="GREEN" if result["returncode"] == 0 else "FAILED", checks=result)
         save_json(path, report)
-        checkpoint(output, stage="05", task="database runtime", action="Execute real database and startup checks",
+        checkpoint(output, stage="04", task="database runtime", action="Execute real database and startup checks",
             status=report["status"], details=result)
         if result["returncode"]:
             raise CheckFailure("Database initialization or startup failed", result)

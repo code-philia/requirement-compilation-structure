@@ -50,25 +50,44 @@ Add `--model-log` to display and save detailed model input/output, or `--port 33
 
 ### Step by step
 
-Run these commands in order. They call the same 13 passes with the same default settings as `main.py`. Step 01 uses `--no-browse` to match the non-interactive pipeline.
+Run these commands in order to execute the same 11 passes as the full pipeline. Each command runs only the selected stage and reads existing artifacts from `outputs/demo/.arc/`.
 
 ```bash
-uv run 00_project_initialization.py --input input --output outputs/demo
-uv run 01_explore_requirement.py --input input --output outputs/demo --no-browse
-uv run 02_build_db_schema.py --input input --output outputs/demo
-uv run 03_infer_db_obligations.py --input input --output outputs/demo
-uv run 04_check_db_obligations.py --input input --output outputs/demo
-uv run 05_implement_db.py --input input --output outputs/demo
-uv run 06_design_backend_apis.py --input input --output outputs/demo
-uv run 07_check_backend_apis.py --input input --output outputs/demo
-uv run 08_implement_backend_tdd.py --input input --output outputs/demo
-uv run 09_design_ui.py --input input --output outputs/demo
-uv run 10_implement_ui.py --input input --output outputs/demo
-uv run 11_design_frontend_triggers.py --input input --output outputs/demo
-uv run 12_implement_frontend_tdd.py --input input --output outputs/demo
+# 00: Initialize project
+uv run main.py input --output-dir outputs/demo --stage 00_project_initialization
+
+# 01: Read requirements and analyze reference images
+uv run main.py input --output-dir outputs/demo --stage 01_explore_requirement
+
+# 02: Design database schema
+uv run main.py input --output-dir outputs/demo --stage 02_build_db_schema
+
+# 03: Infer database read/write obligations
+uv run main.py input --output-dir outputs/demo --stage 03_infer_db_obligations
+
+# 04: Implement database
+uv run main.py input --output-dir outputs/demo --stage 04_implement_db
+
+# 05: Design backend APIs including P/Q
+uv run main.py input --output-dir outputs/demo --stage 05_design_backend_apis
+
+# 06: Implement backend with test-first acceptance
+uv run main.py input --output-dir outputs/demo --stage 06_implement_backend_tdd
+
+# 07: Design UI and frontend data
+uv run main.py input --output-dir outputs/demo --stage 07_design_ui
+
+# 08: Implement UI and run existence tests
+uv run main.py input --output-dir outputs/demo --stage 08_implement_ui
+
+# 09: Design frontend triggers
+uv run main.py input --output-dir outputs/demo --stage 09_design_frontend_triggers
+
+# 10: Implement triggers and run end-to-end tests
+uv run main.py input --output-dir outputs/demo --stage 10_implement_frontend_tdd
 ```
 
-For individual steps, add `--pause` for teaching pauses or `--debug-model-io` for detailed model I/O. Set a custom backend port with `--port` in step 00.
+The `--stage` option accepts only a full stage name such as `06_implement_backend_tdd`. Use `uv run main.py --help` to see all stages. Add `--pause` for teaching pauses or `--model-log` for detailed model I/O. Set a custom backend port with `--port` in stage 00.
 
 ### Start the generated application
 

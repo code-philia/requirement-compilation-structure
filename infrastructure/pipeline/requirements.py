@@ -2,15 +2,12 @@
 
 import json
 import re
-from contextlib import ExitStack
 from pathlib import Path
 
 import yaml
 
-from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.vision import VisualModel
 from infrastructure.utils.presentation.console import DemoConsole
-from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json, save_text
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.shared.project.git import checkpoint
@@ -307,47 +304,3 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
     save_json(arc_dir / "visual_analysis.json", analysis)
     print(f"Results saved: {arc_dir / 'requirements.json'}, {arc_dir / 'visual_analysis.json'}")
     return requirements
-
-
-def main() -> None:
-    parser = create_parser("Step 01: Explore Requirement Tree")
-    parser.add_argument(
-        "--browse", action="store_true",
-        help="Skip analysis and browse requirements interactively",
-    )
-    parser.add_argument(
-        "--no-browse", action="store_true",
-        help="Run analysis only (used by non-interactive pipelines)",
-    )
-    args = parser.parse_args()
-
-    if args.browse and args.no_browse:
-        parser.error("--browse and --no-browse cannot be used together")
-
-    input_dir = args.input.expanduser().resolve()
-    source = input_dir / "requirements.yaml"
-    if args.browse:
-        try:
-            if not input_dir.is_dir():
-                raise ValueError(f"Input directory does not exist or is not a directory: {input_dir}")
-            root = load_requirements(source)
-            RequirementExplorer(source, root).run()
-        except (OSError, ValueError, yaml.YAMLError) as error:
-            parser.exit(1, f"Cannot browse requirements: {error}\n")
-        return
-
-    with ExitStack() as stack:
-        try:
-            input_dir, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            if not input_dir.is_dir():
-                raise ValueError(f"Input directory does not exist or is not a directory: {input_dir}")
-            requirements = explore_requirement(input_dir, output_dir / ".arc", args.pause)
-            if not args.no_browse:
-                RequirementExplorer(source, requirements).run()
-        except (OSError, ValueError, RuntimeError) as error:
-            parser.exit(1, f"Execution failed: {error}\n")
-
-
-if __name__ == "__main__":
-    main()

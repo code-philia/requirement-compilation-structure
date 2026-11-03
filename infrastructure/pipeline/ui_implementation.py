@@ -1,14 +1,11 @@
-"""Step 10: implement the saved UI/data design through UI existence TDD."""
+"""Step 08: implement the saved UI/data design through UI existence TDD."""
 
-from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.stages.frontend.context import load_ui_context, load_ui_design
 from infrastructure.stages.frontend.ui.implementation import implement_ui
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
-from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
 
 
@@ -17,14 +14,14 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
     if not (arc_dir / "ui_design.json").is_file():
-        raise ValueError("Run 09_design_ui.py first to create .arc/ui_design.json")
+        raise ValueError("Run main.py --stage 07 first to create .arc/ui_design.json")
     report = {"status": "VALIDATING", "pages": {}}
     save_json(arc_dir / "ui_checks.json", report)
     try:
         tree, images, contexts = load_ui_context(arc_dir, input_dir)
         design = load_ui_design(arc_dir, tree)
         console = DemoConsole(pause)
-        console.show("Step 10 | Saved UI/data design", f"Loaded {arc_dir / 'ui_design.json'}\nPages: {', '.join(design['pages']) or '(none)'}\nGenerate existence tests and implement this design without rerunning synthesis.")
+        console.show("Step 08 | Saved UI/data design", f"Loaded {arc_dir / 'ui_design.json'}\nPages: {', '.join(design['pages']) or '(none)'}\nGenerate existence tests and implement this design without rerunning synthesis.")
         if not design["pages"]:
             report["status"] = "NO_UI"
             save_json(arc_dir / "ui_checks.json", report)
@@ -41,23 +38,3 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
                 page["status"] = "FAILED"
         save_json(arc_dir / "ui_checks.json", report)
         raise
-
-
-def main() -> None:
-    parser = create_parser("Step 10: Playwright UI Existence Tests and UI Implementation TDD")
-    parser.add_argument("--max-turns", type=int, default=10, help="Maximum edit/check turns per page implementation")
-    args = parser.parse_args()
-    with ExitStack() as stack:
-        try:
-            input_dir, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            result = implement_frontend_ui(input_dir, output_dir / ".arc", args.pause, args.max_turns)
-        except (OSError, ValueError, RuntimeError) as error:
-            parser.exit(1, f"Execution failed: {error}\n")
-
-    if result["status"] == "COMPLETED_WITH_FAILURES":
-        parser.exit(1, "All implementation tasks were attempted; some acceptance checks failed. See the .arc report.\n")
-
-
-if __name__ == "__main__":
-    main()

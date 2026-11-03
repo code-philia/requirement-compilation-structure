@@ -1,16 +1,13 @@
 """Step 03: infer database read/write obligations for every requirement and step."""
 
 import json
-from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.stages.database.obligations.records import normalize_inference, normalize_obligations, check_symbols
 from infrastructure.stages.database.schema import check_related_fields
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
-from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.utils.files import save_json
@@ -54,7 +51,7 @@ returning data from a create operation does not replace a later retrieval operat
 
 
 def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10) -> dict:
-    for filename, previous in (("requirements.json", "01_explore_requirement.py"), ("db_schema.json", "02_build_db_schema.py")):
+    for filename, previous in (("requirements.json", "main.py --stage 01"), ("db_schema.json", "main.py --stage 02")):
         if not (arc_dir / filename).is_file():
             raise ValueError(f"Run {previous} first to create .arc/{filename}")
     if top_k < 1:
@@ -86,7 +83,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
                 check_related_fields(schema, related_fields)
             except ValueError as error:
                 raise ValueError(f"Invalid schema associations for {rid} in .arc/db_schema.json. "
-                    f"Rerun 02_build_db_schema.py to repair the schema before inference. {error}") from error
+                    f"Rerun main.py --stage 02 to repair the schema before inference. {error}") from error
             related_entities = {}
             for symbol in related_fields:
                 entity, field = symbol.split(".", 1)
@@ -123,21 +120,3 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
     save_json(arc_dir / "db_obligations.json", obligations)
     print(f"Obligations saved: {arc_dir / 'db_obligations.json'}", flush=True)
     return obligations
-
-
-def main() -> None:
-    parser = create_parser("Step 03: Infer DB Obligations")
-    parser.add_argument("--top-k", type=int, default=6, help="Number of BM25 entity/field hits (default: 6)")
-    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per requirement; including the first proposal (default: 10)")
-    args = parser.parse_args()
-    with ExitStack() as stack:
-        try:
-            _, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            infer_db_obligations(output_dir / ".arc", args.pause, args.top_k, args.max_attempts)
-        except (OSError, ValueError, RuntimeError) as error:
-            parser.exit(1, f"Execution failed: {error}\n")
-
-
-if __name__ == "__main__":
-    main()

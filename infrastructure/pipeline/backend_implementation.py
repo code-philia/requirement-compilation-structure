@@ -1,7 +1,6 @@
-"""Step 08: implement backend APIs against real-server HTTP acceptance suites."""
+"""Step 06: implement backend APIs against real-server HTTP acceptance suites."""
 
 import json
-from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.shared.agent.context import SourceFiles
@@ -13,10 +12,8 @@ from infrastructure.stages.backend.context import load_context, requirement_cont
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.runtime import REGISTER_PATH, TEST_RUNNER_PATH, TEST_SUPPORT_PATH, prepare_runtime, test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green, test_run_status
-from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
-from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.shared.project.git import checkpoint
@@ -125,15 +122,15 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     contracts = read_artifact(arc_dir, "backend_apis.json")
     output = arc_dir.parent.resolve()
     if not (output / "backend/src/db/initialize.ts").is_file():
-        raise ValueError("Run 00_project_initialization.py and 05_implement_db.py first")
+        raise ValueError("Run main.py --stage 00 and main.py --stage 04 first")
     for name in schema["entities"]:
         if not (output / f"backend/src/db/tables/{name}.sql").is_file():
-            raise ValueError(f"Missing implemented SQL for {name}; run step 05")
+            raise ValueError(f"Missing implemented SQL for {name}; run step 04")
     prepare_runtime(output)
     console = DemoConsole(pause)
     console.show("TDD preparation | Install dependencies", f"Workspace: {output}\nCommand: npm install --include=dev --no-audit --no-fund")
     install_dependencies(output)
-    checkpoint(output, stage="08", task="runtime", action="Prepare backend wiring and dependencies",
+    checkpoint(output, stage="06", task="runtime", action="Prepare backend wiring and dependencies",
         details={"api_ids": list(contracts["apis"]), "http_test_runner": TEST_RUNNER_PATH})
     if not contracts["apis"]:
         report = {"status": "NO_APIS", "tests": {}, "red": {}, "green": {}, "agents": {}, "summary": {"tests": 0, "pass": 0, "fail": 0}}
@@ -200,7 +197,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         entry["test_status"] = status
                         console.show(f"{aid} | HTTP tests: {status}", result["output"])
                         save_json(arc_dir / "backend_tdd.json", report)
-                        checkpoint(output, stage="08", task=aid, action="Run HTTP tests before implementation",
+                        checkpoint(output, stage="06", task=aid, action="Run HTTP tests before implementation",
                             status=status, details={"test_path": chosen, "checks": result})
                         return {"typecheck": compiled, "tests": result, "status": status}
 
@@ -288,24 +285,3 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 requirement["status"] = "FAILED"
         save_json(arc_dir / "backend_tdd.json", report)
         raise
-
-
-def main() -> None:
-    parser = create_parser("Step 08: TDD-driven API Implementation (P / Q / Dataflow Obligations)")
-    parser.add_argument("--max-turns", type=int, default=10, help="Maximum edit rounds per test/implementation agent")
-    parser.add_argument("--max-tests", type=int, default=5, help="Maximum key contract tests per API (default: 5)")
-    args = parser.parse_args()
-    with ExitStack() as stack:
-        try:
-            _, output = resolve_directories(args)
-            stack.enter_context(console_log(output, debug_model_io=args.debug_model_io))
-            result = implement_backend_tdd(output / ".arc", args.pause, args.max_turns, args.max_tests)
-        except (OSError, ValueError, RuntimeError) as error:
-            parser.exit(1, f"Execution failed: {error}\n")
-
-    if result["status"] == "COMPLETED_WITH_FAILURES":
-        parser.exit(1, "All implementation tasks were attempted; some acceptance checks failed. See the .arc report.\n")
-
-
-if __name__ == "__main__":
-    main()

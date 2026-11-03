@@ -1,14 +1,11 @@
 """Step 02: discover entities and fields incrementally using schema RAG."""
 
 import json
-from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_changes, format_schema
-from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import apply_patch, check_related_fields
@@ -86,7 +83,7 @@ def requirement_nodes(root: dict):
 def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10) -> dict:
     requirements_path = arc_dir / "requirements.json"
     if not requirements_path.is_file():
-        raise ValueError("Run 01_explore_requirement.py first to create .arc/requirements.json")
+        raise ValueError("Run main.py --stage 01 first to create .arc/requirements.json")
     requirements = json.loads(requirements_path.read_text(encoding="utf-8-sig"))
     # --- Extension point 02B: traversal and analysis context -------------------
     # RequirementTree owns traversal and step ownership. Study how another visit
@@ -152,21 +149,3 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_atte
     failures.finish()
     print(f"Schema saved: {arc_dir / 'db_schema.json'}", flush=True)
     return schema
-
-
-def main() -> None:
-    parser = create_parser("Step 02: Build DB Schema with RAG")
-    parser.add_argument("--top-k", type=int, default=6, help="Number of BM25 entity/field hits (default: 6)")
-    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per requirement; including the first proposal (default: 10)")
-    args = parser.parse_args()
-    with ExitStack() as stack:
-        try:
-            _, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            build_db_schema(output_dir / ".arc", args.pause, args.top_k, args.max_attempts)
-        except (OSError, ValueError, RuntimeError) as error:
-            parser.exit(1, f"Execution failed: {error}\n")
-
-
-if __name__ == "__main__":
-    main()

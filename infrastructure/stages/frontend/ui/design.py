@@ -50,7 +50,7 @@ Unchanged records may be omitted from their maps; include all four root keys eve
 Reuse canonical variable names and element IDs. Query relevant elements/pages when needed.
 mode declares how the user interacts with the element; implementation chooses framework
 bindings and routing. No fixed host synchronizes inputs or interprets this design. Additional
-interaction behavior belongs to step 11; real data loading and updates belong to step 12.
+interaction behavior belongs to step 09; real data loading and updates belong to step 10.
 Preserve visible labels in their original language. UI has no DB field-mapping model.
 """
 

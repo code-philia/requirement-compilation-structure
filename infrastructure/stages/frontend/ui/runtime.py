@@ -92,7 +92,7 @@ def prepare_frontend(output: Path) -> None:
     """Prepare build and test infrastructure without generating application behavior."""
     for relative in ("package.json", "frontend/package.json", "frontend/src/main.tsx", "frontend/tsconfig.json", "frontend/vite.config.ts"):
         if not (output / relative).is_file():
-            raise ValueError(f"Missing {relative}; run 00_project_initialization.py first")
+            raise ValueError(f"Missing {relative}; run main.py --stage 00 first")
     configure_tailwind(output)
     enable_import_case_checks(output, "frontend")
     path = output / "package.json"

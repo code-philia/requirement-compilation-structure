@@ -1,6 +1,6 @@
-"""Step 09 orchestration: retrieve pages, propose UI/data, parse, and publish.
+"""Step 07 orchestration: retrieve pages, propose UI/data, parse, and publish.
 
-All leaf requirements are designed before step 10 implements any UI. Reuse is
+All leaf requirements are designed before step 08 implements any UI. Reuse is
 page-first: retrieval returns the corresponding UI/data subtree, not disconnected
 components. Prompts and design records live in ui/design.py."""
 
@@ -48,7 +48,7 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
 
     Show existing/retrieved pages, ask for an incremental proposal, and feed
     response-consumption errors back for repair. Save accepted ui_design.json
-    updates; implementation and browser tests belong to step 10."""
+    updates; implementation and browser tests belong to step 08."""
     design, retriever = empty_design(), PageRetriever()
     for rid in tree.requirements:
         if tree.children[rid]:
@@ -56,7 +56,7 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
             for sid in tree.own_steps[rid]:
                 design["steps"][sid] = []
             console.show(f"{rid} | Skip non-leaf UI/data analysis", "Only leaf requirements are analyzed. Organizational parents do not generate or inherit UI nodes.")
-    failures = TaskFailures(arc_dir, "09_design_ui", console)
+    failures = TaskFailures(arc_dir, "07_design_ui", console)
     save_json(arc_dir / "ui_design.json", design)
     for number, rid in enumerate(tree.leaves, 1):
         with failures.task(rid):
@@ -90,5 +90,5 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
     failures.finish()
     normalize_design(design, tree)
     save_json(arc_dir / "ui_design.json", design)
-    console.show("UI/data design complete for ALL requirements", f"Saved {arc_dir / 'ui_design.json'}\nRun 10_implement_ui.py for existence tests and UI implementation. Interactions belong to step 11.")
+    console.show("UI/data design complete for ALL requirements", f"Saved {arc_dir / 'ui_design.json'}\nRun main.py --stage 08 for existence tests and UI implementation. Interactions belong to step 09.")
     return design

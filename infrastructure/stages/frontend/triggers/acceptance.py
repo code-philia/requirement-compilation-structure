@@ -149,7 +149,7 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                 # gate intentionally does not demand behavioral GREEN.
                 entry['initial_failure'] = result
                 save_json(arc_dir / 'independent_acceptance.json', report)
-                checkpoint(output, stage="12", task=rid, action="Record independent acceptance before test review",
+                checkpoint(output, stage="10", task=rid, action="Record independent acceptance before test review",
                     status="FAILED", details={"test_path": path, "checks": result})
                 review = run_file_agent(model, REVIEW_INSTRUCTIONS, task, workspace, compile_suite,
                     max_turns, console, label + ' / Test review', feedback=result)
@@ -243,12 +243,12 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
             entry.update(status='FAILED', error=str(error))
         finally:
             save_json(arc_dir / 'independent_acceptance.json', report)
-            checkpoint(output, stage="12", task=rid, action="Publish independent requirement acceptance",
+            checkpoint(output, stage="10", task=rid, action="Publish independent requirement acceptance",
                 status=entry['status'], details=entry)
             console.show(label + ' | ' + entry['status'], entry.get('error', 'Real acceptance checks completed'))
     report['status'] = 'GREEN' if report['requirements'] and all(
         entry['status'] == 'GREEN' for entry in report['requirements'].values()) else 'COMPLETED_WITH_FAILURES'
     save_json(arc_dir / 'independent_acceptance.json', report)
-    checkpoint(output, stage="12", task="independent acceptance", action="Publish final independent acceptance report",
+    checkpoint(output, stage="10", task="independent acceptance", action="Publish final independent acceptance report",
         status=report['status'], details=report)
     return report
