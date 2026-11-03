@@ -111,7 +111,7 @@ class Compiler:
         try:
             for name, function, artifact in passes:
                 if function is project_initialization:
-                    result = self._run(name, function, self.output_dir, port=self.port, pause=self.pause)
+                    result = self._run(name, function, self.input_dir, self.output_dir, port=self.port, pause=self.pause)
                 elif function in (explore_requirement, design_frontend_ui, implement_frontend_ui,
                         design_frontend_triggers, implement_frontend_triggers):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
