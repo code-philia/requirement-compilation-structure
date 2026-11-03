@@ -13,6 +13,10 @@ from metrics import (
     read_json,
     seconds_between,
     recorded_stages,
+    calls_from_terminal,
+    telemetry_summary,
+    metrics_from_totals,
+    MODEL_PRICES,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +56,7 @@ class Repository:
         self.last_scan = 0
         self.cache = {}
         self.log_cache = {}
-        self.prices = {}
+        self.prices = MODEL_PRICES
 
     def scan(self, force=False):
         if not force and time.monotonic() - self.last_scan < 10:
@@ -77,6 +81,8 @@ class Repository:
                 subdirs[:] = []
         entries = {}
         for output in outputs:
+            if not (output / ".arc").is_dir():
+                continue
             run_root = output / ".arc" / "playground" / "runs"
             if run_root.is_dir():
                 for run_dir in run_root.iterdir():
@@ -91,9 +97,7 @@ class Repository:
                         }
             # Existing files may contain several appended invocations. Keep that
             # provenance explicit instead of claiming they represent one exact run.
-            if (
-                output / ".arc" / "requirements.json"
-            ).exists() and not run_root.exists():
+            if not run_root.exists():
                 identity = (
                     "history-" + hashlib.sha256(str(output).encode()).hexdigest()[:16]
                 )
@@ -119,7 +123,7 @@ class Repository:
         manifest = read_json(archive / "run.json") if archive else {}
         report = read_json(output / ".arc" / "compilation.json") if not archive else {}
         if not manifest:
-            modified = (output / ".arc" / "requirements.json").stat().st_mtime
+            modified = (output / ".arc").stat().st_mtime
             manifest = {
                 "id": entry["id"],
                 "name": output.name,
@@ -138,76 +142,200 @@ class Repository:
         run = self.summary(entry)
         output, archive = entry["output"], entry["archive"]
         base = archive / "artifacts" if archive else output / ".arc"
-        log_path = (
-            archive / "model_calls.jsonl" if archive else output / "model_calls.jsonl"
-        )
-        try:
-            signature = (log_path.stat().st_size, log_path.stat().st_mtime_ns)
-        except OSError:
-            signature = None
-        cached = self.cache.get(identity)
-        if not cached or cached[0] != signature:
-            calls = calls_from_records(log_records(log_path))
-            self.cache[identity] = (signature, calls)
-        else:
-            calls = cached[1]
-        prices = run.get("settings", {}).get("prices", {}) if archive else self.prices
-        metrics = aggregate(calls, prices)
-        artifacts = {name: read_json(base / (name + ".json")) for name in ARTIFACTS}
-        if run.get("legacy"):
-            run["settings"] = {
-                "model": next((call["model"] for call in calls if call["model"]), None),
-                "base_url": next(
-                    (call.get("base_url") for call in calls if call.get("base_url")),
-                    None,
-                ),
-            }
-            run["data_note"] = (
-                "历史工作目录：日志可能包含多次执行；时间、设置及产物只展示可确认的数据。"
-            )
-        stages = []
-        stage_definitions = STAGES
-        if run.get("legacy"):
-            console_path = output / "compiler.log"
+        logs = archive or output
+        console_path = logs / ("console.log" if archive else "compiler.log")
+        model_path = logs / "model_calls.jsonl"
+        events_path = logs / "compilation_events.jsonl"
+        signature = []
+        for path in (console_path, model_path, events_path):
             try:
-                console_signature = (
-                    console_path.stat().st_size,
-                    console_path.stat().st_mtime_ns,
-                )
+                signature.append((path.stat().st_size, path.stat().st_mtime_ns))
             except OSError:
-                console_signature = None
-            previous = self.log_cache.get(run["id"])
-            if previous is None or previous[0] != console_signature:
-                recorded = recorded_stages(console_path)
-                self.log_cache[run["id"]] = (console_signature, recorded)
+                signature.append(None)
+        cached = self.cache.get(identity)
+        if cached is None or cached[0] != signature:
+            records = list(log_records(events_path))
+            telemetry = None
+            if records:
+                latest_run = records[-1].get("run_id")
+                telemetry = telemetry_summary(
+                    record for record in records if record.get("run_id") == latest_run
+                )
+                calls = telemetry["calls"]
+                recorded = {}
             else:
-                recorded = previous[1]
+                calls = calls_from_records(log_records(model_path))
+                if not calls:
+                    calls = calls_from_terminal(console_path)
+                recorded = recorded_stages(console_path)
+            cached = (signature, calls, telemetry, recorded)
+            self.cache[identity] = cached
+        _, cached_calls, telemetry, recorded = cached
+        calls = [dict(call) for call in cached_calls]
+        artifacts = {name: read_json(base / (name + ".json")) for name in ARTIFACTS}
+        metrics = aggregate(calls, self.prices)
+        settings = dict(run.get("settings", {}))
+        settings.update(prices=self.prices, currency="CNY", pricing_period="peak")
+        if not settings.get("model"):
+            settings["model"] = next(
+                (call["model"] for call in calls if call.get("model")), None
+            )
+        if not settings.get("base_url"):
+            settings["base_url"] = next(
+                (call.get("base_url") for call in calls if call.get("base_url")), None
+            )
+        run["settings"] = settings
+        stage_definitions = STAGES
+        stage_records = dict(run.get("stages", {}))
+        tasks, actions = [], []
+        if telemetry:
+            run.update(telemetry["run"])
+            run["legacy"] = False
+            settings.update(telemetry["run"].get("settings", {}))
+            stage_records = telemetry["stages"]
+            tasks = [dict(task) for task in telemetry["tasks"]]
+            actions = [dict(action) for action in telemetry["actions"]]
+            parents = {task["id"]: task.get("parent_id") for task in tasks}
+            for task in tasks:
+                if "usage" in task:
+                    task["metrics"] = metrics_from_totals(task["usage"])
+                    continue
+                task_calls = []
+                for call in calls:
+                    ancestor = call.get("task_span_id")
+                    while ancestor:
+                        if ancestor == task["id"]:
+                            task_calls.append(call)
+                            break
+                        ancestor = parents.get(ancestor)
+                task["metrics"] = aggregate(task_calls, self.prices)
+            for action in actions:
+                action["metrics"] = metrics_from_totals(action.get("usage", {}))
+        elif run.get("legacy"):
+            run["data_note"] = (
+                "按历史日志中已报告的数据统计；未保存的模型输入输出和时间戳无法恢复。费用按高峰期人民币单价估算。"
+            )
             if recorded:
-                run["stages"] = {entry["id"]: entry for entry in recorded.values()}
-                stage_definitions = [
-                    (entry["id"], entry["label"], "历史执行阶段")
-                    for entry in recorded.values()
-                ]
-            run["settings"]["prices"] = prices
-            if prices:
-                run["data_note"] += " 金额按当前配置单价估算。"
-        for identity, label, zone in stage_definitions:
-            entry = run.get("stages", {}).get(identity, {})
-            stage_calls = [call for call in calls if call["stage"] == identity[:2]]
+                known = {stage[:2]: stage for stage in stage_records}
+                stage_records = {}
+                stage_definitions = []
+                for code, record in recorded.items():
+                    stage_key = known.get(code, record["id"])
+                    stage_records[stage_key] = record
+                    stage_definitions.append((stage_key, record["label"], "已记录阶段"))
+            if (
+                run.get("seconds") is None
+                and recorded
+                and all(
+                    record.get("seconds") is not None for record in recorded.values()
+                )
+            ):
+                run["seconds"] = sum(record["seconds"] for record in recorded.values())
+                run["timing_source"] = "stage_timers"
+                run["data_note"] += " 总耗时为已记录阶段耗时之和。"
+        run["settings"] = settings
+        requirement_ids = []
+        pending = [artifacts.get("requirements", {})]
+        while pending:
+            node = pending.pop()
+            if not isinstance(node, dict):
+                continue
+            if node.get("id"):
+                requirement_ids.append(node["id"])
+            pending.extend(node.get("children") or [])
+        groups = {}
+        for call in calls:
+            if call.get("task_span_id"):
+                continue
+            owners = [
+                rid
+                for rid in requirement_ids
+                if re.search(
+                    r"(?<![\w.-])" + re.escape(rid) + r"(?![\w.-])", call["activity"]
+                )
+            ]
+            task_id = call["activity"].split(" | ", 1)[0]
+            if len(owners) == 1:
+                task_id = owners[0]
+            for api_id in artifacts.get("backend_apis", {}).get("apis", {}):
+                if api_id in call["activity"]:
+                    task_id = api_id
+                    break
+            group_id = f"recorded-task:{call['stage']}:{task_id}"
+            call.update(task_id=task_id, task_span_id=group_id, requirement_ids=owners)
+            group = groups.setdefault(
+                group_id,
+                {
+                    "id": group_id,
+                    "task_id": task_id,
+                    "stage": call["stage"],
+                    "requirement_ids": owners,
+                    "seconds": None,
+                    "parent_id": None,
+                    "status": "RECORDED",
+                    "calls": [],
+                },
+            )
+            group["calls"].append(call)
+        for group in groups.values():
+            group["metrics"] = aggregate(group.pop("calls"), self.prices)
+            tasks.append(group)
+        stages = []
+        for stage_key, label, zone in stage_definitions:
+            record = stage_records.get(stage_key, {})
+            stage_calls = [call for call in calls if call["stage"] == stage_key[:2]]
             stages.append(
                 {
-                    "id": identity,
+                    "id": stage_key,
                     "label": label,
                     "zone": zone,
-                    "status": entry.get(
+                    "status": record.get(
                         "status", "RECORDED" if stage_calls else "PENDING"
                     ),
-                    "seconds": entry.get("seconds"),
-                    "started_at": entry.get("started_at"),
-                    "error": entry.get("error"),
-                    "metrics": aggregate(stage_calls, prices),
+                    "seconds": record.get("seconds"),
+                    "started_at": record.get("started_at"),
+                    "error": record.get("error"),
+                    "metrics": aggregate(stage_calls, self.prices),
                 }
             )
+        requirement_metrics = {}
+        pending = [artifacts.get("requirements", {})]
+        while pending:
+            requirement = pending.pop()
+            if not requirement.get("id"):
+                continue
+            children = requirement.get("children") or []
+            pending.extend(children)
+            descendants = set()
+            subtree = [requirement]
+            while subtree:
+                node = subtree.pop()
+                descendants.add(node["id"])
+                subtree.extend(node.get("children") or [])
+            assigned_calls, shared_calls = [], []
+            for call in calls:
+                owners = set(call.get("requirement_ids") or [])
+                if owners and owners.issubset(descendants):
+                    assigned_calls.append(call)
+                elif owners.intersection(descendants):
+                    shared_calls.append(call)
+            assigned_tasks = [
+                task
+                for task in tasks
+                if not task.get("parent_id")
+                and task.get("requirement_ids")
+                and set(task["requirement_ids"]).issubset(descendants)
+            ]
+            task_seconds = None
+            if assigned_tasks and all(
+                task.get("seconds") is not None for task in assigned_tasks
+            ):
+                task_seconds = sum(task["seconds"] for task in assigned_tasks)
+            requirement_metrics[requirement["id"]] = {
+                "metrics": aggregate(assigned_calls, self.prices),
+                "seconds": task_seconds,
+                "shared_calls": len(shared_calls),
+            }
         duration = run.get("seconds")
         if duration is None and run.get("started_at"):
             from datetime import datetime, timezone
@@ -222,6 +350,9 @@ class Repository:
             "seconds": duration,
             "stages": stages,
             "calls": calls,
+            "requirements": requirement_metrics,
+            "tasks": tasks,
+            "actions": actions,
             "artifacts": artifacts,
         }
 
@@ -232,11 +363,24 @@ class Repository:
             if entry["archive"]
             else entry["output"] / "model_calls.jsonl"
         )
-        return [
+        records = [
             record
             for record in log_records(path)
             if record.get("call_id") == call_id
             and record.get("event") in {"request", "response", "error"}
+        ]
+        if records:
+            return records
+        detail = self.detail(identity)
+        call = next((call for call in detail["calls"] if call["id"] == call_id), None)
+        if call is None:
+            raise ValueError("模型调用不存在")
+        return [
+            {
+                "event": "summary",
+                "summary": call,
+                "note": "此运行未保存完整模型输入输出；统计摘要来自结构化事件或终端日志。",
+            }
         ]
 
     def log(self, identity, offset=0):

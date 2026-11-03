@@ -6,7 +6,6 @@ import {
   ChevronDown,
   CircleHelp,
   Cpu,
-  Coins,
   FolderInput,
   FolderOutput,
   KeyRound,
@@ -57,9 +56,8 @@ export function RunControls({
   const [inputPaths, setInputPaths] = useState<RecordData[]>([]);
   const [outputPaths, setOutputPaths] = useState<RecordData[]>([]);
   const [advanced, setAdvanced] = useState(false);
-  const [prices, setPrices] = useState({ input: "", cached: "", output: "" });
+  const price = config?.prices?.[settings.model];
   const [port, setPort] = useState(3000);
-  const [priceSaved, setPriceSaved] = useState(false);
   useEffect(() => {
     if (config)
       setSettings((before) => ({
@@ -113,14 +111,6 @@ export function RunControls({
   function change(name: string, value: string) {
     setSettings((before) => ({ ...before, [name]: value }));
   }
-  useEffect(() => {
-    const configured = config?.prices?.[settings.model];
-    setPrices({
-      input: configured?.input?.toString() ?? "",
-      output: configured?.output?.toString() ?? "",
-      cached: configured?.cached?.toString() ?? "",
-    });
-  }, [settings.model]);
   async function connect() {
     setConnecting(true);
     try {
@@ -139,43 +129,15 @@ export function RunControls({
       setConnecting(false);
     }
   }
-  async function savePrices() {
-    try {
-      if (prices.input === "" || prices.output === "") {
-        onError("请填写输入和输出单价。");
-        return;
-      }
-      await api("/prices", {
-        [settings.model]: {
-          input: Number(prices.input),
-          output: Number(prices.output),
-          ...(prices.cached !== "" ? { cached: Number(prices.cached) } : {}),
-        },
-      });
-      setPriceSaved(true);
-      onRefresh();
-      setTimeout(() => setPriceSaved(false), 2000);
-    } catch (error) {
-      onError((error as Error).message);
-    }
-  }
   async function start() {
     setLoading(true);
     try {
-      const priceMap: RecordData = {};
-      if (prices.input !== "" && prices.output !== "")
-        priceMap[settings.model] = {
-          input: Number(prices.input),
-          output: Number(prices.output),
-          ...(prices.cached !== "" ? { cached: Number(prices.cached) } : {}),
-        };
       const result = await api("/runs", {
         ...settings,
         input: source,
         output,
         stage,
         port,
-        prices: priceMap,
       });
       setSettings((before) => ({
         ...before,
@@ -212,12 +174,6 @@ export function RunControls({
       api_key: "",
       visual_api_key: "",
     }));
-    const price = detail.run.settings.prices?.[detail.run.settings.model];
-    setPrices({
-      input: price?.input?.toString() || "",
-      output: price?.output?.toString() || "",
-      cached: price?.cached?.toString() || "",
-    });
     setPort(detail.run.settings.port || 3000);
   }
   return (
@@ -401,36 +357,24 @@ export function RunControls({
                 placeholder="沿用文本密钥或服务现有配置"
               />
               <label className="field-label">
-                文本模型价格 · USD / 1M tokens
+                高峰期价格 · 人民币 / 百万 tokens
               </label>
               <div className="price-fields">
                 {(["input", "cached", "output"] as const).map((key, index) => (
                   <label key={key}>
-                    <span>{["输入", "缓存输入", "输出"][index]}</span>
+                    <span>{["未缓存输入", "缓存命中", "输出"][index]}</span>
                     <input
                       className="field-input"
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={prices[key]}
-                      onChange={(event) =>
-                        setPrices((before) => ({
-                          ...before,
-                          [key]: event.target.value,
-                        }))
-                      }
-                      placeholder="—"
+                      readOnly
+                      value={price?.[key] == null ? "未配置" : `¥${price[key]}`}
                     />
                   </label>
                 ))}
               </div>
               <p className="field-hint">
-                未配置模型显示未计价；不同视觉模型的费用不混用文本模型单价。
+                费率统一维护在模型价格表中，使用高峰期单价；缓存命中是输入 token
+                的一部分，不重复收费。
               </p>
-              <button className="reuse-button" onClick={savePrices}>
-                {priceSaved ? <Check size={12} /> : <Coins size={12} />}
-                {priceSaved ? "已保存历史计价" : "保存单价，用于估算历史费用"}
-              </button>
               <label className="field-label">生成应用端口</label>
               <input
                 className="field-input"

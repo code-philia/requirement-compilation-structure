@@ -12,7 +12,14 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
-import type { Detail, Selection, RecordData } from "../types";
+import {
+  duration,
+  compact,
+  money,
+  type Detail,
+  type Selection,
+  type RecordData,
+} from "../types";
 import { ZONES } from "../graph";
 
 export function JsonView({ value }: { value: unknown }) {
@@ -95,6 +102,7 @@ export function NodeDetails({
   if (!selection) return null;
   const { record, kind, label } = selection;
   const a = detail?.artifacts || {};
+  const stats = detail?.requirements?.[record.id];
   const requirementIds: string[] = [];
   if (kind === "entity")
     for (const [rid, fields] of Object.entries(
@@ -187,6 +195,37 @@ export function NodeDetails({
                     <strong>{record.scenarios?.length || 0}</strong>
                   </div>
                 </div>
+                {stats && (
+                  <section className="requirement-stats">
+                    <h3>需求编译统计</h3>
+                    <div className="detail-info-grid">
+                      <div>
+                        <span>任务耗时</span>
+                        <strong>{duration(stats.seconds)}</strong>
+                      </div>
+                      <div>
+                        <span>模型耗时</span>
+                        <strong>{duration(stats.metrics.model_seconds)}</strong>
+                      </div>
+                      <div>
+                        <span>输入 / 输出 Token</span>
+                        <strong>
+                          {compact(stats.metrics.input)} /{" "}
+                          {compact(stats.metrics.output)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>可归属费用 · CNY</span>
+                        <strong>{money(stats.metrics.cost)}</strong>
+                      </div>
+                    </div>
+                    <p className="fine-print">
+                      父需求包含子需求的统计。仅计入可明确归属的调用；关联共享调用{" "}
+                      {stats.shared_calls}{" "}
+                      次，不重复分摊费用。历史记录缺少任务计时时保留为空。
+                    </p>
+                  </section>
+                )}
                 {(record.scenarios || []).map((scenario: RecordData) => (
                   <section className="scenario" key={scenario.id}>
                     <h3>{scenario.name || scenario.id}</h3>

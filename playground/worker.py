@@ -3,7 +3,6 @@
 import json
 import os
 from pathlib import Path
-import signal
 import sys
 import threading
 import time
@@ -47,6 +46,7 @@ def main():
     os.environ.setdefault("VISUAL_MODEL", os.environ["MODEL"])
     os.environ.setdefault("VISUAL_API_KEY", os.environ["OPENAI_API_KEY"])
     os.environ.setdefault("VISUAL_BASE_URL", os.environ["OPENAI_BASE_URL"])
+    os.environ["COMPILER_RUN_ID"] = manifest["id"]
     from infrastructure.compiler import Compiler
     from infrastructure.shared.project.git import GitRepository
 
@@ -61,7 +61,10 @@ def main():
     lock = threading.RLock()
     stopped = threading.Event()
     signatures = {}
-    model_offset = config.get("model_offset", 0)
+    offsets = {
+        "model_calls.jsonl": config.get("model_offset", 0),
+        "compilation_events.jsonl": config.get("event_offset", 0),
+    }
 
     def event(kind, **data):
         with lock:
@@ -70,27 +73,25 @@ def main():
                 stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def snapshot():
-        nonlocal model_offset
         with lock:
-            source = output / "model_calls.jsonl"
-            try:
-                with source.open("rb") as stream:
-                    stream.seek(model_offset)
-                    chunk = stream.read()
-                # Keep an incomplete JSONL tail for the next observation.
-                boundary = chunk.rfind(b"\n") + 1
-                if boundary:
-                    with (run_dir / "model_calls.jsonl").open("ab") as target:
+            for filename, offset in list(offsets.items()):
+                try:
+                    with (output / filename).open("rb") as stream:
+                        stream.seek(offset)
+                        chunk = stream.read()
+                    boundary = chunk.rfind(b"\n") + 1
+                    if boundary:
                         captured = chunk[:boundary]
                         for key, value in config["environment"].items():
                             if "KEY" in key and value:
                                 captured = captured.replace(
                                     value.encode(), b"[REDACTED]"
                                 )
-                        target.write(captured)
-                    model_offset += boundary
-            except OSError:
-                pass
+                        with (run_dir / filename).open("ab") as target:
+                            target.write(captured)
+                        offsets[filename] += boundary
+                except OSError:
+                    continue
             for name in ARTIFACTS:
                 path = output / ".arc" / (name + ".json")
                 try:
@@ -98,6 +99,9 @@ def main():
                     if signatures.get(name) == signature:
                         continue
                     value = json.loads(path.read_text(encoding="utf-8-sig"))
+                    if name == "compilation" and value.get("run_id") == manifest["id"]:
+                        manifest["stages"] = value.get("stages", {})
+                        write_json(run_dir / "run.json", manifest)
                     write_json(run_dir / "artifacts" / (name + ".json"), value)
                     signatures[name] = signature
                     event("artifact", artifact=name)
@@ -108,30 +112,11 @@ def main():
         while not stopped.wait(0.7):
             snapshot()
 
-    class ObservedCompiler(Compiler):
-        def _run(self, stage, function, *arguments, **options):
-            started = time.monotonic()
-            with lock:
-                manifest["stages"][stage] = {"status": "RUNNING", "started_at": now()}
-                write_json(run_dir / "run.json", manifest)
-            event("stage_started", stage=stage)
-            try:
-                result = super()._run(stage, function, *arguments, **options)
-                return result
-            finally:
-                with lock:
-                    entry = manifest["stages"][stage]
-                    entry.update(self.report["stages"].get(stage, {"status": "FAILED"}))
-                    entry.update(finished_at=now(), seconds=time.monotonic() - started)
-                    write_json(run_dir / "run.json", manifest)
-                snapshot()
-                event("stage_finished", stage=stage, status=entry["status"])
-
     # Copy prerequisites once so single-stage runs retain an honest starting state.
     snapshot()
     watcher = threading.Thread(target=watch, daemon=True)
     watcher.start()
-    compiler = ObservedCompiler(
+    compiler = Compiler(
         Path(config["input"]),
         output,
         model_log=True,
@@ -153,7 +138,10 @@ def main():
         stopped.set()
         watcher.join(timeout=3)
         snapshot()
-        manifest.update(finished_at=now(), seconds=time.monotonic() - started)
+        manifest.update(
+            finished_at=now(),
+            seconds=compiler.report.get("seconds", time.monotonic() - started),
+        )
         write_json(run_dir / "run.json", manifest)
         event("run_finished", status=manifest["status"])
 

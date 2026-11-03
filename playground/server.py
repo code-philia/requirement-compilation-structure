@@ -7,7 +7,6 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 import json
-import math
 import os
 from pathlib import Path
 import signal
@@ -27,12 +26,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
-from metrics import read_json, write_json
+from metrics import read_json, write_json, MODEL_PRICES
 from repository import ROOT, Repository, STAGES
 
 HERE = Path(__file__).resolve().parent
 repository = Repository()
-repository.prices = read_json(HERE / ".runtime" / "prices.json")
+repository.prices = MODEL_PRICES
 processes = {}
 run_lock = threading.Lock()
 # Credentials live only in this server's memory, never in manifests or browser storage.
@@ -69,7 +68,6 @@ class StartRun(Settings):
     output: str
     stage: str = ""
     port: int = Field(default=3000, ge=1, le=65535)
-    prices: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
 def local_path(value):
@@ -183,18 +181,6 @@ def config():
 def settings(body: Settings):
     update_settings(body)
     return public_settings()
-
-
-@app.post("/api/prices")
-def prices(body: dict[str, dict[str, float]]):
-    for price in body.values():
-        if not {"input", "output"}.issubset(price) or any(
-            value < 0 or not math.isfinite(value) for value in price.values()
-        ):
-            raise ValueError("请填写有效的非负输入、输出单价")
-    repository.prices.update(body)
-    write_json(HERE / ".runtime" / "prices.json", repository.prices)
-    return {"saved": True}
 
 
 @app.post("/api/models")
@@ -380,8 +366,10 @@ async def events(identity: str, request: Request):
                 base / "run.json",
                 base / "events.jsonl",
                 base / "model_calls.jsonl",
+                base / "compilation_events.jsonl",
             ]
             if not entry["archive"]:
+                paths.append(entry["output"] / "compiler.log")
                 paths.extend(
                     entry["output"] / ".arc" / (name + ".json")
                     for name in (
@@ -421,11 +409,6 @@ def start(body: StartRun):
         raise ValueError("缺少前置产物：" + ", ".join(valid["missing"]))
     if body.reasoning not in {"auto", "provider", "none", "low", "high", "max"}:
         raise ValueError("未知 reasoning 设置")
-    for price in body.prices.values():
-        if any(
-            value < 0 or not math.isfinite(value) for value in price.values()
-        ) or not {"input", "output"}.issubset(price):
-            raise ValueError("价格需要有效的输入、输出非负单价")
     with run_lock:
         if any(process.poll() is None for process in processes.values()):
             raise ValueError("已有编译任务正在运行，请等待完成或先停止")
@@ -454,7 +437,9 @@ def start(body: StartRun):
                 or configuration.get("OPENAI_BASE_URL"),
                 "stage": body.stage,
                 "port": body.port,
-                "prices": {**repository.prices, **body.prices},
+                "prices": repository.prices,
+                "currency": "CNY",
+                "pricing_period": "peak",
             },
         }
         write_json(archive / "run.json", manifest)
@@ -477,6 +462,7 @@ def start(body: StartRun):
             or configuration.get("OPENAI_BASE_URL"),
         )
         source_log = output / "model_calls.jsonl"
+        event_log = output / "compilation_events.jsonl"
         config = {
             "run_dir": str(archive),
             "output": str(output),
@@ -485,6 +471,7 @@ def start(body: StartRun):
             "stage": body.stage,
             "port": body.port,
             "model_offset": source_log.stat().st_size if source_log.exists() else 0,
+            "event_offset": event_log.stat().st_size if event_log.exists() else 0,
         }
         process = subprocess.Popen(
             [sys.executable, "-u", str(HERE / "worker.py")],

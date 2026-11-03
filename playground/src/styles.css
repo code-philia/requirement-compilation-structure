@@ -2636,3 +2636,42 @@ select {
 .map-tabs button {
   font-size: 11px;
 }
+
+.task-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: 9px;
+  color: #8298b4;
+  padding: 6px 0 9px;
+}
+.action-metrics {
+  border: 1px solid #e5ebf3;
+  border-radius: 5px;
+  padding: 5px 8px;
+  margin-bottom: 9px;
+}
+.action-metrics summary {
+  font-size: 9px;
+  color: #899fbd;
+  cursor: pointer;
+}
+.action-metrics > div {
+  padding: 7px 0;
+  font-size: 9px;
+  color: #8b9fb9;
+  border-top: 1px solid #edf1f7;
+}
+.action-metrics small {
+  display: block;
+  color: #a3b0c2;
+  margin-top: 4px;
+}
+
+.requirement-stats .detail-info-grid {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.requirement-stats .detail-info-grid strong {
+  font-size: 14px;
+}

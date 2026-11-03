@@ -87,9 +87,9 @@ export default function CompareRuns({
   const taskNames = useMemo(() => {
     const names = new Set<string>();
     for (const detail of selected)
-      for (const call of detail.calls)
-        if (call.stage === stage.slice(0, 2))
-          names.add(call.activity || "未命名任务");
+      for (const task of detail.tasks || [])
+        if (task.stage === stage.slice(0, 2) && !task.parent_id)
+          names.add(task.task_id);
     return [...names];
   }, [selected, stage]);
   const labels = useMemo(
@@ -118,41 +118,29 @@ export default function CompareRuns({
                 : entry.metrics.cost;
         }
       } else {
-        const calls = detail.calls.filter(
-          (call) =>
-            call.stage === stage.slice(0, 2) &&
-            (call.activity || "未命名任务") === label,
+        const tasks = (detail.tasks || []).filter(
+          (task) =>
+            task.stage === stage.slice(0, 2) &&
+            task.task_id === label &&
+            !task.parent_id,
         );
-        if (calls.length) {
-          if (metric === "seconds")
-            value = calls.reduce(
-              (total, call) => total + (call.seconds || 0),
+        if (tasks.length) {
+          if (metric === "seconds") {
+            value = tasks.reduce(
+              (total, task) =>
+                total + (task.seconds ?? task.metrics.model_seconds),
               0,
             );
-          else if (metric === "tokens")
-            value = calls.some((call) => call.input != null)
-              ? calls.reduce(
-                  (total, call) =>
-                    total + (call.input || 0) + (call.output || 0),
-                  0,
-                )
+          } else if (metric === "tokens") {
+            value = tasks.reduce(
+              (total, task) => total + task.metrics.input + task.metrics.output,
+              0,
+            );
+          } else {
+            const priced = tasks.filter((task) => task.metrics.cost != null);
+            value = priced.length
+              ? priced.reduce((total, task) => total + task.metrics.cost!, 0)
               : null;
-          else {
-            let cost = 0,
-              count = 0;
-            for (const call of calls) {
-              const price = detail.run.settings.prices?.[call.model || ""];
-              if (price && call.input != null && call.output != null) {
-                const cached = call.cached || 0;
-                cost +=
-                  ((call.input - cached) * price.input +
-                    cached * (price.cached ?? price.input) +
-                    call.output * price.output) /
-                  1e6;
-                count++;
-              }
-            }
-            value = count ? cost : null;
           }
         }
       }
@@ -352,7 +340,7 @@ export default function CompareRuns({
             )}
             <p className="chart-note">
               {stage
-                ? "任务时间为模型调用耗时之和，不含非模型步骤。共享 API 按实际执行任务统计，避免重复归因。"
+                ? "结构化记录显示任务实际耗时；历史记录缺少任务计时时显示模型耗时之和。共享 API 按实际任务统计。"
                 : "阶段时间为实际墙钟耗时；历史记录缺失的数据留空。点击图表中的阶段可下钻到执行任务。"}{" "}
               ＊ 表示部分计价。
             </p>
@@ -362,11 +350,11 @@ export default function CompareRuns({
                 title={
                   metric === "seconds"
                     ? stage
-                      ? "任务模型耗时"
+                      ? "任务耗时"
                       : "阶段耗时"
                     : metric === "tokens"
                       ? "Token 使用量"
-                      : "估算费用 · USD"
+                      : "估算费用 · CNY"
                 }
                 labels={labels}
                 series={chartData[metric]}
@@ -455,7 +443,7 @@ function Chart({
           color: "#8993a3",
           fontSize: 10,
           formatter: (value: number) =>
-            metric === "cost" ? "$" + value.toFixed(3) : compact(value),
+            metric === "cost" ? "¥" + value.toFixed(3) : compact(value),
         },
       },
       dataZoom: [

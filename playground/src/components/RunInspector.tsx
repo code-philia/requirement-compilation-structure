@@ -105,6 +105,7 @@ export function RunInspector({
   const input = callData?.find((record) => record.event === "request");
   const output = callData?.find((record) => record.event === "response");
   const failure = callData?.find((record) => record.event === "error");
+  const summaryRecord = callData?.find((record) => record.event === "summary");
   return (
     <aside className="run-inspector">
       <div className="inspector-tabs">
@@ -263,7 +264,7 @@ export function RunInspector({
                   <div>
                     <span>
                       <Coins size={12} />
-                      估算 USD
+                      估算 CNY
                     </span>
                     <b
                       className={detail.metrics.cost == null ? "unpriced" : ""}
@@ -423,6 +424,11 @@ export function RunInspector({
               <LoaderCircle className="spin" />
               正在读取完整调用…
             </div>
+          ) : summaryRecord ? (
+            <>
+              <p className="data-note">{summaryRecord.note}</p>
+              <JsonView value={summaryRecord.summary} />
+            </>
           ) : callTab === "input" ? (
             <>
               {(input?.arguments?.messages || []).map(
@@ -485,16 +491,8 @@ function StageCard({
   const calls = detail.calls.filter(
     (call) => call.stage === stage.id.slice(0, 2),
   );
-  const tasks = useMemo(() => {
-    const groups = new Map<string, Call[]>();
-    for (const call of calls) {
-      const key = call.activity || "模型调用";
-      const list = groups.get(key) || [];
-      list.push(call);
-      groups.set(key, list);
-    }
-    return [...groups.entries()];
-  }, [calls]);
+  const tasks =
+    detail.tasks?.filter((task) => task.stage === stage.id.slice(0, 2)) || [];
   const seconds =
     stage.status === "RUNNING" && stage.started_at
       ? (clock - Date.parse(stage.started_at)) / 1000
@@ -562,36 +560,80 @@ function StageCard({
               <span>{summary}</span>
             </div>
           )}
-          {tasks.slice(0, limit).map(([activity, items]) => (
+          {tasks.slice(0, limit).map((task) => (
             <details
               className="task-group"
-              key={activity}
+              key={task.id}
               open={tasks.length <= 2}
             >
               <summary>
-                <span>{activity}</span>
-                <small>{items.length}</small>
+                <span>{task.task_id}</span>
+                <small>{task.metrics.calls}</small>
               </summary>
-              {items.map((call, index) => (
-                <button
-                  className="call-row"
-                  key={call.id}
-                  onClick={() => onCall(call)}
-                >
-                  <span className={`call-dot status-${call.status}`} />
-                  <span>
-                    调用 {index + 1}
-                    <small>{call.model}</small>
-                  </span>
-                  <span>
-                    {duration(call.seconds)}
-                    <small>
-                      {compact((call.input || 0) + (call.output || 0))} tok
-                    </small>
-                  </span>
-                  <ChevronRight size={12} />
-                </button>
-              ))}
+              <div className="task-totals">
+                <span>
+                  {task.seconds == null && task.status !== "RUNNING"
+                    ? "模型耗时"
+                    : "任务耗时"}{" "}
+                  {duration(
+                    task.seconds ??
+                      (task.status === "RUNNING" && task.started_at
+                        ? (clock - Date.parse(task.started_at)) / 1000
+                        : task.metrics.model_seconds),
+                  )}
+                </span>
+                <span>
+                  输入 {compact(task.metrics.input)} / 输出{" "}
+                  {compact(task.metrics.output)}
+                </span>
+                <span>{money(task.metrics.cost)}</span>
+              </div>
+              {task.requirement_ids.length > 0 && (
+                <p className="fine-print">
+                  {task.requirement_ids.length > 1 ? "共享任务 · " : "需求 · "}
+                  {task.requirement_ids.join("、")}
+                </p>
+              )}
+              {detail.actions?.some(
+                (action) => action.task_span_id === task.id,
+              ) && (
+                <details className="action-metrics">
+                  <summary>动作明细</summary>
+                  {detail.actions
+                    .filter((action) => action.task_span_id === task.id)
+                    .map((action) => (
+                      <div key={action.id}>
+                        <span>{action.action}</span>
+                        <small>
+                          {duration(action.seconds)} ·{" "}
+                          {money(action.metrics.cost)}
+                        </small>
+                      </div>
+                    ))}
+                </details>
+              )}
+              {calls
+                .filter((call) => call.task_span_id === task.id)
+                .map((call, index) => (
+                  <button
+                    className="call-row"
+                    key={call.id}
+                    onClick={() => onCall(call)}
+                  >
+                    <span className={`call-dot status-${call.status}`} />
+                    <span>
+                      调用 {index + 1}
+                      <small>{call.model}</small>
+                    </span>
+                    <span>
+                      {duration(call.seconds)}
+                      <small>
+                        {compact((call.input || 0) + (call.output || 0))} tok
+                      </small>
+                    </span>
+                    <ChevronRight size={12} />
+                  </button>
+                ))}
             </details>
           ))}
           {tasks.length > limit && (

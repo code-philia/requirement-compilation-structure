@@ -1,5 +1,6 @@
 export type RecordData = Record<string, any>;
 export type Metrics = {
+  currency: "CNY";
   calls: number;
   input: number;
   output: number;
@@ -46,6 +47,30 @@ export type Call = {
   seconds: number | null;
   started_at?: string;
   error?: string;
+  cost?: number | null;
+  source?: string;
+  task_id?: string;
+  task_span_id?: string;
+  requirement_ids?: string[];
+};
+export type TaskMetric = {
+  id: string;
+  task_id: string;
+  started_at?: string;
+  stage: string;
+  requirement_ids: string[];
+  parent_id?: string | null;
+  status: string;
+  seconds: number | null;
+  metrics: Metrics;
+};
+export type ActionMetric = {
+  id: string;
+  task_span_id?: string;
+  stage: string;
+  action: string;
+  seconds: number;
+  metrics: Metrics;
 };
 export type Detail = {
   run: Run;
@@ -53,6 +78,12 @@ export type Detail = {
   seconds: number | null;
   stages: Stage[];
   calls: Call[];
+  requirements?: Record<
+    string,
+    { metrics: Metrics; seconds: number | null; shared_calls: number }
+  >;
+  tasks: TaskMetric[];
+  actions: ActionMetric[];
   artifacts: RecordData;
 };
 export type Config = {
@@ -101,7 +132,7 @@ export function compact(value: number | null | undefined) {
       }).format(value);
 }
 export function money(value: number | null | undefined) {
-  return value == null ? "未配置" : `$${value.toFixed(value < 0.01 ? 5 : 3)}`;
+  return value == null ? "未配置" : `¥${value.toFixed(value < 0.01 ? 5 : 3)}`;
 }
 export async function api<T = any>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(

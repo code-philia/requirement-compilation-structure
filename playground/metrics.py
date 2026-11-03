@@ -3,6 +3,10 @@
 import json
 from datetime import datetime
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from infrastructure.shared.models.pricing import MODEL_PRICES, estimate_cost
 
 
 def read_json(path, default=None):
@@ -116,8 +120,9 @@ def log_records(path, offset=0):
         return
 
 
-def aggregate(calls, prices):
+def aggregate(calls, prices=None):
     result = {
+        "currency": "CNY",
         "calls": len(calls),
         "input": 0,
         "output": 0,
@@ -134,16 +139,22 @@ def aggregate(calls, prices):
             result["usage_calls"] += 1
         for field in ("input", "output", "cached"):
             result[field] += call.get(field) or 0
-        price = prices.get(call.get("model"))
-        if not price or call.get("input") is None or call.get("output") is None:
-            continue
-        cached = call.get("cached") or 0
-        amount += (
-            (call["input"] - cached) * price["input"]
-            + cached * price.get("cached", price["input"])
-            + call["output"] * price["output"]
-        ) / 1_000_000
-        result["priced_calls"] += 1
+        if call.get("source") == "structured":
+            cost = call.get("cost")
+        else:
+            usage = {
+                "input_tokens": call.get("input"),
+                "cached_input_tokens": call.get("cached"),
+                "output_tokens": call.get("output"),
+            }
+            cost = estimate_cost(
+                call.get("model"), usage, MODEL_PRICES if prices is None else prices
+            )
+        call["cost"] = cost
+        call["currency"] = "CNY"
+        if cost is not None:
+            amount += cost
+            result["priced_calls"] += 1
     if result["priced_calls"]:
         result["cost"] = amount
     return result
@@ -155,6 +166,7 @@ def recorded_stages(path):
 
     stages = {}
     pending = None
+    pending_start = None
     try:
         with Path(path).open(encoding="utf-8", errors="replace") as source:
             for line in source:
@@ -176,11 +188,20 @@ def recorded_stages(path):
                     )
                     if outcome == "START":
                         entry["attempts"] += 1
+                        pending_start = code
                         entry["status"] = "RECORDED"
                     else:
                         entry["status"] = "GREEN" if outcome == "DONE" else "FAILED"
                         pending = code
                     continue
+                if pending_start:
+                    date = re.search(
+                        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                        line,
+                    )
+                    if date:
+                        stages[pending_start]["started_at"] = date[0]
+                        pending_start = None
                 timer = re.search(r"(?:Completed in|Stopped after) ([\d.]+)s", line)
                 if pending and timer:
                     stages[pending]["seconds"] = (
@@ -190,3 +211,196 @@ def recorded_stages(path):
     except OSError:
         pass
     return stages
+
+
+def calls_from_terminal(path):
+    """Recover each untruncated usage summary once when full model I/O was disabled."""
+    import re
+
+    calls = []
+    model = None
+    current = None
+    try:
+        with Path(path).open(encoding="utf-8", errors="replace") as stream:
+            for line_number, line in enumerate(stream, 1):
+                match = re.search(r"\bModel: ([^\s│]+)", line)
+                if match:
+                    model = match[1]
+                header = re.match(
+                    r"--- \[MODEL OUTPUT\] Stage (\d+) \| [^|]+ \| (.+) \(full content\) ---",
+                    line,
+                )
+                if header:
+                    current = {
+                        "id": f"terminal-{line_number}",
+                        "stage": header[1],
+                        "activity": header[2],
+                        "model": model,
+                        "status": "GREEN",
+                        "input": None,
+                        "cached": None,
+                        "output": None,
+                        "seconds": None,
+                        "source": "terminal_summary",
+                    }
+                    calls.append(current)
+                    continue
+                if current is None:
+                    continue
+                if line.startswith("Reported tokens |"):
+                    for label, key in (
+                        ("input", "input"),
+                        ("cached input", "cached"),
+                        ("output", "output"),
+                    ):
+                        value = re.search(
+                            r"\| " + label + r": ([\d,]+|unavailable)", line
+                        )
+                        if value and value[1] != "unavailable":
+                            current[key] = int(value[1].replace(",", ""))
+                latency = re.match(r"Round-trip latency: ([\d.]+) s", line)
+                if latency:
+                    current["seconds"] = float(latency[1])
+                    current = None
+    except OSError:
+        pass
+    return calls
+
+
+def telemetry_summary(records):
+    """Read one run's stage, task and action measurements from canonical events."""
+    calls, stages, tasks, actions = {}, {}, {}, {}
+    run = {}
+    for record in records:
+        event = record.get("event")
+        stage = stage_id(record.get("stage"))
+        if event == "run_started":
+            run.update(
+                started_at=record["timestamp"],
+                run_id=record["run_id"],
+                status="RUNNING",
+                settings=record.get("settings", {}),
+            )
+            if record.get("pricing"):
+                run["settings"]["prices"] = record["pricing"].get("models", {})
+            if record.get("input"):
+                source = Path(record["input"])
+                root = Path(__file__).resolve().parents[1]
+                run["input"] = (
+                    str(source.relative_to(root))
+                    if source.is_relative_to(root)
+                    else str(source)
+                )
+        elif event == "run_finished":
+            for key in ("status", "started_at", "finished_at", "seconds", "usage"):
+                if key in record:
+                    run[key] = record[key]
+        elif event in {"stage_started", "stage_finished"}:
+            entry = stages.setdefault(record["stage"], {})
+            if event == "stage_started":
+                entry.update(status="RUNNING", started_at=record["timestamp"])
+            else:
+                entry.update(
+                    {
+                        key: record.get(key)
+                        for key in (
+                            "status",
+                            "started_at",
+                            "finished_at",
+                            "seconds",
+                            "usage",
+                        )
+                    }
+                )
+        elif event in {"task_started", "task_finished"}:
+            identity = record["task_span_id"]
+            task = tasks.setdefault(
+                identity,
+                {
+                    "id": identity,
+                    "task_id": record.get("task_id"),
+                    "requirement_ids": record.get("requirement_ids", []),
+                    "stage": stage,
+                    "parent_id": record.get("parent_task_span_id"),
+                    "status": "RUNNING",
+                    "started_at": record["timestamp"],
+                },
+            )
+            if event == "task_finished":
+                task.update(
+                    status=record["status"],
+                    seconds=record["seconds"],
+                    usage=record["usage"],
+                )
+        elif event == "action_finished":
+            actions[record["action_id"]] = {
+                "id": record["action_id"],
+                "task_span_id": record.get("task_span_id"),
+                "action": record["action"],
+                "stage": stage,
+                "seconds": record["seconds"],
+                "usage": record["usage"],
+            }
+        elif event in {"model_started", "model_finished"}:
+            call = calls.setdefault(
+                record["call_id"],
+                {
+                    "id": record["call_id"],
+                    "stage": stage,
+                    "activity": record.get("action")
+                    or record.get("task_id")
+                    or "模型调用",
+                    "task_id": record.get("task_id"),
+                    "task_span_id": record.get("task_span_id"),
+                    "requirement_ids": record.get("requirement_ids", []),
+                    "source": "structured",
+                    "status": "RUNNING",
+                    "input": None,
+                    "output": None,
+                    "cached": None,
+                    "seconds": None,
+                },
+            )
+            if event == "model_started":
+                call.update(
+                    model=record.get("model"),
+                    started_at=record["timestamp"],
+                    base_url=record.get("base_url"),
+                )
+            else:
+                usage = record["usage"]
+                call.update(
+                    model=record.get("model"),
+                    status=record["status"],
+                    seconds=record["seconds"],
+                    input=usage["input_tokens"],
+                    cached=usage["cached_input_tokens"],
+                    output=usage["output_tokens"],
+                    cost=record.get("cost_cny"),
+                    currency="CNY",
+                    error=record.get("error"),
+                )
+    return {
+        "run": run,
+        "calls": list(calls.values()),
+        "stages": stages,
+        "tasks": list(tasks.values()),
+        "actions": list(actions.values()),
+    }
+
+
+def metrics_from_totals(usage):
+    calls = usage.get("calls", 0)
+    priced = usage.get("priced_calls", 0)
+    cost = usage.get("cost_cny") if priced else (0 if calls == 0 else None)
+    return {
+        "calls": calls,
+        "input": usage.get("input_tokens", 0),
+        "cached": usage.get("cached_input_tokens", 0),
+        "output": usage.get("output_tokens", 0),
+        "usage_calls": usage.get("usage_calls", 0),
+        "priced_calls": priced,
+        "cost": cost,
+        "currency": "CNY",
+        "model_seconds": usage.get("model_seconds", 0),
+    }
