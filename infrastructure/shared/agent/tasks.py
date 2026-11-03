@@ -1,6 +1,7 @@
 """Isolate failed design tasks while preserving successful neighboring artifacts."""
 
 from contextlib import contextmanager
+from infrastructure.utils.presentation.events import task_scope
 
 
 class StageIncomplete(RuntimeError):
@@ -20,7 +21,8 @@ class TaskFailures:
     @contextmanager
     def task(self, identity):
         try:
-            yield
+            with task_scope(identity):
+                yield
         except Exception as error:
             if isinstance(error, OSError):
                 raise

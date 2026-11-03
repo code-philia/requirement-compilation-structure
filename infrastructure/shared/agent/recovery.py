@@ -7,6 +7,7 @@ from uuid import uuid4
 from infrastructure.shared.agent.files import EXCLUDED
 from infrastructure.utils.files import save_bytes, save_json
 from infrastructure.shared.project.git import checkpoint
+from infrastructure.utils.presentation.events import task_scope
 
 
 def _snapshot(output):
@@ -27,40 +28,41 @@ def implementation_task(output, entry, console, label):
     Missing prerequisites are checked before this boundary. Disk errors, interrupts,
     and unexpected compiler exceptions propagate; they are not business failures.
     """
-    before = _snapshot(output)
-    try:
-        yield
-    except ValueError as error:
-        after = _snapshot(output)
-        changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
-        name = re.sub(r"[^\w.-]+", "_", label).strip("._")[:100] or "task"
-        directory = output / ".arc/failures" / f"{name}.{uuid4().hex[:8]}"
-        for path in sorted(changed):
-            if path in after:
-                save_bytes(directory / "files" / path, after[path])
-        failure = {"status": "FAILED", "task": label, "phase": entry.get("status"),
-            "error": str(error), "turns": getattr(error, "turns", 0),
-            "feedback": getattr(error, "feedback", None), "changed_files": sorted(changed),
-            "deleted_files": sorted(changed - after.keys()),
-            "archive": directory.relative_to(output).as_posix()}
-        save_json(directory / "failure.json", failure)
-        for path in sorted(changed):
-            if path in before:
-                save_bytes(output / path, before[path])
-            else:
-                (output / path).unlink(missing_ok=True)
-        entry.update(failure)
-        console.show(label + " | FAILED; continuing", str(error) + "\nBaseline restored. Failure archive: " + failure["archive"])
-        checkpoint(output, task=label, action="Archive failed attempt and restore task baseline",
-            status="FAILED", details=failure)
-    except BaseException as error:
-        checkpoint(output, task=label, action="Record interrupted implementation task",
-            status="INTERRUPTED" if isinstance(error, KeyboardInterrupt) else "FAILED",
-            details={"error": str(error), "error_type": type(error).__name__})
-        raise
-    else:
-        checkpoint(output, task=label, action="Publish accepted implementation task",
-            status=entry.get("status", "GREEN"), details=entry)
+    with task_scope(label, entry.get("requirements"), result=entry):
+        before = _snapshot(output)
+        try:
+            yield
+        except ValueError as error:
+            after = _snapshot(output)
+            changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+            name = re.sub(r"[^\w.-]+", "_", label).strip("._")[:100] or "task"
+            directory = output / ".arc/failures" / f"{name}.{uuid4().hex[:8]}"
+            for path in sorted(changed):
+                if path in after:
+                    save_bytes(directory / "files" / path, after[path])
+            failure = {"status": "FAILED", "task": label, "phase": entry.get("status"),
+                "error": str(error), "turns": getattr(error, "turns", 0),
+                "feedback": getattr(error, "feedback", None), "changed_files": sorted(changed),
+                "deleted_files": sorted(changed - after.keys()),
+                "archive": directory.relative_to(output).as_posix()}
+            save_json(directory / "failure.json", failure)
+            for path in sorted(changed):
+                if path in before:
+                    save_bytes(output / path, before[path])
+                else:
+                    (output / path).unlink(missing_ok=True)
+            entry.update(failure)
+            console.show(label + " | FAILED; continuing", str(error) + "\nBaseline restored. Failure archive: " + failure["archive"])
+            checkpoint(output, task=label, action="Archive failed attempt and restore task baseline",
+                status="FAILED", details=failure)
+        except BaseException as error:
+            checkpoint(output, task=label, action="Record interrupted implementation task",
+                status="INTERRUPTED" if isinstance(error, KeyboardInterrupt) else "FAILED",
+                details={"error": str(error), "error_type": type(error).__name__})
+            raise
+        else:
+            checkpoint(output, task=label, action="Publish accepted implementation task",
+                status=entry.get("status", "GREEN"), details=entry)
 
 
 def final_checks(console, **checks):

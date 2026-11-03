@@ -12,6 +12,7 @@ import httpx
 
 from infrastructure.utils.presentation.console import current_activity, preview, show_panel, WaitingStatus
 from infrastructure.utils.presentation.logging import session_info, full_detail
+from infrastructure.utils.presentation.events import model_started, model_finished
 from rich.console import Group
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -284,7 +285,9 @@ def invoke(client, arguments: dict):
     waiting = WaitingStatus()
     started = monotonic()
 
+    usage_recorded = False
     try:
+        model_started(call_id, arguments.get("model"), str(getattr(client, "base_url", "")))
         _record("request", arguments=arguments)
         started = monotonic()
         response = client.chat.completions.create(**arguments)
@@ -295,6 +298,8 @@ def invoke(client, arguments: dict):
         waiting.close()
         content = "\n".join(choice.message.content or "" for choice in response.choices)
         usage = raw.get("usage") or {}
+        model_finished(call_id, arguments.get("model"), usage, elapsed)
+        usage_recorded = True
         _count_call(usage, elapsed)
         full_detail(f"[MODEL OUTPUT] {label}", _usage_summary(usage) + f"\nRound-trip latency: {elapsed:.2f} s" + ("\n" + content if verbose else ""))
         show_panel(f"[MODEL OUTPUT] {label} | {elapsed:.2f}s",
@@ -302,6 +307,8 @@ def invoke(client, arguments: dict):
         return response
     except BaseException as error:
         elapsed = monotonic() - started
+        if not usage_recorded:
+            model_finished(call_id, arguments.get("model"), {}, elapsed, status="FAILED", error=str(error))
         _count_call({}, elapsed, failed=True)
         waiting.close()
         chain = _exception_chain(error)

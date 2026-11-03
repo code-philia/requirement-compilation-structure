@@ -18,6 +18,7 @@ from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
 from infrastructure.shared.project.git import checkpoint
+from infrastructure.utils.presentation.events import begin_run, finish_run, begin_stage, finish_stage, timestamp
 
 
 PIPELINE = (
@@ -54,13 +55,17 @@ class Compiler:
     def _run(self, stage: str, function, *arguments, **options):
         """Attempt every pass; keep failures explicit without aborting later passes."""
         self.current_stage = stage
+        stage_event = begin_stage(stage)
+        self.report["stages"][stage] = {"status": "RUNNING", "started_at": timestamp()}
+        save_json(self.arc_dir / "compilation.json", self.report)
         try:
             with console_log(self.output_dir, stage=stage,
                     model_log=self.model_log, debug_model_io=self.model_log):
                 result = function(*arguments, **options)
         except KeyboardInterrupt as error:
             self.report["status"] = "INTERRUPTED"
-            self.report["stages"][stage] = {"status": "INTERRUPTED", "error": str(error)}
+            self.report["stages"][stage] = {"status": "INTERRUPTED", "error": str(error),
+                **finish_stage(stage_event, "INTERRUPTED")}
             save_json(self.arc_dir / "compilation.json", self.report)
             checkpoint(self.output_dir, stage=stage, task="stage report", action="Record interrupted pass",
                 status="INTERRUPTED", details=self.report["stages"][stage])
@@ -72,8 +77,11 @@ class Compiler:
                 result.update(status="COMPLETED_WITH_FAILURES", failures=error.failures)
             show_panel("[FAILED; continuing] " + stage,
                 result["error"] + "\nAccepted artifacts remain available. Attempt the next pass.", tone="error")
+        except BaseException:
+            finish_stage(stage_event, "FAILED")
+            raise
         status = result.get("status", "GREEN") if isinstance(result, dict) else "GREEN"
-        self.report["stages"][stage] = {"status": status}
+        self.report["stages"][stage] = {"status": status, **finish_stage(stage_event, status)}
         if isinstance(result, dict):
             for key in ("failures", "verification", "error", "error_type", "traceback"):
                 if key in result:
@@ -98,24 +106,33 @@ class Compiler:
         self.report = {"status": "RUNNING", "stages": {}}
         show_panel("Requirement compiler | Pipeline",
             f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: {len(passes)}\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
-        for name, function, artifact in passes:
-            if function is project_initialization:
-                result = self._run(name, function, self.output_dir, port=self.port, pause=self.pause)
-            elif function in (explore_requirement, design_frontend_ui, implement_frontend_ui,
-                    design_frontend_triggers, implement_frontend_triggers):
-                result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
-            else:
-                result = self._run(name, function, self.arc_dir, pause=self.pause)
-            self.artifacts[artifact] = result
-        self.current_stage = None
-        incomplete = [name for name, result in self.report["stages"].items()
-            if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
-        self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
-        save_json(self.arc_dir / "compilation.json", self.report)
-        checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
-            status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete})
-        show_panel("[DONE] Requirement compilation | " + self.report["status"],
-            f"Application: {self.output_dir}\nReport: {self.arc_dir / 'compilation.json'}"
-            + ("\nIncomplete stages: " + ", ".join(incomplete) if incomplete else ""),
-            tone="error" if incomplete else "success")
-        return self.output_dir
+        run_token, run_id = begin_run(self.output_dir, self.input_dir, stage)
+        self.report.update(run_id=run_id, started_at=timestamp())
+        try:
+            for name, function, artifact in passes:
+                if function is project_initialization:
+                    result = self._run(name, function, self.output_dir, port=self.port, pause=self.pause)
+                elif function in (explore_requirement, design_frontend_ui, implement_frontend_ui,
+                        design_frontend_triggers, implement_frontend_triggers):
+                    result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
+                else:
+                    result = self._run(name, function, self.arc_dir, pause=self.pause)
+                self.artifacts[artifact] = result
+            self.current_stage = None
+            incomplete = [name for name, result in self.report["stages"].items()
+                if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
+            self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
+            save_json(self.arc_dir / "compilation.json", self.report)
+            checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
+                status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete})
+            show_panel("[DONE] Requirement compilation | " + self.report["status"],
+                f"Application: {self.output_dir}\nReport: {self.arc_dir / 'compilation.json'}"
+                + ("\nIncomplete stages: " + ", ".join(incomplete) if incomplete else ""),
+                tone="error" if incomplete else "success")
+            return self.output_dir
+        except BaseException as error:
+            self.report["status"] = "INTERRUPTED" if isinstance(error, KeyboardInterrupt) else "FAILED"
+            raise
+        finally:
+            self.report.update(finish_run(run_token, self.report["status"]))
+            save_json(self.arc_dir / "compilation.json", self.report)

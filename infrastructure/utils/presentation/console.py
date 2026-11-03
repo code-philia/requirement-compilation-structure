@@ -16,6 +16,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 from infrastructure.utils.presentation.logging import full_detail, session_info
+from infrastructure.utils.presentation.events import begin_action
 
 
 _activity = ContextVar("compiler_activity", default="Model request")
@@ -136,6 +137,7 @@ class DemoConsole:
         self.artifacts = {}
 
     def show(self, title: str, body: str) -> None:
+        begin_action(title)
         _activity.set(title)
         session = session_info()
         label = f"{session['stage']} | {title}" if session else title
