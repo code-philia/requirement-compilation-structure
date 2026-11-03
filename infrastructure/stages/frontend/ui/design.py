@@ -27,6 +27,15 @@ prop contains static text, label, placeholder, input_type, options, style, href,
 or heading level. Optional prop.visible is a boolean or {var:VARIABLE_NAME, equals:VALUE}.
 A status dependency controls visibility without requiring its raw value as display text.
 
+Treat explicit UI names and roles in the original requirement as interface contracts.
+Preserve required labels, action names, region names and placeholders verbatim, including
+language, spelling and case. Do not paraphrase, add object-type prefixes, translate or
+concatenate aliases: a required "Name" field must not become "Shelf name". Record the
+wording in the existing element.prop; do not create a separate naming registry.
+Explicit requirement wording takes precedence over visual-reference examples. Only choose
+wording freely when it is unspecified or alternatives are explicitly allowed. Business
+record names and user-entered values remain dynamic; example data is not fixed UI wording.
+
 pages maps PAGE IDs to {name, route, root, images}. route is a URL path, root is an
 ELEMENT ID and images lists supplied image IDs. Preserve explicit image.page hints.
 Do not add fixtures or sample objects. Reference images describe appearance, not actual

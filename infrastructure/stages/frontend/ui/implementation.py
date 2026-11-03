@@ -44,6 +44,16 @@ input synchronization; no such host is generated.
 
 Render real layout, labels, controls and conditional content with original text and stable
 data-testid=ELEMENT_ID selectors. Use the installed dependencies and configured styles.
+Preserve every explicitly required UI name and role verbatim, including language, spelling
+and case. Do not rename "Name" to "Shelf name", translate captions, or combine aliases.
+Keep visible labels and computed accessible names consistent: associate labels correctly,
+and do not override them with a different aria-label or concatenate unrelated text through
+aria-labelledby. Use exact placeholders only when the requirement specifies placeholders;
+an accessible field name alone does not prescribe a placeholder or HTML implementation.
+Apply this to buttons, links, headings and named regions as well as form fields. If the
+generated design or reference image conflicts with an explicit original UI contract, follow
+the original requirement and explain the discrepancy. Unspecified wording is an implementation
+choice; business object names still come from actual data, not reference examples.
 This stage builds presentation, native editing and navigation, not business API operations,
 session restoration or later requirements' workflows. Step 12 adds those interactions.
 Keep one clear owner for each native form/navigation action. Later implementation must

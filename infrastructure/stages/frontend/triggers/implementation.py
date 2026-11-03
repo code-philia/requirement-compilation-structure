@@ -102,6 +102,10 @@ assert every DB field, full-table snapshots, exact cookie/hash encodings, genera
 timestamps, decorative text, styling or intermediate loading states. If deletion versus
 soft invalidation is not specified, assert the observable session behavior instead of
 choosing one database strategy. Do not invent wording or storage policies.
+Use original requirement-defined UI names and roles exactly when they are explicit; do not
+replace them with aliases learned from current application code. Conversely, do not invent
+exact captions, placeholders or globally unique link names when the requirement does not
+specify them. Scope navigation and business-object locators by their semantic purpose.
 
 Tests still need real assertions and must not be skipped or weakened to pass. During
 test generation, fix test syntax, fixtures or invalid selectors. Missing application
@@ -124,6 +128,16 @@ Use ordinary framework code: closures/callbacks, hooks, services or shared funct
 appropriate. You may implement several related reference triggers together in components
 or helpers. No one-file-per-trigger rule, forced handle export, UiTriggerContext or central
 registry is required. Keep code reusable and incrementally preserve previous requirements.
+
+Preserve explicit original UI naming contracts during implementation and every repair:
+labels, action names, headings, region names, required placeholders and semantic roles.
+Keep wording, language, spelling and case unchanged; do not add prefixes, translate or
+concatenate aliases. A required "Name" field stays "Name". Keep the visible label and
+computed accessible name consistent; aria-label/aria-labelledby must not replace or extend
+the required name. Original explicit requirements take precedence over generated design,
+reference examples and existing incorrect code. Fix a naming violation in the application,
+not by weakening an otherwise correct test. Unspecified wording remains your choice;
+dynamic business names and user input must still reflect real data.
 
 Before adding an event or effect, read the existing component and follow its current
 UI -> callback/effect -> service -> HTTP call chain. Extend or reuse the existing owner

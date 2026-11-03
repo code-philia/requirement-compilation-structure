@@ -50,6 +50,8 @@ Describe action conditions, request sources, response branches and transformatio
 prose. Guards and actions are implemented as code, not interpreted as an expression DSL.
 
 This design is a behavioral reference, not a compiler-interpreted routing/event/state DSL.
+Reference existing controls by ID and preserve their original requirement-defined UI names
+and roles. Adding behavior must not rename controls, translate captions or combine aliases.
 Implementation owns native bindings, component state, input conversion and API calls.
 Describe which value receives user input; visibility/status dependencies are not writable
 input values. A mount trigger describes required page-entry work, not a forced global hook.
