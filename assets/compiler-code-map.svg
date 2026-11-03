@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="870" viewBox="0 0 1200 870" role="img" aria-labelledby="title description">
+  <title id="title">Requirement Compiler — code map</title>
+  <desc id="description">Pipeline orchestration calls four groups of domain passes. Shared proposal and implementation loops use model clients, memory, retrieval, and file tools. Extension suggestions appear below each service. Generated application code and compiler evidence are saved in the output directory.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10Z" fill="#718096"/>
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #263649; }
+      .title { font-size: 25px; font-weight: 650; }
+      .label { font-size: 11px; font-weight: 650; letter-spacing: 1.5px; fill: #65758a; }
+      .heading { font-size: 17px; font-weight: 650; }
+      .body { font-size: 13px; fill: #57677a; }
+      .code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; font-size: 12px; fill: #4a627c; }
+      .small { font-size: 12px; fill: #65758a; }
+      .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1; }
+      .flow { fill: none; stroke: #718096; stroke-width: 1.2; marker-end: url(#arrow); }
+      .line { fill: none; stroke: #b5c2d2; stroke-width: 1; }
+      .accent { fill: #315e91; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="870" fill="#fafbfd"/>
+  <rect x="0" y="0" width="1200" height="76" fill="#f0f4f8"/>
+  <text x="40" y="46" class="title">Requirement Compiler / Code map</text>
+  <text x="1160" y="43" text-anchor="end" class="code">13 passes · 00–12</text>
+  <path d="M0 76H1200" class="line"/>
+
+  <text x="40" y="108" class="label">ORCHESTRATION</text>
+  <rect x="40" y="124" width="1120" height="64" class="box"/>
+  <text x="60" y="151" class="heading">main.py</text>
+  <text x="60" y="173" class="small">CLI configuration</text>
+  <path d="M248 156H302" class="flow"/>
+  <text x="325" y="151" class="heading">infrastructure/compiler.py</text>
+  <text x="325" y="173" class="small">Pass order, results, continuation</text>
+  <path d="M697 156H754" class="flow"/>
+  <text x="780" y="151" class="heading">00_*.py … 12_*.py</text>
+  <text x="780" y="173" class="small">Stage entrypoints</text>
+
+  <text x="40" y="224" class="label">DOMAIN PASSES</text>
+  <rect x="40" y="240" width="262" height="122" class="box"/>
+  <rect x="326" y="240" width="262" height="122" class="box"/>
+  <rect x="612" y="240" width="262" height="122" class="box"/>
+  <rect x="898" y="240" width="262" height="122" class="box"/>
+  <path d="M40 240H302M326 240H588M612 240H874M898 240H1160" stroke="#7192b5" stroke-width="2"/>
+  <text x="58" y="264" class="code accent">00–01</text>
+  <text x="58" y="292" class="heading">Project + requirements</text>
+  <text x="58" y="316" class="body">Scaffold, tree, scenarios</text>
+  <text x="58" y="343" class="code">stages/requirements/</text>
+  <text x="344" y="264" class="code accent">02–05</text>
+  <text x="344" y="292" class="heading">Database</text>
+  <text x="344" y="316" class="body">Schema, obligations, DDL, seeds</text>
+  <text x="344" y="343" class="code">stages/database/</text>
+  <text x="630" y="264" class="code accent">06–08</text>
+  <text x="630" y="292" class="heading">Backend APIs</text>
+  <text x="630" y="316" class="body">Contracts, HTTP tests, repair</text>
+  <text x="630" y="343" class="code">stages/backend/</text>
+  <text x="916" y="264" class="code accent">09–12</text>
+  <text x="916" y="292" class="heading">UI + interactions</text>
+  <text x="916" y="316" class="body">UI, triggers, browser acceptance</text>
+  <text x="916" y="343" class="code">stages/frontend/</text>
+  <path d="M304 300H322" class="flow"/>
+  <path d="M590 300H608" class="flow"/>
+  <path d="M876 300H894" class="flow"/>
+  <path d="M171 362V386H1029V362M457 362V386M743 362V386" class="line"/>
+  <path d="M600 386V424" class="flow"/>
+
+  <text x="40" y="417" class="label">SHARED SERVICES</text>
+  <rect x="40" y="432" width="812" height="110" class="box"/>
+  <text x="60" y="460" class="heading">Proposal + implementation loops</text>
+  <text x="60" y="484" class="code">shared/agent/proposals.py · loop.py</text>
+  <text x="60" y="519" class="body">Task + evidence → model → proposal / edits → stage checks → accept or repair</text>
+  <rect x="898" y="432" width="262" height="110" class="box"/>
+  <text x="916" y="460" class="heading">Model clients</text>
+  <text x="916" y="484" class="code">shared/models/</text>
+  <text x="916" y="519" class="body">Usage, latency, prompt / output logs</text>
+  <path d="M855 487H894" class="flow" marker-start="url(#arrow)"/>
+  <path d="M446 542V568M220 590V568H980V590M600 568V590" class="line"/>
+
+  <rect x="40" y="590" width="360" height="120" class="box"/>
+  <text x="60" y="617" class="heading">Memory</text>
+  <text x="60" y="640" class="code">shared/agent/conventions.py</text>
+  <text x="60" y="662" class="body">Shared decisions + task evidence</text>
+  <text x="60" y="690" class="small">Extend: validated repair lessons</text>
+  <rect x="420" y="590" width="360" height="120" class="box"/>
+  <text x="440" y="617" class="heading">RAG + discovery</text>
+  <text x="440" y="640" class="code">shared/rag/ · agent/discovery.py</text>
+  <text x="440" y="662" class="body">BM25, lexical search, exact reads</text>
+  <text x="440" y="690" class="small">Extend: embeddings + hybrid ranking</text>
+  <rect x="800" y="590" width="360" height="120" class="box"/>
+  <text x="820" y="617" class="heading">Tools</text>
+  <text x="820" y="640" class="code">shared/agent/tools/</text>
+  <text x="820" y="662" class="body">JSON read_file / edit_file</text>
+  <text x="820" y="690" class="small">Extend: adapters + Skill loading</text>
+
+  <text x="40" y="752" class="label">OUTPUT + EVIDENCE</text>
+  <rect x="40" y="768" width="1120" height="64" fill="#f0f4f8" stroke="#cbd5e1"/>
+  <path d="M410 768V832M820 768V832" class="line"/>
+  <text x="60" y="794" font-size="14" font-weight="650">output/backend/ + frontend/</text>
+  <text x="60" y="816" class="small">Generated application</text>
+  <text x="430" y="794" font-size="14" font-weight="650">output/.arc/</text>
+  <text x="430" y="816" class="small">Artifacts, reports, failures, model logs</text>
+  <text x="840" y="794" font-size="14" font-weight="650">shared/project/</text>
+  <text x="840" y="816" class="small">Templates, dependencies, Git checkpoints</text>
+  <text x="40" y="855" class="small">Paths are relative to infrastructure/ unless qualified. “Extend” marks suggested additions; a Skill loader is not implemented.</text>
+</svg>

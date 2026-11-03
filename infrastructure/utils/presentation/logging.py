@@ -68,7 +68,9 @@ def console_log(output_dir: Path, *, debug_model_io: bool = False, model_log: bo
     """Mirror a pass to compiler.log; explicit stage names support in-process compilation."""
     from infrastructure.utils.presentation.console import show_panel, show_dashboard
     from infrastructure.utils.presentation.artifacts import ARTIFACTS
+    from infrastructure.shared.project.git import initialize_repository, checkpoint
     output_dir.mkdir(parents=True, exist_ok=True)
+    initialize_repository(output_dir)
     configure_console()
     with (output_dir / "compiler.log").open("a", encoding="utf-8", newline="\n") as log:
         lock = RLock()
@@ -91,9 +93,13 @@ def console_log(output_dir: Path, *, debug_model_io: bool = False, model_log: bo
             model_logs = f"Full model I/O: {output_dir / 'model_calls.jsonl'}" if model_log else "Detailed model I/O logs: disabled"
             show_panel(f"[START] {stage_label(script)}", f"{timestamp}\nScript: {script}\nLogs: {output_dir / 'compiler.log'}\n{model_logs}")
             show_dashboard(stage_label(script), artifacts)
+            outcome, failure = "COMPLETED", None
+            checkpoint(task="stage", action="Begin stage execution", status="RUNNING", details={"script": script})
             try:
                 yield
             except BaseException as error:
+                outcome = "INTERRUPTED" if isinstance(error, KeyboardInterrupt) else "FAILED"
+                failure = {"error": str(error), "error_type": type(error).__name__}
                 if not isinstance(error, SystemExit):
                     traceback.print_exc(file=log)
                 show_panel(f"[FAILED] {stage_label(script)}", f"Stopped after {monotonic() - started:.1f}s", tone="error")
@@ -101,6 +107,8 @@ def console_log(output_dir: Path, *, debug_model_io: bool = False, model_log: bo
             else:
                 show_panel(f"[DONE] {stage_label(script)}", f"Completed in {monotonic() - started:.1f}s", tone="success")
             finally:
+                checkpoint(task="stage", action="Finish stage execution", status=outcome,
+                    details={"script": script, "error": failure, "seconds": round(monotonic() - started, 2)})
                 stdout.flush()
                 stderr.flush()
                 _session.reset(token)

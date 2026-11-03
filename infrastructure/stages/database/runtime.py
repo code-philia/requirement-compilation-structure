@@ -13,3 +13,12 @@ def initializer_source(implementations: dict) -> str:
         raise ValueError("The DB initializer template is missing its table-list marker")
     files = [Path(item["path"]).name for item in implementations.values()]
     return source.replace(marker, "export const tableFiles: readonly string[] = " + json.dumps(files, indent=2) + ";")
+
+
+def seed_source(table_order: list[str]) -> str:
+    """Render the seed loader; models maintain only the per-table insertion files."""
+    template = Path(__file__).resolve().parents[2] / "shared/project/templates/backend/src/db/seed.ts"
+    source = template.read_text(encoding="utf-8-sig")
+    marker = "export const seedFiles: readonly string[] = [];"
+    files = [name + ".sql" for name in table_order]
+    return source.replace(marker, "export const seedFiles: readonly string[] = " + json.dumps(files, indent=2) + ";")

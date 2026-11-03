@@ -1,8 +1,8 @@
 """Small model contexts without reducing the compiler's implementation or test scope.
 
-Requirement implementation and repair see every required handler together.
-Source dependencies and files named by failed checks are added as needed; tests
-remain read-only except for the current suite during test generation.
+Requirement implementation and repair see the current behavioral references together.
+Source dependencies and generated tests named by failed checks are added as needed;
+test corrections remain grounded in the supplied requirement contexts.
 """
 
 import json
@@ -18,15 +18,17 @@ class TriggerCheckFailure(ValueError):
         super().__init__(f"{message}: {report}")
 
 
-def model_context(context, trigger_ids=None):
+def model_context(context):
     """Supply selected triggers, complete page data, API contracts and derived DB effects."""
-    selected = set(context["triggers"]) if trigger_ids is None else set(trigger_ids)
+    selected = set(context["triggers"])
     triggers = {tid: context["triggers"][tid] for tid in sorted(selected)}
     called = {aid for trigger in triggers.values() for aid in api_ids(trigger)}
     result = {"page_subtrees": context["page_subtrees"], "triggers": triggers,
         "obligations": {tid: context["obligations"][tid] for tid in sorted(selected)},
-        "target_trigger_ids": sorted(selected),
+        "target_trigger_ids": context["target_trigger_ids"],
         "backend_apis": {aid: context["backend_apis"][aid] for aid in sorted(called)}}
     if "requirement" in context:
         result["requirement"] = context["requirement"]
+    if "regression_requirements" in context:
+        result["regression_requirements"] = context["regression_requirements"]
     return result

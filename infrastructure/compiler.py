@@ -2,10 +2,12 @@
 
 from importlib import import_module
 from pathlib import Path
+import traceback
 
 from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
+from infrastructure.shared.project.git import checkpoint
 
 
 class Compiler:
@@ -24,25 +26,36 @@ class Compiler:
         self.report = {"status": "NOT_STARTED", "stages": {}}
 
     def _run(self, module: str, function: str, *arguments, **options):
-        """Call a pass directly, preserving its stage identity and error traceback."""
+        """Attempt every pass; keep failures explicit without aborting later passes."""
         self.current_stage = module + ".py"
-        with console_log(self.output_dir, stage=self.current_stage,
-                model_log=self.model_log, debug_model_io=self.model_log):
-            try:
+        try:
+            with console_log(self.output_dir, stage=self.current_stage,
+                    model_log=self.model_log, debug_model_io=self.model_log):
                 result = getattr(import_module(module), function)(*arguments, **options)
-            except BaseException as error:
-                self.report["status"] = "INTERRUPTED" if isinstance(error, KeyboardInterrupt) else "FAILED"
-                self.report["stages"][module] = {"status": self.report["status"], "error": str(error)}
-                save_json(self.arc_dir / "compilation.json", self.report)
-                raise
-            status = result.get("status", "GREEN") if isinstance(result, dict) else "GREEN"
-            self.report["stages"][module] = {"status": status}
-            if isinstance(result, dict):
-                for key in ("failures", "verification"):
-                    if key in result:
-                        self.report["stages"][module][key] = result[key]
+        except KeyboardInterrupt as error:
+            self.report["status"] = "INTERRUPTED"
+            self.report["stages"][module] = {"status": "INTERRUPTED", "error": str(error)}
             save_json(self.arc_dir / "compilation.json", self.report)
-            return result
+            checkpoint(self.output_dir, stage=module, task="stage report", action="Record interrupted pass",
+                status="INTERRUPTED", details=self.report["stages"][module])
+            raise
+        except Exception as error:
+            result = {"status": "FAILED", "error": str(error),
+                "error_type": type(error).__name__, "traceback": traceback.format_exc()}
+            if getattr(error, "failures", None):
+                result.update(status="COMPLETED_WITH_FAILURES", failures=error.failures)
+            show_panel("[FAILED; continuing] " + module,
+                result["error"] + "\nAccepted artifacts remain available. Attempt the next pass.", tone="error")
+        status = result.get("status", "GREEN") if isinstance(result, dict) else "GREEN"
+        self.report["stages"][module] = {"status": status}
+        if isinstance(result, dict):
+            for key in ("failures", "verification", "error", "error_type", "traceback"):
+                if key in result:
+                    self.report["stages"][module][key] = result[key]
+        save_json(self.arc_dir / "compilation.json", self.report)
+        checkpoint(self.output_dir, stage=module, task="stage report", action="Publish pass result",
+            status=status, details=self.report["stages"][module])
+        return result
 
     def compile(self) -> Path:
         """Execute the 13 compilation passes in order and return the generated application directory."""
@@ -81,6 +94,8 @@ class Compiler:
             if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
         self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
         save_json(self.arc_dir / "compilation.json", self.report)
+        checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
+            status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete})
         show_panel("[DONE] Requirement compilation | " + self.report["status"],
             f"Application: {self.output_dir}\nReport: {self.arc_dir / 'compilation.json'}"
             + ("\nIncomplete stages: " + ", ".join(incomplete) if incomplete else ""),

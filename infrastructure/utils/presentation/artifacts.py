@@ -56,7 +56,7 @@ def inventory(kind, data):
         return {f"{entity}.{field}": value for entity, record in data.get("entities", {}).items()
             for field, value in record.get("fields", {}).items()}
     keys = {"db_obligations": ("requirements", "steps"), "backend_apis": ("apis",),
-        "ui_design": ("pages", "elements", "bindings"),
+        "ui_design": ("pages", "elements"),
         "frontend_triggers": ("triggers",)}.get(kind, ())
     return {f"{registry}:{key}": value for registry in keys for key, value in data.get(registry, {}).items()}
 
@@ -127,7 +127,7 @@ def render_artifact(kind, data, previous=None, context=None):
                 contracts.add_row(text(aid), text(conditions("precondition"), 600), text(conditions("postcondition"), 600))
             views.append(contracts)
     elif kind == "ui_design":
-        root = Tree("Pages → UI elements → data bindings", guide_style="cyan")
+        root = Tree("Pages → UI elements → data declarations", guide_style="cyan")
         elements = data.get("elements", {})
         children = {}
         for eid, element in elements.items():
@@ -147,7 +147,7 @@ def render_artifact(kind, data, previous=None, context=None):
                 label = prop.get("text", prop.get("label", ""))
                 node = parent.add(text(f"{eid} [{element.get('type', '?')}] {label}"))
                 if element.get("data"):
-                    node.add(text("data → " + joined(element["data"])))
+                    node.add(text("data → " + joined(record["var"] for record in element["data"])))
                 if depth < 7:
                     pending.extend((node, child, depth + 1) for child in reversed(children.get(eid, [])))
             if pending:
@@ -158,11 +158,16 @@ def render_artifact(kind, data, previous=None, context=None):
             ownership.add_row(text(rid), text(joined(ids), 400))
         if ownership.row_count:
             views.append(ownership)
-        bindings = table("Data binding", "Type", "Source")
-        for name, record in list(data.get("bindings", {}).items())[:12]:
-            bindings.add_row(text(name), text(record.get("dtype", "?")), text(record.get("source", "—")))
-        if bindings.row_count:
-            views.append(bindings)
+        declarations = table("Element", "Variable", "Type")
+        for uid, element in elements.items():
+            for record in element.get("data", []):
+                declarations.add_row(text(uid), text(record["var"]), text(record["dtype"]))
+                if declarations.row_count >= 12:
+                    break
+            if declarations.row_count >= 12:
+                break
+        if declarations.row_count:
+            views.append(declarations)
     elif kind == "frontend_triggers":
         root = Tree("UI trigger → API → DB fields", guide_style="cyan")
         backend = (context or {}).get("backend_apis", {}).get("apis", {})

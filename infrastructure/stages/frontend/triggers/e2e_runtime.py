@@ -95,6 +95,7 @@ export const test = base.extend<{ database: Database.Database; applicationErrors
         for (const table of tables) connection.exec(`DELETE FROM "${table.name.replaceAll('"', '""')}"`);
       })();
       connection.pragma("foreign_keys = ON");
+      initializeDatabase(connection);
       await use(connection);
     } finally { connection.close(); }
   }, { auto: true }],

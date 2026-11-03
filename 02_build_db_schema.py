@@ -11,17 +11,45 @@ from infrastructure.utils.presentation.formatting import format_changes, format_
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.requirements.tree import RequirementTree
-from infrastructure.stages.database.schema import apply_patch
+from infrastructure.stages.database.schema import apply_patch, check_related_fields
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.tasks import TaskFailures
+from infrastructure.shared.agent.discovery import ContextIndex
 
 
 # --- Extension point 02A: schema discovery policy ------------------------------
 # Experiment with entity boundaries, reuse decisions, and constraint inference.
 # Keep the upsert response compatible with infrastructure/stages/database/schema.py.
-INSTRUCTIONS = """Design persistent data for the supplied requirement and its scenario steps.
-Reuse the supplied retrieved entities and symbol_inventory; extend existing entities
-rather than introducing synonyms for the same concept. Preserve unrelated definitions.
+INSTRUCTIONS = """Incrementally maintain ONE shared database schema while requirements are visited
+in document order. This call handles only the supplied requirement and its steps;
+the compiler merges your entities update into the schema accepted from earlier calls.
+The first call starts with an empty schema. Later calls extend that same schema,
+not a new database for each requirement.
+
+symbol_inventory lists only the retrieved candidate entity and field names.
+It is NOT a complete inventory; a retrieval miss does not prove absence. retrieved_schema contains selected definitions from that inventory; it is
+only a detail excerpt, not a separate schema or a complete list of existing entities.
+Reuse exact existing names and extend existing entities rather than introducing
+synonyms. Preserve unrelated definitions and names referenced by earlier requirements.
+
+For this requirement, follow this order:
+1. Identify persistent data needed by its behavior and scenarios, including data it
+   only READS. Given state such as an existing account or session still needs schema
+   definitions, even if account/session creation belongs to a later requirement.
+2. Reuse existing entities/fields from symbol_inventory. For any needed entity or
+   field that is absent, DEFINE it in this response's entities update, including its
+   required field properties. Do not merely mention it or leave a placeholder.
+3. List related_fields using only fields that will exist AFTER this update is merged:
+   existing inventory fields plus fields defined in this response. Do not rely on
+   a future requirement to define a field referenced by the current requirement.
+
+For example, if a requirement reads Session.id and Session.account_id but Session is
+absent from symbol_inventory, entities must define Session with both fields in this
+same response before related_fields can contain those names. If the existing entity
+is AccountSession, reuse AccountSession's exact field names instead of citing Session.
+Listing a field in related_fields does not create that entity or field.
+
 Store persistent business data, not transient UI values such as password confirmation.
 Derive constraints from requirement evidence; example fixture values alone do not
 establish uniqueness, normalization, value ranges or defaults.
@@ -70,53 +98,58 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_atte
     retriever = SchemaRetriever()
     model = TextModel()
     schema = {"entities": {}, "requirements": {}}
+    failures = TaskFailures(arc_dir, "02_build_db_schema", console)
+    save_json(arc_dir / "db_schema.json", schema)
     for index, requirement in enumerate(nodes, 1):
-        label = f"{index}/{len(nodes)} {requirement['id']}"
-        console.show(f"{label} | 1. Current requirement", (
-            f"{requirement['name']}\n\nDescription:\n{requirement['description']}"
-            f"\n\nConcatenated steps:\n{requirement['steps'] or '(No steps on this requirement.)'}"
-        ))
-        console.show(f"{label} | 2. All existing schema (excerpt)", format_schema(schema["entities"], excerpt=True))
+        with failures.task(requirement["id"]):
+            label = f"{index}/{len(nodes)} {requirement['id']}"
+            console.show(f"{label} | 1. Current requirement", (
+                f"{requirement['name']}\n\nDescription:\n{requirement['description']}"
+                f"\n\nConcatenated steps:\n{requirement['steps'] or '(No steps on this requirement.)'}"
+            ))
+            console.show(f"{label} | 2. All existing schema (excerpt)", format_schema(schema["entities"], excerpt=True))
 
-        # --- Key extension point 02C: retrieval / RAG --------------------------
-        # Rewrite query construction here and ranking/candidate selection in
-        # infrastructure/shared/rag/schema.py: BM25, embeddings, hybrid search,
-        # or reranking are possible experiments. Return {matches, entities};
-        # retrieved entity definitions must retain their actual schema names.
-        query = "\n".join(requirement[key] for key in ("name", "description", "steps"))
-        retrieved = retriever.retrieve(query, schema, top_k)
-        ranking = "\n".join(f"{item['symbol']}  BM25={item['score']:.4f}" for item in retrieved["matches"])
-        console.show(f"{label} | 3. Retrieved schema", (
-            (ranking or "No lexical matches (the schema may still be empty).")
-            + "\n\nRetrieved entity definitions:\n"
-            + format_schema(retrieved["entities"])
-        ))
+            # --- Key extension point 02C: retrieval / RAG --------------------------
+            # Rewrite query construction here and ranking/candidate selection in
+            # infrastructure/shared/rag/schema.py: BM25, embeddings, hybrid search,
+            # or reranking are possible experiments. Return {matches, entities};
+            # retrieved entity definitions must retain their actual schema names.
+            query = "\n".join(requirement[key] for key in ("name", "description", "steps"))
+            retrieved = retriever.retrieve(query, schema, top_k)
+            ranking = "\n".join(f"{item['symbol']}  BM25={item['score']:.4f}" for item in retrieved["matches"])
+            console.show(f"{label} | 3. Retrieved schema", (
+                (ranking or "No lexical matches (the schema may still be empty).")
+                + "\n\nRetrieved entity definitions:\n"
+                + format_schema(retrieved["entities"])
+            ))
 
-        # --- Extension point 02D: generation and JSON parse feedback -----------
-        # Change the evidence supplied to the model or its correction strategy.
-        # The name inventory is global; full definitions come from retrieval.
-        # apply_patch() merges the proposed entity and field updates.
-        request = {
-            "requirement": requirement,
-            "symbol_inventory": {name: list(entity["fields"]) for name, entity in schema["entities"].items()},
-            "retrieved_schema": {"entities": retrieved["entities"]},
-        }
-        def accept(patch):
-            updated = apply_patch(schema, patch)
-            updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
-            changes = format_changes(schema, updated)
-            return updated, changes
+            # --- Extension point 02D: generation and JSON parse feedback -----------
+            # Change the evidence supplied to the model or its correction strategy.
+            # The name inventory is global; full definitions come from retrieval.
+            # apply_patch() merges the proposed entity and field updates.
+            request = {
+                "requirement": requirement,
+                "symbol_inventory": {name: list(entity["fields"]) for name, entity in retrieved["entities"].items()},
+                "retrieved_schema": {"entities": retrieved["entities"]},
+            }
+            def accept(patch):
+                updated = apply_patch(schema, patch)
+                check_related_fields(updated, patch["related_fields"])
+                updated["requirements"][requirement["id"]] = sorted(set(patch["related_fields"]))
+                changes = format_changes(schema, updated)
+                return updated, changes
 
-        (updated, changes), patch = propose_json(model, INSTRUCTIONS, request, accept,
-            console, f"Schema design {requirement['id']}", max_attempts)
-        # --- Pass boundary: publish the schema ----------------------
-        # Subsequent requirements retrieve from this updated graph.
-        save_json(arc_dir / "db_schema.json", updated)
-        console.show(f"{label} | 4. Schema changes (saved)", (
-            changes
-        ))
-        schema = updated
-        console.artifact("db_schema", schema, f"{label} | Accepted schema")
+            (updated, changes), patch = propose_json(model, INSTRUCTIONS, request, accept,
+                console, f"Schema design {requirement['id']}", max_attempts, context_index=ContextIndex(lambda: {"schema": schema["entities"]}))
+            # --- Pass boundary: publish the schema ----------------------
+            # Subsequent requirements retrieve from this updated graph.
+            save_json(arc_dir / "db_schema.json", updated)
+            console.show(f"{label} | 4. Schema changes (saved)", (
+                changes
+            ))
+            schema = updated
+            console.artifact("db_schema", schema, f"{label} | Accepted schema")
+    failures.finish()
     print(f"Schema saved: {arc_dir / 'db_schema.json'}", flush=True)
     return schema
 

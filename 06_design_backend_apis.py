@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
+from infrastructure.stages.database.obligations.records import check_symbols
 from infrastructure.stages.backend.primitives import apply_decomposition, validate_design
 from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
@@ -16,6 +17,9 @@ from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.shared.rag.apis import ApiRetriever
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.shared.agent.tasks import TaskFailures
+from infrastructure.shared.agent.discovery import ContextIndex
+from infrastructure.shared.agent.conventions import CONVENTION_RULES, load_conventions, select_conventions, merge_conventions
 
 
 INSTRUCTIONS = """Design complete backend APIs for the supplied leaf requirement and scenarios.
@@ -107,15 +111,21 @@ Response bodies expose business results, not password hashes or session secrets.
 Specify success and rejection branches supported by the requirement; HTTP 501 is
 reserved for the TDD stub. Do not invent business policy or generic failure branches.
 
-retrieved_apis contains existing complete definitions; api_uses contains their earlier
-requirement scenarios. The current requirement is separate. A shared API has one
+retrieved_apis contains selected canonical definitions, not the complete API inventory. The current requirement is separate. A shared API has one
 canonical interface and P/Q covering its known uses. Return a complete updated API
 when new evidence requires coordinated interface or P/Q changes; retain earlier behavior.
 
 requirement_apis lists APIs directly needed by this requirement. The union of their
-read arrays must equal its read obligation, and likewise for write arrays. Shared API
+read arrays must cover its read obligation; supporting lookups, joins and extra response
+fields are allowed. The union of write arrays must equal its write obligation. The
+selected APIs must also cover each supplied step_obligations record. Shared API
 updates must preserve coverage of earlier requirements. Effects can overlap across
 APIs and describe possible effects across branches, not unconditional per-call access.
+Design the operations needed at each point of the scenario. A create response is not
+a reload endpoint: provide/reuse read operations for reload, direct entry, reopening
+forms and post-mutation navigation. Include those read APIs in requirement_apis even
+when a mutation API already reads the same fields. Do not use transient browser state
+as a substitute for retrieving persisted data. Given setup is not a current API mutation.
 Use requirement_apis=[] for requirements with no backend behavior and empty obligations.
 Return only API definitions and requirement associations.
 """
@@ -126,56 +136,70 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
     if top_k < 1:
         raise ValueError("--top-k must be positive")
     console, retriever, model = DemoConsole(pause), ApiRetriever(), TextModel()
+    conventions = load_conventions(arc_dir)
     # Parents organize requirements; they do not receive APIs or coverage checks.
     design = {"apis": {}, "requirements": {rid: [] for rid in tree.requirements if tree.children[rid]}}
     # --- Extension point 06A: leaf order and reusable API discovery ------------
+    failures = TaskFailures(arc_dir, "06_design_backend_apis", console)
+    save_json(arc_dir / "backend_apis.json", design)
     for number, rid in enumerate(tree.leaves, 1):
-        context = requirement_context(tree, rid)
-        required = obligations["requirements"][rid]
-        label = f"{number}/{len(tree.leaves)} {rid}"
-        console.show(f"{label} | 1. Requirement and Dataflow Obligations", (
-            context["name"] + "\n" + context["description"] + "\n\n" + context["concatenated_steps"]
-            + "\n\nRequirement obligations:\n" + format_obligations({rid: required})
-        ))
-        console.show(f"{label} | 2. All Existing APIs", format_apis(design["apis"]))
-        query = json.dumps({"requirement": context, "obligations": required}, ensure_ascii=False)
-        candidates = design["apis"]
-        retrieved = retriever.retrieve(query, candidates, top_k)
-        console.show(f"{label} | 3. Retrieved APIs (RAG)", (
-            "\n".join(f"{item['symbol']} BM25={item['score']:.4f}" for item in retrieved["matches"])
-            + "\n\n" + format_apis(retrieved["apis"])
-        ))
-        related = set(required["read"]) | set(required["write"])
-        for api in retrieved["apis"].values():
-            related.update(api["read"])
-            related.update(api["write"])
-        related_schema = {name: {"description": entity["description"],
-            "fields": {field: value for field, value in entity["fields"].items() if f"{name}.{field}" in related}}
-            for name, entity in schema["entities"].items()
-            if any(symbol.startswith(name + ".") for symbol in related)}
-        request = {
-            "requirement": context, "obligations": required, "related_schema": related_schema,
-            "retrieved_apis": retrieved["apis"], "api_inventory": list(candidates),
-            "api_uses": {aid: api_requirement_uses(tree, design["requirements"], aid)
-                for aid in retrieved["apis"]},
-        }
-        def accept(response):
-            updated = apply_decomposition(design, response, rid, obligations, tree=tree)
-            selected = {aid: updated["apis"][aid] for aid in updated["requirements"][rid]}
-            definitions = {aid: {key: api[key] for key in (
-                "signature", "request", "response", "read", "write", "precondition", "postcondition")}
-                for aid, api in selected.items()}
-            console.show(f"{label} | Complete API definitions", json.dumps(definitions, ensure_ascii=False, indent=2))
-            console.show(f"{label} | API design / Obligation Propagation",
-                format_apis(selected) + "\nRequired direct obligations:\n" + format_obligations({rid: required})
-                + "\nAssigned API obligation union:\n" + format_obligations({rid: union(selected.values())}))
-            return updated
+        with failures.task(rid):
+            context = requirement_context(tree, rid)
+            required = obligations["requirements"][rid]
+            step_obligations = {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]}
+            label = f"{number}/{len(tree.leaves)} {rid}"
+            console.show(f"{label} | 1. Requirement and Dataflow Obligations", (
+                context["name"] + "\n" + context["description"] + "\n\n" + tree.concatenated_steps(rid)
+                + "\n\nRequirement obligations:\n" + format_obligations({rid: required})
+            ))
+            console.show(f"{label} | 2. All Existing APIs", format_apis(design["apis"]))
+            query = json.dumps({"requirement": context, "obligations": required}, ensure_ascii=False)
+            candidates = design["apis"]
+            retrieved = retriever.retrieve(query, candidates, top_k)
+            console.show(f"{label} | 3. Retrieved APIs (RAG)", (
+                "\n".join(f"{item['symbol']} BM25={item['score']:.4f}" for item in retrieved["matches"])
+                + "\n\n" + format_apis(retrieved["apis"])
+            ))
+            related = set(required["read"]) | set(required["write"])
+            for effects in step_obligations.values():
+                related.update(effects["read"])
+                related.update(effects["write"])
+            for api in retrieved["apis"].values():
+                related.update(api["read"])
+                related.update(api["write"])
+            related_schema = {name: {"description": entity["description"],
+                "fields": {field: value for field, value in entity["fields"].items() if f"{name}.{field}" in related}}
+                for name, entity in schema["entities"].items()
+                if any(symbol.startswith(name + ".") for symbol in related)}
+            request = {
+                "requirement": context, "obligations": required, "step_obligations": step_obligations,
+                "related_schema": related_schema,
+                "shared_conventions": select_conventions(conventions, fields=related, requirements=[rid]),
+                "retrieved_apis": retrieved["apis"], "api_inventory": list(retrieved["apis"]),
+            }
+            def accept(response):
+                nonlocal conventions
+                updated = apply_decomposition(design, response, rid, obligations, tree=tree)
+                check_symbols(updated["apis"].values(), schema)
+                revised = merge_conventions(conventions, response, rid, related)
+                selected = {aid: updated["apis"][aid] for aid in updated["requirements"][rid]}
+                definitions = {aid: {key: api[key] for key in (
+                    "signature", "request", "response", "read", "write", "precondition", "postcondition")}
+                    for aid, api in selected.items()}
+                console.show(f"{label} | Complete API definitions", json.dumps(definitions, ensure_ascii=False, indent=2))
+                console.show(f"{label} | API design / Obligation Propagation",
+                    format_apis(selected) + "\nRequired direct obligations:\n" + format_obligations({rid: required})
+                    + "\nAssigned API obligation union:\n" + format_obligations({rid: union(selected.values())}))
+                conventions = revised
+                return updated
 
-        updated, _ = propose_json(model, INSTRUCTIONS, request, accept, console,
-            f"Backend API design {rid}", max_attempts)
-        design = updated
-        save_json(arc_dir / "backend_apis.json", design)
-        console.artifact("backend_apis", design, f"{label} | Accepted APIs")
+            updated, _ = propose_json(model, INSTRUCTIONS + "\n\n" + CONVENTION_RULES, request, accept, console,
+                f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.leaves}}))
+            design = updated
+            save_json(arc_dir / "backend_apis.json", design)
+            save_json(arc_dir / "shared_conventions.json", conventions)
+            console.artifact("backend_apis", design, f"{label} | Accepted APIs")
+    failures.finish()
     # --- Extension point 06B: API -> DB Access Primitive decomposition ---------
     # Intentionally absent: an API directly accesses the database in step 08.
     validate_design(design, obligations, tree=tree)

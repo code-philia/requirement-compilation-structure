@@ -1,4 +1,5 @@
 """Frontend representation, publication, lifecycle dependencies and acceptance regressions."""
+from tool_fixtures import propose_files
 
 from copy import deepcopy
 from pathlib import Path
@@ -145,7 +146,7 @@ class FrontendFlow(unittest.TestCase):
     def check_event_creation(self, early_green=False, needs_repair=False, partial_batch=False, preexisting=False, backend_repair=False, backend_fails_once=False):
         """Run the real orchestration with fake browser reports and model edits."""
         from unittest.mock import patch
-        from infrastructure.shared.agent.files import FileWorkspace
+        from infrastructure.shared.agent.tools import FileTools
         from infrastructure.shared.project.entrypoints import selected_path, remember_path
         from infrastructure.shared.project.initialize import initialize_project
         from infrastructure.stages.frontend.triggers import implementation
@@ -167,16 +168,16 @@ class FrontendFlow(unittest.TestCase):
         save_text(self.output / "frontend/src/features/other-page-helper.ts", "export const helper = 1;")
         save_text(self.output / "backend/src/features/other-api-helper.ts", "export const helper = 2;")
         for pid in self.ui["pages"]:
-            workspace = FileWorkspace.for_target(self.output, "page", pid)
+            workspace = FileTools.for_target(self.output, "page", pid)
             workspace.state()
-            workspace.apply({"edits": [{"path": f"frontend/src/screens/{pid}.tsx",
-                "content": "export function Page() {return null;}"}]})
+            workspace.execute(propose_files(self.output, [{"path": f"frontend/src/screens/{pid}.tsx",
+                "content": "export function Page() {return null;}"}])["tool_calls"])
         implementation_calls = []
         repaired = False
         def generate(instructions, payload):
             nonlocal repaired
             task = payload["task"]
-            if "new_file" not in task:
+            if "file_target" not in task:
                 implementation_calls.append(deepcopy(payload))
                 self.assertEqual(set(task["triggers"]), set(self.interactions["triggers"]))
                 for eid in self.interactions["triggers"]:
@@ -187,10 +188,9 @@ class FrontendFlow(unittest.TestCase):
                     self.assertTrue(payload["files"][f"frontend/src/screens/{pid}.tsx"]["writable"])
                 for path in api_paths.values():
                     self.assertTrue(payload["files"][path]["writable"])
-                for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts", "frontend/src/style.css"):
-                    self.assertTrue(payload["files"][path]["writable"])
-                self.assertFalse(payload["files"]["backend/src/server.ts"]["writable"])
-                self.assertFalse(payload["files"]["backend/src/db/client.ts"]["writable"])
+                for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts", "backend/src/server.ts"):
+                    self.assertNotIn(path, payload["files"])
+                self.assertTrue(payload["files"]["frontend/src/style.css"]["writable"])
                 if len(implementation_calls) == 1:
                     ids = sorted(tid for tid, path in task["implementation_paths"].items()
                         if payload["files"][path]["content"] is None)
@@ -201,34 +201,33 @@ class FrontendFlow(unittest.TestCase):
                         "content": "export function handle() {}"} for tid in ids]
                     if backend_repair:
                         edits.append({"path": api_paths["API-SAVE"], "content": "export function handle() { /* fixed integration */ }"})
-                        edits.extend({"path": path, "content": "export const helper = 4;"} for path in (
-                            "frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts"))
-                    return {"edits": edits}
+                    return propose_files(self.output, edits)
                 if partial_batch:
                     self.assertIn("Create all supplied trigger files", payload["feedback"][0]["error"])
                     missing = [path for path in task["implementation_paths"].values()
                         if payload["files"][path]["content"] is None]
                     self.assertEqual(len(missing), 1)
-                    return {"edits": [{"path": missing[0], "content": "export function handle() {}"}]}
+                    return propose_files(self.output, [{"path": missing[0], "content": "export function handle() {}"}])
                 if backend_fails_once:
                     self.assertEqual(payload["feedback"][0]["checks"]["backend_tests"]["returncode"], 1)
-                    self.assertFalse(payload["files"][backend_suites[0]]["writable"])
-                    return {"edits": [{"path": api_paths["API-SAVE"], "content": "export function handle() { /* API regression repaired */ }"}]}
+                    self.assertTrue(payload["files"][backend_suites[0]]["writable"])
+                    return propose_files(self.output, [{"path": api_paths["API-SAVE"], "content": "export function handle() { /* API regression repaired */ }"}])
                 repaired = True
-                return {"edits": [{"path": selected_path(self.output, "trigger", "TR-INPUT"),
-                    "content": "export function handle() { /* repaired */ }"}]}
-            creation = task["new_file"]
+                return propose_files(self.output, [{"path": selected_path(self.output, "trigger", "TR-INPUT"),
+                    "content": "export function handle() { /* repaired */ }"}])
+            creation = task["file_target"]
             self.assertEqual(creation["kind"], "e2e_test")
-            self.assertFalse(payload["files"]["frontend/src/screens/editor.tsx"]["writable"])
+            for pid in task["page_subtrees"]:
+                self.assertTrue(payload["files"][f"frontend/src/screens/{pid}.tsx"]["writable"])
             self.assertEqual(task["max_tests"], 2)
             for aid in task["backend_apis"]:
-                self.assertFalse(payload["files"][api_paths[aid]]["writable"])
+                self.assertTrue(payload["files"][api_paths[aid]]["writable"])
             self.assertFalse(payload["files"]["frontend/src/ui-runtime.ts"]["writable"])
             utilities = payload["files"]["backend/tests/support/context.ts"]
             self.assertFalse(utilities["writable"])
             self.assertIn("export function fixturePasswordHash(password: string): string", utilities["content"])
-            path = f"{creation['directory']}/chosen/{creation['target']}.spec.ts"
-            return {"edits": [{"path": path, "content": "export function handle() {}"}]}
+            path = f"{creation['directory']}/chosen/{creation['id']}.spec.ts"
+            return propose_files(self.output, [{"path": path, "content": "export function handle() {}"}])
         checks, api_checks = Mock(), Mock()
         checks.typecheck.return_value = {"returncode": 0, "output": "compiled"}
         checks.build.return_value = {"returncode": 0, "output": "built"}
@@ -278,8 +277,8 @@ class FrontendFlow(unittest.TestCase):
             self.assertEqual(backend_checks.call_count, 3 if backend_fails_once else 2)
             self.assertTrue(all(call.args == (self.output.resolve(),) for call in backend_checks.call_args_list))
             self.assertTrue(all(call.args == (backend_suites,) for call in api_checks.tests.call_args_list))
-            for path in ("frontend/src/features/other-page-helper.ts", "backend/src/features/other-api-helper.ts"):
-                self.assertEqual((self.output / path).read_text(), "export const helper = 4;")
+            self.assertEqual((self.output / "frontend/src/features/other-page-helper.ts").read_text(), "export const helper = 1;")
+            self.assertEqual((self.output / "backend/src/features/other-api-helper.ts").read_text(), "export const helper = 2;")
         else:
             backend_checks.assert_called_once_with(self.output.resolve())
         self.assertEqual(report["summary"]["ui_tests"], 0)
@@ -300,7 +299,7 @@ class FrontendFlow(unittest.TestCase):
         self.assertNotIn("contracts", selected)
 
 
-    def test_repair_scope_keeps_all_handlers_and_transitive_imports_writable(self):
+    def test_repair_scope_keeps_handlers_and_direct_imports_then_reads_failure_dependencies(self):
         """Do not omit required handlers/helpers, including a missing indexed file."""
         from infrastructure.shared.project.entrypoints import remember_path
         from infrastructure.shared.agent.context import SourceFiles
@@ -316,14 +315,19 @@ class FrontendFlow(unittest.TestCase):
         selected = SourceFiles(self.output, self.ui)
         workspace = selected.workspace(triggers=set(paths), references=["frontend/src/ui-runtime.ts"])
         files = workspace.state()
-        for relative in [*paths.values(), "frontend/src/shared/value.ts", "frontend/src/shared/nested/index.ts"]:
+        for relative in [*paths.values(), "frontend/src/shared/value.ts"]:
             self.assertTrue(files[relative]["writable"], relative)
+        self.assertNotIn("frontend/src/shared/nested/index.ts", files)
+        selected.feedback(workspace, {"error": "frontend/src/shared/nested/index.ts: invalid value"})
+        self.assertIn("frontend/src/shared/nested/index.ts", workspace.state())
+        selected.feedback(workspace, {"error": "another failure"})
+        self.assertNotIn("frontend/src/shared/nested/index.ts", workspace.state())
         self.assertIsNone(files[paths["TR-COUNT"]]["content"])
         self.assertNotIn("frontend/src/unrelated.ts", files)
         self.assertFalse(files["frontend/src/ui-runtime.ts"]["writable"])
 
-    def test_feedback_expands_page_dependencies_and_preserves_frozen_tests(self):
-        """A locator/compiler error exposes repairable sources, never accepted tests."""
+    def test_feedback_exposes_generated_tests_for_requirement_based_repairs(self):
+        """A locator/compiler error exposes repairable sources and generated test suites."""
         from infrastructure.shared.project.entrypoints import remember_path
         from infrastructure.shared.agent.context import SourceFiles
         page, helper = "frontend/src/screens/summary.tsx", "frontend/src/shared/count.ts"
@@ -335,7 +339,7 @@ class FrontendFlow(unittest.TestCase):
         selected = SourceFiles(self.output, self.ui)
         generation = selected.workspace(target=("e2e_test", "REQ-A"))
         generation.state()
-        generation.apply({"edits": [{"path": "frontend/tests/e2e/new.spec.ts", "content": "new assertions"}]})
+        generation.execute(propose_files(self.output, [{"path": "frontend/tests/e2e/new.spec.ts", "content": "new assertions"}])["tool_calls"])
         selected.feedback(generation, {"error": "generation error"})
         workspace = selected.workspace()
         result = selected.feedback(workspace, {"ui": {"returncode": 1,
@@ -344,8 +348,8 @@ class FrontendFlow(unittest.TestCase):
         files = workspace.state()
         self.assertTrue(files[page]["writable"])
         self.assertTrue(files[helper]["writable"])
-        self.assertFalse(files[frozen]["writable"])
-        self.assertFalse(files["frontend/tests/e2e/new.spec.ts"]["writable"])
+        self.assertTrue(files[frozen]["writable"])
+        self.assertTrue(files["frontend/tests/e2e/new.spec.ts"]["writable"])
         self.assertNotIn("output", result["ui"])
         self.assertEqual(result["typecheck"], {"returncode": 0})
 
@@ -364,10 +368,10 @@ class FrontendFlow(unittest.TestCase):
             calls.append(payload)
             if len(calls) == 1:
                 self.assertNotIn(page, payload["files"])
-                return {"edits": []}
+                return propose_files(self.output, [])
             self.assertTrue(payload["files"][page]["writable"])
             self.assertTrue(payload["files"][helper]["writable"])
-            return {"edits": [{"path": helper, "content": "export const value = true;"}]}
+            return propose_files(self.output, [{"path": helper, "content": "export const value = true;"}])
         gate = Mock(side_effect=[ValueError(f"{page}(1,1): Type error"), {"green": True}])
         result = run_file_agent(Mock(generate_json=generate), "Repair", {}, workspace,
             gate, 2, Mock(), "Repair", feedback_filter=lambda value: selection.feedback(workspace, value))
@@ -424,7 +428,7 @@ class FrontendFlow(unittest.TestCase):
                 self.assertEqual(set(details["response_template"]),
                     {"pages", "elements", "bindings", "requirement_ui", "step_ui"})
                 self.assertEqual(payload["all_pages"], {})
-                self.assertFalse((self.arc / "ui_design.json").exists())
+                self.assertEqual(json.loads((self.arc / "ui_design.json").read_text())["pages"], {})
             return {"pages": {pid: self.ui["pages"][pid]} if rid != "REQ-B" else {},
                 "elements": context["elements"] if rid != "REQ-B" else {},
                 "bindings": context["bindings"] if rid != "REQ-B" else {},
@@ -478,9 +482,12 @@ class FrontendFlow(unittest.TestCase):
             {"read": ["Note.id", "Note.text"], "write": []})
         self.assertEqual(result["triggers"]["T"]["read"], ["form.text"])
 
-    def test_trigger_synthesis_only_retries_json_and_has_no_contract_pass(self):
+    def test_trigger_synthesis_retries_json_and_checks_declared_obligations(self):
         from infrastructure.stages.frontend.triggers.synthesis import synthesize_triggers
         calls = []
+        self.obligations["steps"] = {sid: self.obligations["requirements"][rid]
+            for rid in self.tree.leaves for sid in self.tree.own_steps[rid]}
+        save_json(self.arc / "db_obligations.json", self.obligations)
 
         def generate(instructions, payload):
             calls.append(deepcopy(payload))
@@ -489,13 +496,13 @@ class FrontendFlow(unittest.TestCase):
             rid = payload["requirement"]["id"]
             ids = self.interactions["requirements"][rid]
             return {"triggers": {tid: self.interactions["triggers"][tid] for tid in ids},
-                "requirement_triggers": ids, "step_triggers": {}}
+                "requirement_triggers": ids, "step_triggers": {sid: ids for sid in self.tree.own_steps[rid]}}
 
         result = synthesize_triggers(self.arc, self.ui, self.tree, self.backend,
             self.tree.requirements, Mock(generate_json=generate), Mock())
         self.assertEqual(len(calls), 4)
         self.assertIn("correction", calls[1])
-        self.assertTrue(all("obligations" not in call for call in calls))
+        self.assertTrue(all("required_obligations" in call for call in calls))
         self.assertEqual(set(result), {"triggers", "requirements", "steps"})
         self.assertTrue((self.arc / "frontend_triggers.json").is_file())
 

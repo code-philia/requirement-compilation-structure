@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from infrastructure.shared.agent.files import EXCLUDED
 from infrastructure.utils.files import save_bytes, save_json
+from infrastructure.shared.project.git import checkpoint
 
 
 def _snapshot(output):
@@ -50,6 +51,16 @@ def implementation_task(output, entry, console, label):
                 (output / path).unlink(missing_ok=True)
         entry.update(failure)
         console.show(label + " | FAILED; continuing", str(error) + "\nBaseline restored. Failure archive: " + failure["archive"])
+        checkpoint(output, task=label, action="Archive failed attempt and restore task baseline",
+            status="FAILED", details=failure)
+    except BaseException as error:
+        checkpoint(output, task=label, action="Record interrupted implementation task",
+            status="INTERRUPTED" if isinstance(error, KeyboardInterrupt) else "FAILED",
+            details={"error": str(error), "error_type": type(error).__name__})
+        raise
+    else:
+        checkpoint(output, task=label, action="Publish accepted implementation task",
+            status=entry.get("status", "GREEN"), details=entry)
 
 
 def final_checks(console, **checks):
@@ -68,6 +79,8 @@ def final_checks(console, **checks):
             results[name] = {"status": "FAILED", "result": result, "error": str(error)}
         console.show("Final verification | " + name + " | " + results[name]["status"],
             results[name].get("error") or (result or {}).get("output", "Passed"))
+        checkpoint(task="final verification", action="Run " + name,
+            status=results[name]["status"], details=results[name])
     return results
 
 

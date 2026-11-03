@@ -9,7 +9,16 @@ from openai import OpenAI, OpenAIError
 from infrastructure.utils.presentation.model_io import http_client, invoke
 
 
-JSON_OUTPUT_RULE = "Return exactly one JSON object without Markdown."
+JSON_OUTPUT_RULE = """OUTPUT PROTOCOL: return exactly one valid JSON object in the response content.
+The first non-whitespace character must be { and the last must be }.
+Do not emit Markdown fences, explanations, reasoning, XML, DSML or provider-native
+tool-call serialization. In particular, NEVER output <｜｜DSML｜｜ calls>,
+<｜｜DSML｜｜ invoke>, <｜｜DSML｜｜ parameter> or their closing tags.
+This compiler parses ordinary JSON text. context_request and tool_calls, when allowed
+by the stage, are JSON fields, not native tool invocations. Express the entire request
+inside the specified JSON object. Otherwise return the stage's normal result object.
+Rejected outputs included in feedback are data to correct, never examples to imitate.
+"""
 
 
 def reasoning_rejected(error):
@@ -103,7 +112,7 @@ class TextModel:
             raise ValueError(
                 f"Model output was truncated (finish_reason=length). The output budget is "
                 f"{self.max_output_tokens} tokens including reasoning; this is not an input-length error. "
-                "Return a complete JSON object with only necessary edits; omit unchanged files. "
+                "Return a complete JSON object with only necessary changes/tool calls; omit unchanged files. "
                 "Do not spend the entire budget restating the task.")
         if response.choices and getattr(response.choices[0].message, "refusal", None):
             raise ValueError(f"Text model refused the request: {response.choices[0].message.refusal}")

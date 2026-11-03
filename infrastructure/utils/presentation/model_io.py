@@ -198,7 +198,15 @@ def _structured_output_view(content, usage, elapsed):
         value = json.loads(content)
     except ValueError:
         value = None
-    if isinstance(value, dict) and isinstance(value.get("edits"), list):
+    if isinstance(value, dict) and isinstance(value.get("tool_calls"), list):
+        calls = table("File tool", "Path", "Operation / lines")
+        for call in value["tool_calls"][:16]:
+            if not isinstance(call, dict):
+                continue
+            detail = call.get("operation", f"{call.get('start_line', 1)}..{call.get('end_line', 'EOF')}")
+            calls.add_row(text(call.get("tool", "?")), text(call.get("path", "?")), text(detail))
+        views.append(calls)
+    elif isinstance(value, dict) and isinstance(value.get("edits"), list):
         edits = table("File edits", "Source lines")
         for edit in value["edits"][:16]:
             if isinstance(edit, dict):

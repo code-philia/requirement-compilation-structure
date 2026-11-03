@@ -4,7 +4,9 @@ import json
 import posixpath
 import re
 
-from infrastructure.shared.agent.files import FileWorkspace, editable_sources, source_paths
+from infrastructure.shared.agent.feedback import compact_feedback
+from infrastructure.shared.agent.files import SHARED_SOURCES, editable_application_path, editable_sources, source_paths
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.utils.files import read_source
 
@@ -13,8 +15,9 @@ class SourceFiles:
     """Select sources by semantic ownership, imports, and concrete failure feedback.
 
     The available-file catalogue is compiler-only. It is never sent wholesale to
-    the model. All supplied application dependencies stay writable; generated
-    wiring, runtime interfaces, and accepted tests stay read-only.
+    the model. Application integration stays writable; compiler-owned database
+    and test infrastructure stay read-only. Generated test suites can be
+    corrected against requirements; compiler-owned test utilities remain references.
     """
 
     def __init__(self, output, ui=None, *, root="frontend/src", tests_root="frontend/tests"):
@@ -31,9 +34,14 @@ class SourceFiles:
         return {relative for identity in identities
             if (relative := selected_path(self.output, kind, identity)) is not None}
 
+    def is_test(self, relative):
+        """Identify generated suites, leaving shared fixtures and test utilities read-only."""
+        return "/tests/e2e/acceptance/" not in relative and relative.startswith(self.tests_root + "/") and relative.endswith((".spec.ts", ".test.ts"))
+
     def include(self, workspace, paths):
         """Add selected files plus transitive local imports, preserving write protection."""
-        pending = list(paths)
+        roots = set(paths)
+        pending = list(roots)
         seen = set()
         while pending:
             relative = pending.pop()
@@ -42,12 +50,12 @@ class SourceFiles:
             seen.add(relative)
             workspace.path(relative)
             workspace.files.add(relative)
-            if relative in self.editable:
+            if relative in self.editable or self.is_test(relative):
                 workspace.writable.add(relative)
             target = self.output / relative
-            # Compiler-owned wiring can import the whole application. Supply its
+            # Shared wiring can import the whole application. Supply its
             # interface only; it must not expand the source context transitively.
-            if relative not in self.editable or not target.is_file():
+            if relative in SHARED_SOURCES or relative not in roots or relative not in self.editable or not target.is_file():
                 continue
             source = read_source(target)
             imports = re.findall(r'''(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\(\s*)["'](\.[^"']+)["']''', source)
@@ -65,8 +73,9 @@ class SourceFiles:
         self.sources.update(source_paths(self.output, self.root))
         self.editable.update(editable_sources(self.output, self.root))
         self.tests.update(source_paths(self.output, self.tests_root))
-        workspace = (FileWorkspace.for_target(self.output, *target, existing=existing)
-            if target else FileWorkspace(self.output, ()))
+        workspace = (FileTools.for_target(self.output, *target, existing=existing)
+            if target else FileTools(self.output, ()))
+        workspace.allow_write = lambda path: editable_application_path(self.output, path)
         paths = set(paths) | self.paths("trigger", triggers)
         paths.update(workspace.writable)
         # New handlers may have been created since this catalogue was built.
@@ -74,6 +83,7 @@ class SourceFiles:
         self.editable.update(path for path in paths if path.startswith(self.root + "/"))
         self.include(workspace, paths)
         workspace.files.update(references)
+        workspace.writable.update(path for path in references if self.is_test(path))
         return workspace
 
     def feedback(self, workspace, value):
@@ -82,6 +92,7 @@ class SourceFiles:
         Full reports remain in compiler results/logs. The model receives failure
         details once. Successful checks and duplicate JSON `output` are omitted.
         """
+        value = compact_feedback(value)
         text = (value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)).replace("\\\\", "/").replace("\\", "/")
         application_files = {path for path in workspace.writable if path.startswith(self.root + "/")}
         self.sources.update(application_files)
@@ -103,18 +114,17 @@ class SourceFiles:
         for pid in self.ui["pages"]:
             if f"frontend/tests/ui/{pid}.spec.ts" in text or f"tests/ui/{pid}.spec.ts" in text:
                 named.update(self.paths("page", [pid]))
+        if not hasattr(workspace, "context_baseline"):
+            workspace.context_baseline = (set(workspace.files), set(workspace.writable))
+        base_files, base_writable = workspace.context_baseline
+        # Replace this layer's previous failure context; keep other layers intact.
+        workspace.files = {path for path in workspace.files if not path.startswith(self.layer + "/")} | base_files
+        workspace.writable = {path for path in workspace.writable if not path.startswith(self.layer + "/")} | base_writable
+        if workspace.target:
+            path = selected_path(self.output, workspace.target.kind, workspace.target.identity)
+            if path:
+                workspace.files.add(path)
+                workspace.writable.add(path)
         self.include(workspace, named)
-        self.include(workspace, workspace.writable)
 
-        def compact(item):
-            """Remove successful checks and reporter copies without truncating actual failures."""
-            if isinstance(item, dict):
-                if item.get("returncode") == 0:
-                    return {"returncode": 0}
-                return {key: compact(child) for key, child in item.items()
-                    if not (key in {"output", "stdout"} and item.get("failures"))}
-            if isinstance(item, list):
-                return [compact(child) for child in item]
-            return item
-
-        return compact(value)
+        return value

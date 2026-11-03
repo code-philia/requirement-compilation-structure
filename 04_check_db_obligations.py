@@ -4,7 +4,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.utils.cli import create_parser, resolve_directories
-from infrastructure.stages.database.obligations.records import normalize_obligations
+from infrastructure.stages.database.obligations.records import normalize_obligations, check_symbols
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.stages.requirements.tree import RequirementTree
@@ -17,6 +17,7 @@ def check_db_obligations(arc_dir: Path, pause: bool = False) -> dict:
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     schema = read_artifact(arc_dir, "db_schema.json")
     result = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
+    check_symbols([*result["requirements"].values(), *result["steps"].values()], schema)
     DemoConsole(pause).show("Step 04 | Requirement DB obligations", (
         format_requirement_schema_relations(schema) + "\n\nOBLIGATIONS\n" +
         format_obligations(result["requirements"]) + "\nSTEPS\n" + format_obligations(result["steps"])

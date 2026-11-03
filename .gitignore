@@ -5,3 +5,7 @@ outputs/
 output/
 slides/
 docs/
+/scripts/*
+!/scripts/package.py
+
+AGENTS.md

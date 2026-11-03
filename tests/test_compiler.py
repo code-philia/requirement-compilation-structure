@@ -67,7 +67,7 @@ class CompilerPipeline(unittest.TestCase):
             self.assertIn('Stage 00', log)
             self.assertIn('Stage 12', log)
 
-    def test_failure_stops_later_passes_and_preserves_completed_results(self):
+    def test_failure_attempts_later_passes_and_preserves_completed_results(self):
         def load(module):
             if module == '00_project_initialization':
                 return SimpleNamespace(project_initialization=lambda output, port: ['package.json'])
@@ -75,11 +75,13 @@ class CompilerPipeline(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             compiler = Compiler(Path(temporary) / 'input', Path(temporary) / 'output')
             with patch('infrastructure.compiler.import_module', side_effect=load) as loader, redirect_stdout(StringIO()):
-                with self.assertRaisesRegex(ValueError, 'Invalid requirement JSON'):
-                    compiler.compile()
-            self.assertEqual(loader.call_count, 2)
-            self.assertEqual(compiler.current_stage, '01_explore_requirement.py')
-            self.assertEqual(compiler.artifacts, {'project_files': ['package.json']})
+                compiler.compile()
+            self.assertEqual(loader.call_count, len(PASSES))
+            self.assertIsNone(compiler.current_stage)
+            self.assertEqual(compiler.artifacts['project_files'], ['package.json'])
+            self.assertEqual(compiler.report['status'], 'COMPLETED_WITH_FAILURES')
+            self.assertIn('Invalid requirement JSON', compiler.report['stages']['01_explore_requirement']['error'])
+            self.assertEqual(compiler.report['stages']['12_implement_frontend_tdd']['status'], 'FAILED')
             self.assertIsNone(session_info())
 
     def test_numbered_modules_expose_the_composed_pass_functions(self):
@@ -122,6 +124,8 @@ class CompilerPipeline(unittest.TestCase):
                     model.return_value.generate_json.return_value = proposal
                     models.append(model)
                 install = stack.enter_context(patch.object(import_module('08_implement_backend_tdd'), 'install_dependencies'))
+                stack.enter_context(patch.object(import_module('05_implement_db'), 'verify_database_runtime',
+                    return_value={'status': 'GREEN'}))
                 compiler.compile()
             install.assert_called_once_with(compiler.output_dir)
             self.assertEqual(sum(model.return_value.generate_json.call_count for model in models), 4)
@@ -199,7 +203,7 @@ class CompilerCLI(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.source(root)
-            for failure, status in [(ValueError('failed test acceptance'), 1), (KeyboardInterrupt(), 130)]:
+            for failure, status in [(ValueError('failed test acceptance'), 0), (KeyboardInterrupt(), 130)]:
                 with self.subTest(status=status), patch.object(main, 'Compiler') as cls, redirect_stderr(StringIO()):
                     cls.return_value.current_stage = '08_implement_backend_tdd.py'
                     cls.return_value.compile.side_effect = failure

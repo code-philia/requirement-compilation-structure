@@ -38,7 +38,7 @@ def load_ui_context(arc_dir, input_dir):
 
     visit(raw)
     contexts = {}
-    for rid in tree.requirements:
+    for rid in tree.leaves:
         node = nodes[rid]
         direct = {key: value for key, value in node.items() if key != "children"}
         refs = set(REFERENCE.findall(json.dumps(direct)))

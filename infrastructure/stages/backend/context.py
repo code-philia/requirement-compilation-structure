@@ -4,7 +4,7 @@ from pathlib import Path
 
 from infrastructure.utils.files import read_artifact
 
-from infrastructure.stages.database.obligations.records import normalize_obligations
+from infrastructure.stages.database.obligations.records import normalize_obligations, check_symbols
 from infrastructure.stages.requirements.tree import RequirementTree
 
 
@@ -13,12 +13,13 @@ def load_context(arc_dir: Path):
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     schema = read_artifact(arc_dir, "db_schema.json")
     obligations = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
+    check_symbols([*obligations["requirements"].values(), *obligations["steps"].values()], schema)
     return tree, schema, obligations
 
 
 def requirement_context(tree, rid: str) -> dict:
     """Return one requirement with its own structured steps and their concatenated teaching/model context."""
-    return {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]], "concatenated_steps": tree.concatenated_steps(rid)}
+    return {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]]}
 
 
 def api_requirement_uses(tree, allocations: dict, aid: str) -> list[dict]:
@@ -39,6 +40,13 @@ def supplied_sources(output: Path, api: dict, schema: dict) -> dict:
                 if target not in entities:
                     entities.add(target)
                     pending.append(target)
-    paths = ["backend/src/api/types.ts", "backend/src/db/client.ts", "backend/src/db/initialize.ts", "backend/tests/support/context.ts"]
+    paths = ["backend/src/api/types.ts", "backend/src/db/client.ts", "backend/tests/support/context.ts"]
     paths.extend(f"backend/src/db/tables/{name}.sql" for name in sorted(entities))
     return {relative: (output / relative).read_text(encoding="utf-8-sig") for relative in paths}
+
+
+def related_schema(schema, records):
+    """Project explicitly used entities; keep their complete definitions for SQL fixtures."""
+    names = {field.split(".")[0] for record in records for mode in ("read", "write")
+        for field in record.get(mode, [])}
+    return {name: value for name, value in schema["entities"].items() if name in names}
