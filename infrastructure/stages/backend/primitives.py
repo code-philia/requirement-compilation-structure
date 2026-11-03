@@ -1,4 +1,4 @@
-"""Requirement-to-API database obligation coverage."""
+"""Requirement and scenario coverage over declared API database effects."""
 
 from copy import deepcopy
 from infrastructure.stages.database.obligations.rules import difference, union
@@ -13,11 +13,14 @@ class ObligationCoverageError(ValueError):
 
 def coverage(required, apis):
     combined = union(apis)
-    return {"missing": difference(required, combined), "excess": difference(combined, required)}
+    # Required reads are minimum capabilities, not a prohibition on supporting
+    # lookups, joins or reusable response projections. Writes retain their boundary.
+    return {"missing": difference(required, combined),
+        "excess": {"read": [], "write": sorted(set(combined["write"]) - set(required["write"]))}}
 
 
 def validate_design(design, obligations, complete=True, tree=None):
-    """Compare read and write sets independently; no interface or schema policy."""
+    """Check required reads, exact possible writes, and each scenario's API coverage."""
     expected = obligations["requirements"] if complete else design["requirements"]
     for rid in expected:
         if tree is not None and tree.children.get(rid):
@@ -27,6 +30,14 @@ def validate_design(design, obligations, complete=True, tree=None):
         gaps = coverage(required, apis)
         if any(fields for gap in gaps.values() for fields in gap.values()):
             raise ObligationCoverageError(rid, required, union(apis), gaps)
+        if tree is None:
+            continue
+        combined = union(apis)
+        for sid in tree.own_steps[rid]:
+            step_required = obligations["steps"][sid]
+            missing = difference(step_required, combined)
+            if any(missing.values()):
+                raise ObligationCoverageError(sid, step_required, combined, {"missing": missing})
 
 
 def apply_decomposition(design, response, rid, obligations, tree=None):

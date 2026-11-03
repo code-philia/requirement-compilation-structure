@@ -34,16 +34,22 @@ are no steps. Select existing schema symbols; do not create schema definitions.
 
 Infer requirement effects from its description and complete scenarios. Infer each
 step's effects from its own Given/When/Then and requirement context. Keep these
-records independent: do not copy the requirement's writes into every step or force
-parent/step containment equality. References provide context, not inherited effects.
+records specific: do not copy the requirement's writes into every step. The leaf
+requirement must cover the effects of all its own steps; it may also describe behavior
+not exercised by a step. References provide context, not inherited effects.
 
 Given fixtures describe existing state, not writes performed by the behavior under
-test. Rejection and instructions to leave data unchanged do not imply writes.
+test. This includes prerequisite actions described in Given, even when those actions
+create records through the UI. Do not charge their writes to the current When action.
+Rejection and instructions to leave data unchanged do not imply writes.
 Include lookup, filter and join keys in reads, and persisted generated keys in writes.
 A field can occur in both arrays. Read/write sets describe possible behavior across
 branches, not effects required on every invocation. Related fields are candidates;
 there is no need to classify every supplied field. UI-only state has no DB effect.
 For credentials, distinguish submitted passwords from stored hashes.
+Reads describe necessary data capabilities, not an exhaustive SQL access whitelist.
+Include persisted re-reads required by reload, navigation or reopening an editor;
+returning data from a create operation does not replace a later retrieval operation.
 """
 
 
@@ -90,7 +96,8 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
             # --- Extension point 03C: inference granularity and feedback -----------
             # One call currently predicts a requirement and all its own steps.
             # Try separate calls or richer evidence, while retaining every node ID
-            # and independent read/write sets. Do not repair containment here.
+            # and step-specific read/write sets. Report inconsistent inference
+            # for model correction rather than silently expanding its records.
             request = {
                 "requirement": requirement,
                 "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],

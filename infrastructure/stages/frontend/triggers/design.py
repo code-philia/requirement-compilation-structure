@@ -38,7 +38,8 @@ def validate_coverage(design, backend, obligations, tree, requirement_ids):
 
     Step associations must be explicit. A step's calls may include conditional API
     branches with broader possible effects (e.g. a rejected registration), so only
-    missing step effects are errors. Requirement unions retain exact R/W coverage.
+    missing step effects are errors. Requirement reads are minimum capabilities;
+    requirement writes retain exact coverage of their possible effects.
     """
     from infrastructure.stages.backend.primitives import ObligationCoverageError, coverage
     from infrastructure.stages.database.obligations.rules import difference

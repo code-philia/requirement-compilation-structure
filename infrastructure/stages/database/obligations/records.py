@@ -14,8 +14,16 @@ def normalize_record(record):
 
 
 def normalize_inference(result, step_ids):
-    return {'requirement': normalize_record(result['requirement']),
+    inferred = {'requirement': normalize_record(result['requirement']),
         'steps': {sid: normalize_record(result['steps'][sid]) for sid in step_ids}}
+    for sid, step in inferred['steps'].items():
+        for mode in ('read', 'write'):
+            outside = sorted(set(step[mode]) - set(inferred['requirement'][mode]))
+            if outside:
+                raise ValueError(f'{sid} has {mode} effects outside its own requirement: {outside}. '
+                    'Review the requirement and scenario together. Exclude Given setup effects; '
+                    'include all real scenario effects in the requirement. Do not add fields blindly.')
+    return inferred
 
 
 def normalize_obligations(value, tree):

@@ -12,7 +12,7 @@ from infrastructure.shared.agent.recovery import implementation_task, final_chec
 from infrastructure.shared.agent.context import SourceFiles
 from infrastructure.shared.agent.discovery import project_index
 from infrastructure.shared.project.entrypoints import selected_path
-from infrastructure.stages.frontend.triggers.e2e_runtime import FIXTURE, prepare_e2e
+from infrastructure.stages.frontend.triggers.e2e_runtime import CONFIG, FIXTURE, prepare_e2e
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, test_path
 from infrastructure.stages.frontend.ui.runtime import APPLICATION_ENTRYPOINTS, prepare_frontend
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
@@ -216,6 +216,50 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         file_roots=("frontend/src", "frontend/tests", "backend/src", "backend/tests"))
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "frontend_e2e.json", report)
+    baseline_files = [ui_test_path(pid) for pid in ui["pages"]
+        if (output / ui_test_path(pid)).is_file()]
+
+    def baseline_gate():
+        """Check inherited sources independently of the next business requirement."""
+        evidence = {"typecheck": checks.typecheck(baseline_files)}
+        try:
+            if evidence["typecheck"]["returncode"]:
+                raise ValueError(evidence["typecheck"]["output"])
+            if baseline_files:
+                evidence["ui"] = ui_checks.tests(baseline_files)
+                require_green(evidence["ui"])
+        except (ValueError, RuntimeError) as error:
+            raise TriggerCheckFailure("Application baseline failed: " + str(error), evidence) from error
+        return evidence
+
+    report["baseline"] = {"status": "CHECKING"}
+    with implementation_task(output, report["baseline"], console, "12 / baseline"):
+        try:
+            baseline = baseline_gate()
+        except (ValueError, RuntimeError) as error:
+            workspace = selection.workspace(paths=APPLICATION_ENTRYPOINTS,
+                references=["frontend/src/ui-runtime.ts", "frontend/package.json",
+                    "frontend/tsconfig.json", "frontend/playwright.ui.config.ts"])
+            workspace.allow_write = lambda path: editable_runtime_path(output, path)
+
+            def baseline_feedback(value):
+                return selection.feedback(workspace, backend_selection.feedback(workspace, value))
+
+            repair = run_file_agent(model,
+                "Restore the existing application's compilation and display behavior before business work. "
+                "Read the actual entrypoints and failing sources. Use native framework routing/state/events; "
+                "do not recreate a compiler-owned dispatcher, global input capture or design interpreter. "
+                "Preserve earlier pages, selectors and behavior. This is a shared baseline repair, not "
+                "implementation of all future triggers. Read missing requirement/design evidence on demand. "
+                "Shared presentation/test infrastructure is read-only. Repair the actual application.",
+                {"task": "application_baseline", "application_entrypoints": list(APPLICATION_ENTRYPOINTS)},
+                workspace, baseline_gate, max_turns, console, "Application baseline repair",
+                feedback=getattr(error, "feedback", {"error": str(error)}),
+                feedback_filter=baseline_feedback, context_index=context_index)
+            baseline = repair["checks"]
+            report["baseline"]["repair_turns"] = repair["turns"]
+        report["baseline"].update(status="GREEN", checks=baseline)
+    save_json(arc_dir / "frontend_e2e.json", report)
     for number, rid in enumerate(tree.leaves, 1):
         tids = set(design["requirements"][rid])
         steps = tree.own_steps[rid]
@@ -262,14 +306,22 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             test_context = {**model_context(context), "schema": related_schema(schema, context["backend_apis"].values()), "test_path": relative if (output / relative).is_file() else None,
                 "max_tests": max_tests}
             test_workspace = selection.workspace(target=("e2e_test", rid), existing=relative,
-                references=["frontend/src/ui-runtime.ts", FIXTURE, "backend/tests/support/context.ts",
-                    *selection.paths("page", pages), APPLICATION_ENTRYPOINTS[0],
+                references=["frontend/src/ui-runtime.ts", CONFIG, FIXTURE, "backend/tests/support/context.ts",
+                    *selection.paths("page", pages), *APPLICATION_ENTRYPOINTS,
                     "frontend/package.json", "frontend/tsconfig.json",
                     *backend_selection.paths("api", called),
                     *[f"backend/src/db/tables/{name}.sql" for name in related_schema(schema, context["backend_apis"].values())]])
-            agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
-                test_workspace, test_gate, max_turns, console, label + " / Test Generation",
-                feedback_filter=lambda value: selection.feedback(test_workspace, value), context_index=context_index)
+            agent, generation_feedback = None, None
+            if (output / relative).is_file():
+                try:
+                    agent = {"turns": 0, "checks": test_gate()}
+                except (ValueError, RuntimeError) as error:
+                    generation_feedback = getattr(error, "feedback", {"error": str(error)})
+            if agent is None:
+                agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
+                    test_workspace, test_gate, max_turns, console, label + " / Test Generation",
+                    feedback=generation_feedback,
+                    feedback_filter=lambda value: selection.feedback(test_workspace, value), context_index=context_index)
             report["requirements"][rid]["test_turns"] = agent["turns"]
             report["requirements"][rid]["test_path"] = relative
 
@@ -327,7 +379,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     "app": "backend/src/app.ts", "server": "backend/src/server.ts"}}
             workspace = selection.workspace(paths=[*selection.paths("page", pages), "frontend/src/style.css"],
                 references=[relative, *ui_files, "backend/tests/support/context.ts",
-                    "frontend/src/ui-runtime.ts", APPLICATION_ENTRYPOINTS[0],
+                    "frontend/src/ui-runtime.ts", CONFIG, *APPLICATION_ENTRYPOINTS,
                     "frontend/package.json", "frontend/tsconfig.json"])
             workspace.allow_write = lambda path: editable_runtime_path(output, path)
             backend_selection.include(workspace, [*backend_selection.paths("api", called),
@@ -335,9 +387,16 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
 
             def repair_feedback(value):
                 return selection.feedback(workspace, backend_selection.feedback(workspace, value))
-            agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
-                implementation_gate, max_turns, console, label + " / Interaction Implementation",
-                feedback=current, feedback_filter=repair_feedback, context_index=context_index)
+            agent = None
+            if generated["status"] == "GREEN":
+                try:
+                    agent = {"turns": 0, "checks": implementation_gate()}
+                except (ValueError, RuntimeError) as error:
+                    current = getattr(error, "feedback", {"error": str(error)})
+            if agent is None:
+                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
+                    implementation_gate, max_turns, console, label + " / Interaction Implementation",
+                    feedback=current, feedback_filter=repair_feedback, context_index=context_index)
             accepted.append(rid)
             reused = tids & implemented
             implemented.update(targets)

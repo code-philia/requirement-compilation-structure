@@ -26,11 +26,11 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
             report.update({"status": "NO_UI", "summary": {"requirements": 0, "triggers": 0, "e2e_tests": 0, "ui_tests": 0, "failed": 0}})
             save_json(arc_dir / "frontend_e2e.json", report)
             return report
-        model = TextModel(json_mode=False) if any(interactions["requirements"][rid] or tree.own_steps[rid] for rid in tree.leaves) else None
+        model = TextModel()
         result = run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
             contexts, model, DemoConsole(pause), report, max_turns, max_tests)
         acceptance = run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, interactions,
-            model or TextModel(json_mode=False), DemoConsole(pause), max_turns, process_report=result)
+            model, DemoConsole(pause), max_turns, process_report=result)
         if any(entry.get("repair_checks") for entry in acceptance["requirements"].values()):
             result = verify_frontend(arc_dir, tree, backend, ui, DemoConsole(pause), result)
         result["verification"]["independent_acceptance"] = {"status": "GREEN" if acceptance["status"] == "GREEN" else "FAILED",

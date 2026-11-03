@@ -116,9 +116,16 @@ canonical interface and P/Q covering its known uses. Return a complete updated A
 when new evidence requires coordinated interface or P/Q changes; retain earlier behavior.
 
 requirement_apis lists APIs directly needed by this requirement. The union of their
-read arrays must equal its read obligation, and likewise for write arrays. Shared API
+read arrays must cover its read obligation; supporting lookups, joins and extra response
+fields are allowed. The union of write arrays must equal its write obligation. The
+selected APIs must also cover each supplied step_obligations record. Shared API
 updates must preserve coverage of earlier requirements. Effects can overlap across
 APIs and describe possible effects across branches, not unconditional per-call access.
+Design the operations needed at each point of the scenario. A create response is not
+a reload endpoint: provide/reuse read operations for reload, direct entry, reopening
+forms and post-mutation navigation. Include those read APIs in requirement_apis even
+when a mutation API already reads the same fields. Do not use transient browser state
+as a substitute for retrieving persisted data. Given setup is not a current API mutation.
 Use requirement_apis=[] for requirements with no backend behavior and empty obligations.
 Return only API definitions and requirement associations.
 """
@@ -139,6 +146,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
         with failures.task(rid):
             context = requirement_context(tree, rid)
             required = obligations["requirements"][rid]
+            step_obligations = {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]}
             label = f"{number}/{len(tree.leaves)} {rid}"
             console.show(f"{label} | 1. Requirement and Dataflow Obligations", (
                 context["name"] + "\n" + context["description"] + "\n\n" + tree.concatenated_steps(rid)
@@ -153,6 +161,9 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 + "\n\n" + format_apis(retrieved["apis"])
             ))
             related = set(required["read"]) | set(required["write"])
+            for effects in step_obligations.values():
+                related.update(effects["read"])
+                related.update(effects["write"])
             for api in retrieved["apis"].values():
                 related.update(api["read"])
                 related.update(api["write"])
@@ -161,7 +172,8 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 for name, entity in schema["entities"].items()
                 if any(symbol.startswith(name + ".") for symbol in related)}
             request = {
-                "requirement": context, "obligations": required, "related_schema": related_schema,
+                "requirement": context, "obligations": required, "step_obligations": step_obligations,
+                "related_schema": related_schema,
                 "shared_conventions": select_conventions(conventions, fields=related, requirements=[rid]),
                 "retrieved_apis": retrieved["apis"], "api_inventory": list(retrieved["apis"]),
             }

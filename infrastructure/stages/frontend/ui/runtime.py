@@ -102,4 +102,8 @@ def prepare_frontend(output: Path) -> None:
     package.setdefault("scripts", {})["test:ui"] = "playwright test --config frontend/playwright.ui.config.ts"
     save_text(path, json.dumps(package, indent=2) + "\n")
     save_text(output / "frontend/playwright.ui.config.ts", PLAYWRIGHT_CONFIG)
-    save_text(output / "frontend/src/ui-runtime.ts", UI_RUNTIME)
+    adapter = output / "frontend/src/ui-runtime.ts"
+    # Already accepted pages depend on this module. Stage preparation must never
+    # replace its public interface beneath those pages.
+    if not adapter.is_file():
+        save_text(adapter, UI_RUNTIME)

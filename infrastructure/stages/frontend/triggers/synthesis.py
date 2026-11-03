@@ -1,4 +1,4 @@
-"""Design complete triggers, without frontend obligation or semantic gates."""
+"""Design requirement-scoped triggers after checking upstream API capabilities."""
 
 import json
 
@@ -11,6 +11,7 @@ from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.shared.agent.discovery import ContextIndex
 from infrastructure.shared.agent.conventions import load_conventions, select_conventions
+from infrastructure.stages.backend.primitives import validate_design, ObligationCoverageError
 
 
 def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, max_attempts=10):
@@ -24,6 +25,13 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
             label = f"Trigger design {rid}"
             if not relevant_pages(ui, rid):
                 continue
+            try:
+                validate_design({"apis": backend["apis"],
+                    "requirements": {rid: backend["requirements"].get(rid, [])}},
+                    obligations, complete=False, tree=tree)
+            except ObligationCoverageError as error:
+                raise ValueError(f'Upstream backend contract cannot cover {rid}: {error}. '
+                    'Review stage 03 obligations and stage 06 API design before generating triggers.') from error
             pages = relevant_pages(ui, rid)
             elements = {uid for page in pages.values() for uid in page["elements"]}
             local_ui = {**ui, "pages": {pid: ui["pages"][pid] for pid in pages},

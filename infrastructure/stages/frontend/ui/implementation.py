@@ -135,7 +135,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                     "implementation_path": selected_path(output, "page", pid)}
                 workspace = selection.workspace(target=("page", pid),
                     references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json",
-                        "frontend/tsconfig.json", APPLICATION_ENTRYPOINTS[0]])
+                        "frontend/tsconfig.json", "frontend/playwright.ui.config.ts", *APPLICATION_ENTRYPOINTS])
                 report["pages"][pid]["status"] = "IMPLEMENTING"
                 agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
                     max_turns, console, label + " / Implementation", feedback=current,
