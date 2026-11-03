@@ -9,6 +9,8 @@ from openai import OpenAI, OpenAIError
 from infrastructure.utils.presentation.model_io import http_client, invoke
 
 
+DEFAULT_MODEL = "deepseek-flash"
+
 JSON_OUTPUT_RULE = """OUTPUT PROTOCOL: return exactly one valid JSON object in the response content.
 The first non-whitespace character must be { and the last must be }.
 Do not emit Markdown fences, explanations, reasoning, XML, DSML or provider-native
@@ -45,12 +47,12 @@ def reasoning_arguments(name, mode):
 class TextModel:
     """Transport for structured stage proposals and file-edit responses."""
     def __init__(self, *, json_mode: bool = True) -> None:
-        """Read compiler/.env and configure the text model client; reject missing credentials or model name."""
+        """Read compiler/.env and configure the default text model; require API credentials."""
         load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
-        self.name = os.getenv("MODEL")
+        self.name = os.getenv("MODEL") or DEFAULT_MODEL
         api_key = os.getenv("OPENAI_API_KEY")
-        if not self.name or not api_key:
-            raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env")
+        if not api_key:
+            raise ValueError("Set OPENAI_API_KEY in compiler/.env")
         try:
             self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "320000"))
         except ValueError as error:
