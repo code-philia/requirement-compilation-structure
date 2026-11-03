@@ -81,55 +81,33 @@ npm start
 
 Open `http://localhost:3000` (or the port you selected).
 
-### Local context and independent acceptance
+## Code map and extension points
 
-Models receive the current task, selected dependencies and latest failure evidence.
-Completed requirements and full source inventories are not appended to every prompt.
-The optional `context_request` response discovers candidate IDs or reads exact artifacts
-and files; ordinary changes still use `edits`. There is no artificial query-count,
-character-count or exact-ID batch-size cap. `ARC_CONTEXT_MAX_CHARS` is no longer used.
-Query results still replace prior results, and candidate searches remain paginated to
-keep local inputs understandable. Repeated identical evidence prompts the model to read
-exact IDs or produce its stage output; a stalled search enters normal task repair.
-Provider context/output limits still apply. Automatic decomposition of one oversized
-task is not implemented.
+![Compiler code map](assets/compiler-code-map.svg)
 
-Step 06 owns `.arc/shared_conventions.json`. It records concise shared decisions and
-compiler-maintained relevance associations. Implementation tasks read related conventions;
-changes belong to API design. Obligation records require explicit read/write arrays and
-step entries. Step 11 checks declared requirement/step calls against DB obligations;
-these checks do not prove actual code semantics.
+Numbered scripts orchestrate each pass. Domain logic lives in `infrastructure/stages/`; shared agent and project services live in `infrastructure/shared/`.
 
-Step 12 ends with independent acceptance generated per original `requirements.yaml`
-leaf. Its model sees original scenarios, selected UI/API interfaces, schema and fixture
-utilities, but no application source or process tests. Tests are stored under
-`frontend/tests/e2e/acceptance/` and are read-only to application repair. Failed tests may
-be corrected by a separate requirement-grounded test-review call; its completion gate
-checks compilation, not behavioral success. The real browser verdict remains authoritative.
-An unresolved failure produces `COMPLETED_WITH_FAILURES` and does not prevent other
-requirements from being attempted. See `.arc/independent_acceptance.json` and the final
-stage verification report. Generated tests are still fallible; this separation reduces
-shared blind spots, not a proof of complete requirement correctness.
+### Module guide
 
-Changes to existing generated tests are recorded with before/after content, diagnosis and
-actual feedback in `.arc/test_repairs.jsonl`. No source-text policy scans are introduced.
+| Module | Entry | Purpose |
+| --- | --- | --- |
+| Pipeline | [main.py](main.py), [compiler.py](infrastructure/compiler.py) | Configuration, pass order, and reports. |
+| Requirements · 00–01 | [requirements/](infrastructure/stages/requirements/), [project/](infrastructure/shared/project/) | Requirement tree and project initialization. |
+| Database · 02–05 | [database/](infrastructure/stages/database/) | Schema, obligations, DDL, and seed data. |
+| Backend · 06–08 | [backend/](infrastructure/stages/backend/) | API contracts, HTTP tests, and implementation. |
+| Frontend · 09–12 | [ui/](infrastructure/stages/frontend/ui/), [triggers/](infrastructure/stages/frontend/triggers/) | UI design, interactions, and browser acceptance. |
+| Agent loops | [proposals.py](infrastructure/shared/agent/proposals.py), [loop.py](infrastructure/shared/agent/loop.py) | Model requests, file edits, checks, and repair. |
+| Runtime services | [project/](infrastructure/shared/project/), [presentation/](infrastructure/utils/presentation/) | Templates, Git checkpoints, logs, and execution evidence. |
 
-### Complete the pipeline after local failures
+### Extension points
 
-Design tasks (02/03/05/06/09/11), like implementation tasks, attempt their remaining
-requirements/entities after a local proposal fails. Per-task results are saved in
-`.arc/stage_tasks/<stage>.json`; accepted artifacts remain usable. Failed obligations
-stay missing rather than being fabricated as empty R/W records.
+| Area | Current entry | Possible extension |
+| --- | --- | --- |
+| Memory | [conventions.py](infrastructure/shared/agent/conventions.py) stores shared decisions; task loops retain retrieved evidence. | Store validated repair lessons and retrieve only those relevant to the current task. |
+| RAG | [rag/](infrastructure/shared/rag/) provides BM25; [discovery.py](infrastructure/shared/agent/discovery.py) provides lexical search and exact reads. | Add embeddings, hybrid retrieval, or reranking to the relevant retrieval path. |
+| Tools | [tools/](infrastructure/shared/agent/tools/) registers and executes `read_file` and `edit_file`. | Add tool schemas, executors, permissions, and observation handling in `loop.py`, including external service adapters. |
+| Skills | No loader is implemented. | Select task-relevant `SKILL.md` guidance when assembling prompts, using the existing tools and permissions. |
+| Models | [text.py](infrastructure/shared/models/text.py), [vision.py](infrastructure/shared/models/vision.py). | Add providers or select models by task. |
+| Acceptance | Domain `testing.py` and runtime modules. | Support other application stacks or execution environments. |
 
-The compiler attempts all 13 passes even when a pass raises an ordinary exception.
-A downstream pass lacking prerequisites is reported as failed, while independent passes
-can still run. `.arc/compilation.json` finishes with `COMPLETED_WITH_FAILURES` when any
-pass remains unsuccessful. This does not declare an incomplete application correct.
-Ctrl+C still interrupts immediately; a workspace that cannot be written cannot reliably
-save a completion report.
-
-Per-task proposal/edit attempts (normally 10) and actual tool/model timeouts remain finite
-so a broken task does not hang the entire run. Independent acceptance now uses the same
-max-turns value as other stage 12 tasks, without an extra three-turn cap. Test-count values
-are generation hints, not hard acceptance gates. The public CLI retains its established
-zero exit code on completed partial runs; read the structured report for acceptance status.
+Keep each task focused on one requirement. Retrieve shared knowledge on demand, preserve canonical contracts, and use executable checks to accept changes.
