@@ -35,7 +35,7 @@ repository.prices = MODEL_PRICES
 processes = {}
 run_lock = threading.Lock()
 # Credentials live only in this server's memory, never in manifests or browser storage.
-configuration = dict(dotenv_values(ROOT / ".env"))
+configuration = dict(dotenv_values(ROOT / ".env", encoding="utf-8-sig"))
 configuration.update(
     {
         key: value
@@ -43,6 +43,7 @@ configuration.update(
         if key
         in {
             "MODEL",
+            "MODEL_REASONING",
             "OPENAI_API_KEY",
             "OPENAI_BASE_URL",
             "VISUAL_MODEL",

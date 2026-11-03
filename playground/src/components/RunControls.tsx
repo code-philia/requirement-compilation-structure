@@ -273,7 +273,7 @@ export function RunControls({
             autoComplete="off"
             value={settings.api_key}
             onChange={(event) => change("api_key", event.target.value)}
-            placeholder={settings.key_set ? "保留当前服务中的密钥" : "sk-…"}
+            placeholder={settings.key_set ? "已加载密钥，无需重复填写" : "sk-…"}
           />
           <div className="field-label model-label">
             <span>模型</span>
@@ -303,7 +303,7 @@ export function RunControls({
             ))}
           </datalist>
           <p className="field-hint">
-            密钥仅在服务内存中保存，重启后清除。可沿用已有 .env 配置。
+            默认读取 .env 中的模型与连接配置。这里填写的密钥仅在本次服务中保存。
           </p>
           <button
             className="advanced-toggle"
@@ -354,7 +354,11 @@ export function RunControls({
                 onChange={(event) =>
                   change("visual_api_key", event.target.value)
                 }
-                placeholder="沿用文本密钥或服务现有配置"
+                placeholder={
+                  settings.visual_key_set
+                    ? "已加载视觉密钥，无需重复填写"
+                    : "沿用文本密钥"
+                }
               />
               <label className="field-label">
                 高峰期价格 · 人民币 / 百万 tokens

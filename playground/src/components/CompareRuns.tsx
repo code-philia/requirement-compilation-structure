@@ -53,6 +53,7 @@ export default function CompareRuns({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [stage, setStage] = useState("");
   const [cumulative, setCumulative] = useState(false);
+  const [chartType, setChartType] = useState<"line" | "bar">("line");
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState(runs);
   useEffect(() => {
@@ -165,13 +166,7 @@ export default function CompareRuns({
     return result;
   }, [selected, ids, stage, labels, cumulative]);
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title="每一次编译，都值得比较。"
-      eyebrow="RUN ANALYTICS / 运行对比"
-      wide
-    >
+    <Modal open onClose={onClose} title="运行对比" eyebrow="RUN ANALYTICS" wide>
       <div className="compare-controls">
         <div className="selected-runs">
           {ids.map((id, index) => (
@@ -243,14 +238,30 @@ export default function CompareRuns({
             ))}
           </select>
         </div>
-        <label>
-          <input
-            type="checkbox"
-            checked={cumulative}
-            onChange={(event) => setCumulative(event.target.checked)}
-          />
-          累计值
-        </label>
+        <div className="chart-type-controls">
+          <div className="chart-type-switch" role="group" aria-label="图表类型">
+            <button
+              aria-pressed={chartType === "line"}
+              onClick={() => setChartType("line")}
+            >
+              折线图
+            </button>
+            <button
+              aria-pressed={chartType === "bar"}
+              onClick={() => setChartType("bar")}
+            >
+              柱状图
+            </button>
+          </div>
+          <label>
+            <input
+              type="checkbox"
+              checked={cumulative}
+              onChange={(event) => setCumulative(event.target.checked)}
+            />
+            累计值
+          </label>
+        </div>
       </div>
       <div className="modal-body compare-body">
         {ids.filter((id) => !details[id] && !errors[id]).length > 0 && (
@@ -358,7 +369,7 @@ export default function CompareRuns({
                 }
                 labels={labels}
                 series={chartData[metric]}
-                line={cumulative || metric === "cost"}
+                line={chartType === "line"}
                 metric={metric}
                 onClick={(index) => {
                   if (!stage) setStage(stages[index].id);

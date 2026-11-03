@@ -487,16 +487,16 @@ function StageCard({
   onCall: (call: Call) => void;
   clock: number;
 }) {
-  const [limit, setLimit] = useState(35);
   const calls = detail.calls.filter(
     (call) => call.stage === stage.id.slice(0, 2),
   );
-  const tasks =
-    detail.tasks?.filter((task) => task.stage === stage.id.slice(0, 2)) || [];
   const seconds =
     stage.status === "RUNNING" && stage.started_at
       ? (clock - Date.parse(stage.started_at)) / 1000
       : stage.seconds;
+  const pending = stage.status === "PENDING";
+  const hasUsage =
+    !pending && (stage.metrics.usage_calls > 0 || stage.metrics.calls === 0);
   const summary = stage.id.endsWith("_recorded")
     ? null
     : artifactSummary(stage.id, detail.artifacts);
@@ -505,145 +505,119 @@ function StageCard({
       className={`stage-card ${open ? "expanded" : ""}`}
       id={"stage-" + stage.id}
     >
-      <button className="stage-header" onClick={onToggle}>
-        <span className={`stage-number status-${stage.status}`}>
-          {stage.status === "GREEN" ? (
-            <Check size={12} />
-          ) : stage.status === "RUNNING" ? (
-            <LoaderCircle size={12} className="spin" />
-          ) : (
-            stage.id.slice(0, 2)
-          )}
-        </span>
-        <div>
-          <b title={stage.label}>{stage.label}</b>
-          <small>{statusLabel[stage.status] || stage.status}</small>
+      <button
+        className="stage-header"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={"stage-calls-" + stage.id}
+      >
+        <div className="stage-heading">
+          <span className={`stage-number status-${stage.status}`}>
+            {stage.status === "GREEN" ? (
+              <Check size={12} />
+            ) : stage.status === "RUNNING" ? (
+              <LoaderCircle size={12} className="spin" />
+            ) : (
+              stage.id.slice(0, 2)
+            )}
+          </span>
+          <div className="stage-name">
+            <b title={stage.label}>{stage.label}</b>
+            <small>
+              {statusLabel[stage.status] || stage.status} · {calls.length}{" "}
+              次模型调用
+            </small>
+          </div>
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </div>
-        <span className="stage-duration">{duration(seconds)}</span>
-        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <div className="stage-overview-metrics">
+          <div>
+            <span>阶段耗时</span>
+            <strong>{pending ? "—" : duration(seconds)}</strong>
+          </div>
+          <div>
+            <span>Token 总量</span>
+            <strong>
+              {compact(
+                hasUsage ? stage.metrics.input + stage.metrics.output : null,
+              )}
+            </strong>
+            <small>
+              入 {compact(hasUsage ? stage.metrics.input : null)} / 出{" "}
+              {compact(hasUsage ? stage.metrics.output : null)}
+            </small>
+          </div>
+          <div>
+            <span>估算费用</span>
+            <strong>{pending ? "—" : money(stage.metrics.cost)}</strong>
+          </div>
+        </div>
       </button>
+      {stage.error && (
+        <div className="stage-notice error-box">{stage.error}</div>
+      )}
+      {summary && (
+        <div className="stage-notice artifact-summary">
+          <FileBox size={13} />
+          <span>{summary}</span>
+        </div>
+      )}
       {open && (
-        <div className="stage-body">
-          <div className="stage-metrics">
-            <span>
-              输入{" "}
-              <b>
-                {compact(
-                  stage.metrics.usage_calls || stage.metrics.calls === 0
-                    ? stage.metrics.input
-                    : null,
-                )}
-              </b>
-            </span>
-            <span>
-              输出{" "}
-              <b>
-                {compact(
-                  stage.metrics.usage_calls || stage.metrics.calls === 0
-                    ? stage.metrics.output
-                    : null,
-                )}
-              </b>
-            </span>
-            <span>
-              估算 <b>{money(stage.metrics.cost)}</b>
-            </span>
-          </div>
+        <div className="stage-body" id={"stage-calls-" + stage.id}>
           <div className="model-latency">
-            模型耗时 {duration(stage.metrics.model_seconds)} · {calls.length}{" "}
-            次调用
+            模型调用 · 累计模型耗时 {duration(stage.metrics.model_seconds)}
           </div>
-          {stage.error && <div className="error-box">{stage.error}</div>}
-          {summary && (
-            <div className="artifact-summary">
-              <FileBox size={13} />
-              <span>{summary}</span>
-            </div>
-          )}
-          {tasks.slice(0, limit).map((task) => (
-            <details
-              className="task-group"
-              key={task.id}
-              open={tasks.length <= 2}
-            >
-              <summary>
-                <span>{task.task_id}</span>
-                <small>{task.metrics.calls}</small>
-              </summary>
-              <div className="task-totals">
+          <div
+            className="stage-call-list"
+            tabIndex={0}
+            aria-label={stage.label + "模型调用列表"}
+          >
+            {calls.map((call, index) => (
+              <button
+                className="call-row"
+                key={call.id}
+                onClick={() => onCall(call)}
+              >
+                <span className={`call-dot status-${call.status}`} />
                 <span>
-                  {task.seconds == null && task.status !== "RUNNING"
-                    ? "模型耗时"
-                    : "任务耗时"}{" "}
-                  {duration(
-                    task.seconds ??
-                      (task.status === "RUNNING" && task.started_at
-                        ? (clock - Date.parse(task.started_at)) / 1000
-                        : task.metrics.model_seconds),
-                  )}
-                </span>
-                <span>
-                  输入 {compact(task.metrics.input)} / 输出{" "}
-                  {compact(task.metrics.output)}
-                </span>
-                <span>{money(task.metrics.cost)}</span>
-              </div>
-              {task.requirement_ids.length > 0 && (
-                <p className="fine-print">
-                  {task.requirement_ids.length > 1 ? "共享任务 · " : "需求 · "}
-                  {task.requirement_ids.join("、")}
-                </p>
-              )}
-              {detail.actions?.some(
-                (action) => action.task_span_id === task.id,
-              ) && (
-                <details className="action-metrics">
-                  <summary>动作明细</summary>
-                  {detail.actions
-                    .filter((action) => action.task_span_id === task.id)
-                    .map((action) => (
-                      <div key={action.id}>
-                        <span>{action.action}</span>
-                        <small>
-                          {duration(action.seconds)} ·{" "}
-                          {money(action.metrics.cost)}
-                        </small>
-                      </div>
-                    ))}
-                </details>
-              )}
-              {calls
-                .filter((call) => call.task_span_id === task.id)
-                .map((call, index) => (
-                  <button
-                    className="call-row"
-                    key={call.id}
-                    onClick={() => onCall(call)}
+                  调用 {index + 1} ·{" "}
+                  {call.activity || call.task_id || "模型请求"}
+                  <small
+                    title={[
+                      call.task_id,
+                      call.model,
+                      ...(call.requirement_ids || []),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   >
-                    <span className={`call-dot status-${call.status}`} />
-                    <span>
-                      调用 {index + 1}
-                      <small>{call.model}</small>
-                    </span>
-                    <span>
-                      {duration(call.seconds)}
-                      <small>
-                        {compact((call.input || 0) + (call.output || 0))} tok
-                      </small>
-                    </span>
-                    <ChevronRight size={12} />
-                  </button>
-                ))}
-            </details>
-          ))}
-          {tasks.length > limit && (
-            <button className="load-more" onClick={() => setLimit(limit + 35)}>
-              展开更多任务
-            </button>
-          )}
-          {!calls.length && (
-            <p className="fine-print">此阶段暂无模型调用记录。</p>
-          )}
+                    {[call.task_id, call.model, ...(call.requirement_ids || [])]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </small>
+                </span>
+                <span>
+                  {duration(
+                    call.status === "RUNNING" && call.started_at
+                      ? (clock - Date.parse(call.started_at)) / 1000
+                      : call.seconds,
+                  )}
+                  <small>
+                    {compact(
+                      call.input == null && call.output == null
+                        ? null
+                        : (call.input || 0) + (call.output || 0),
+                    )}{" "}
+                    tok · {money(call.cost)}
+                  </small>
+                </span>
+                <ChevronRight size={12} />
+              </button>
+            ))}
+            {!calls.length && (
+              <p className="fine-print">此阶段暂无模型调用记录。</p>
+            )}
+          </div>
         </div>
       )}
     </section>
