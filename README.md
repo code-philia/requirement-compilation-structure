@@ -100,6 +100,25 @@ npm start
 
 Open `http://localhost:3000` (or the port you selected).
 
+## Playground
+
+After the environment setup above, build the React interface from the repository root:
+
+```bash
+npm --prefix playground install
+npm --prefix playground run build
+```
+
+Start the local server:
+
+```bash
+uv run playground/server.py --port 0
+```
+
+Open the URL printed in the terminal. `--port 0` selects an available port; use `--port 45741` for a fixed port. The console loads model settings from the root `.env` file. Input and output paths are relative to the repository root; historical runs are listed from directories under `outputs/` containing `.arc/`.
+
+Rebuild after changing the frontend. Press `Ctrl+C` to stop the server.
+
 ## Code map and extension points
 
 ![Compiler code map](assets/compiler-code-map.svg)
