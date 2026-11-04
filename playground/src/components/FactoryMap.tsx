@@ -64,7 +64,7 @@ const FactoryNodeView = memo(function FactoryNodeView({
       {data.status === "GREEN" && (
         <span
           className="node-verified"
-          title={data.kind === "requirement" ? "独立验收通过" : "实现检查通过"}
+          title={data.kind === "requirement" ? "需求验收通过" : "实现检查通过"}
         >
           <Check size={12} />
         </span>

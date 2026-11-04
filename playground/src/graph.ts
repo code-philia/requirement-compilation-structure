@@ -94,7 +94,7 @@ export function buildGraph(detail: Detail | null, expanded: Set<string>) {
               ? detail?.stages.find((stage) => stage.id.startsWith("04"))
                   ?.status
               : kind === "requirement"
-                ? a.independent_acceptance?.requirements?.[record.id]?.status
+                ? a.frontend_e2e?.requirements?.[record.id]?.status
                 : undefined,
       },
       draggable: kind !== "zone",

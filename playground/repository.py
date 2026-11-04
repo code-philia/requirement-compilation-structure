@@ -31,7 +31,6 @@ ARTIFACTS = (
     "ui_checks",
     "frontend_triggers",
     "frontend_e2e",
-    "independent_acceptance",
     "compilation",
 )
 STAGES = [
@@ -45,7 +44,7 @@ STAGES = [
     ("07_design_ui", "界面设计", "界面装配区"),
     ("08_implement_ui", "界面实现", "界面装配区"),
     ("09_design_frontend_triggers", "交互设计", "界面装配区"),
-    ("10_implement_frontend_tdd", "交互实现与独立验收", "质量检查台"),
+    ("10_implement_frontend_tdd", "逐需求实现与验收", "质量检查台"),
 ]
 
 

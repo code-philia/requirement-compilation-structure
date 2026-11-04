@@ -24,7 +24,6 @@ ARTIFACTS = (
     "ui_checks",
     "frontend_triggers",
     "frontend_e2e",
-    "independent_acceptance",
     "compilation",
 )
 

@@ -647,14 +647,17 @@ function artifactSummary(stage: string, a: RecordData) {
     return a.frontend_triggers?.triggers
       ? `${Object.keys(a.frontend_triggers.triggers).length} 个交互 Trigger`
       : null;
-  const report =
-    id === "06"
-      ? a.backend_tdd
-      : id === "08"
-        ? a.ui_checks
-        : id === "10"
-          ? a.independent_acceptance
-          : null;
+  if (id === "10" && a.frontend_e2e?.status) {
+    const report = a.frontend_e2e;
+    const requirements = Object.values(report.requirements || {}).filter(
+      (entry: any) => entry.status !== "NO_DIRECT_TRIGGERS",
+    );
+    const passed = requirements.filter(
+      (entry: any) => entry.status === "GREEN",
+    ).length;
+    return `单遍需求验收：${passed}/${requirements.length} · ${statusLabel[report.status] || report.status}`;
+  }
+  const report = id === "06" ? a.backend_tdd : id === "08" ? a.ui_checks : null;
   return report?.status
     ? `检查结果：${statusLabel[report.status] || report.status}`
     : null;
