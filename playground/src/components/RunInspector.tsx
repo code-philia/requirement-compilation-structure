@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -32,6 +33,7 @@ import {
   type Stage,
 } from "../types";
 import { JsonView, Modal } from "./Details";
+import { FailureList } from "./FailureList";
 
 export function RunInspector({
   detail,
@@ -45,6 +47,7 @@ export function RunInspector({
   connected,
   loading,
   onError,
+  onLocate,
 }: {
   detail: Detail | null;
   runs: Run[];
@@ -57,6 +60,7 @@ export function RunInspector({
   connected: boolean;
   loading: boolean;
   onError: (message: string) => void;
+  onLocate: (id: string) => void;
 }) {
   const [tab, setTab] = useState("current");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -309,6 +313,45 @@ export function RunInspector({
                 {detail.run.data_note && (
                   <div className="data-note">{detail.run.data_note}</div>
                 )}
+                {!!detail.failures?.length && (
+                  <div className="failure-overview">
+                    <AlertTriangle size={16} />
+                    <div>
+                      <b>{detail.failures.length} 处失败需要排查</b>
+                      <p>
+                        涉及{" "}
+                        {
+                          new Set(
+                            detail.failures.flatMap(
+                              (failure) => failure.requirement_ids,
+                            ),
+                          ).size
+                        }{" "}
+                        个需求 · 阶段卡片可查看失败环节、原始反馈与关联调用。
+                      </p>
+                      {Array.from(
+                        new Set(
+                          detail.failures.map((failure) => failure.stage),
+                        ),
+                      ).map((stage) => (
+                        <button
+                          key={stage}
+                          onClick={() => {
+                            setExpanded(stage);
+                            document
+                              .getElementById("stage-" + stage)
+                              ?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start",
+                              });
+                          }}
+                        >
+                          查看阶段 {stage.slice(0, 2)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {detail.run.error && (
                   <div className="error-box">{detail.run.error}</div>
                 )}
@@ -360,6 +403,7 @@ export function RunInspector({
                     onToggle={() =>
                       setExpanded(expanded === stage.id ? null : stage.id)
                     }
+                    onLocate={onLocate}
                     onCall={(value) => {
                       setCall(value);
                       setCallTab("input");
@@ -478,6 +522,7 @@ function StageCard({
   open,
   onToggle,
   onCall,
+  onLocate,
   clock,
 }: {
   stage: Stage;
@@ -485,6 +530,7 @@ function StageCard({
   open: boolean;
   onToggle: () => void;
   onCall: (call: Call) => void;
+  onLocate: (id: string) => void;
   clock: number;
 }) {
   const calls = detail.calls.filter(
@@ -553,6 +599,14 @@ function StageCard({
           </div>
         </div>
       </button>
+      <FailureList
+        failures={(detail.failures || []).filter(
+          (failure) => failure.stage === stage.id,
+        )}
+        detail={detail}
+        onLocate={onLocate}
+        onCall={onCall}
+      />
       {stage.error && (
         <div className="stage-notice error-box">{stage.error}</div>
       )}

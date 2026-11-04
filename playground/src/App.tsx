@@ -41,6 +41,10 @@ export default function App() {
     new URLSearchParams(window.location.search).get("run"),
   );
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [mapTarget, setMapTarget] = useState<{
+    id: string;
+    request: number;
+  } | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -103,6 +107,7 @@ export default function App() {
   }, [identity, showError]);
   useEffect(() => {
     setSelected(null);
+    setMapTarget(null);
     setDetail(null);
     const url = new URL(window.location.href);
     if (identity) url.searchParams.set("run", identity);
@@ -242,6 +247,8 @@ export default function App() {
             <Panel id="canvas" order={2} defaultSize={56} minSize={28}>
               <FactoryMap
                 detail={detail}
+                locateTarget={mapTarget}
+                onFocus={setSelected}
                 selected={selected}
                 onClear={() => setSelected(null)}
                 onSelect={(selection) => {
@@ -269,6 +276,10 @@ export default function App() {
                 runs={runs}
                 total={total}
                 onChoose={setIdentity}
+                onLocate={(id) => {
+                  setDetailOpen(false);
+                  setMapTarget({ id, request: Date.now() });
+                }}
                 search={search}
                 onSearch={(value) => {
                   setSearch(value);

@@ -379,6 +379,11 @@ async def events(identity: str, request: Request):
                         "ui_design",
                         "backend_apis",
                         "frontend_triggers",
+                        "backend_tdd",
+                        "db_checks",
+                        "ui_checks",
+                        "frontend_e2e",
+                        "independent_acceptance",
                     )
                 )
             signature = []

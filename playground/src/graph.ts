@@ -322,6 +322,24 @@ export function buildGraph(detail: Detail | null, expanded: Set<string>) {
         : undefined) || "PENDING";
     render(items, zone);
   }
+  // Retain earlier stage failures even when a later frontend check passed.
+  // Badges propagate to collapsed ancestors so hidden failures stay discoverable.
+  for (const failure of detail?.failures || []) {
+    const affected = new Set<string>();
+    for (const id of failure.node_ids) {
+      affected.add(id);
+      for (const ancestor of catalog.find((item) => item.selection.id === id)
+        ?.ancestors || [])
+        affected.add(ancestor);
+    }
+    for (const node of nodes) {
+      if (!affected.has(node.id)) continue;
+      node.data.failureCount = Number(node.data.failureCount || 0) + 1;
+      node.data.status = failure.node_ids.includes(node.id)
+        ? "FAILED"
+        : "COMPLETED_WITH_FAILURES";
+    }
+  }
   for (const [name, entity] of Object.entries(a.db_schema?.entities || {}) as [
     string,
     RecordData,

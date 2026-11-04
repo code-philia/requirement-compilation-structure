@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 import time
 
+from failures import collect_failures
+
 from metrics import (
     aggregate,
     calls_from_records,
@@ -24,12 +26,14 @@ ARTIFACTS = (
     "visual_analysis",
     "db_schema",
     "db_obligations",
+    "db_checks",
     "backend_apis",
     "backend_tdd",
     "ui_design",
     "ui_checks",
     "frontend_triggers",
     "frontend_e2e",
+    "independent_acceptance",
     "compilation",
 )
 STAGES = [
@@ -342,6 +346,7 @@ class Repository:
             "tasks": tasks,
             "actions": actions,
             "artifacts": artifacts,
+            "failures": collect_failures(artifacts, stages, calls),
         }
 
     def call_detail(self, identity, call_id):

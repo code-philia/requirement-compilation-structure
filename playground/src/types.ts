@@ -72,6 +72,21 @@ export type ActionMetric = {
   seconds: number;
   metrics: Metrics;
 };
+export type Failure = {
+  id: string;
+  stage: string;
+  stage_label: string;
+  label: string;
+  target: string;
+  requirement_ids: string[];
+  requirement_names: Record<string, string>;
+  node_ids: string[];
+  phase: string;
+  error: string;
+  source: string;
+  call_ids: string[];
+  record: RecordData;
+};
 export type Detail = {
   run: Run;
   metrics: Metrics;
@@ -85,6 +100,7 @@ export type Detail = {
   tasks: TaskMetric[];
   actions: ActionMetric[];
   artifacts: RecordData;
+  failures?: Failure[];
 };
 export type Config = {
   prices?: RecordData;

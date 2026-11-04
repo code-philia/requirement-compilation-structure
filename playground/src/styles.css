@@ -2728,3 +2728,162 @@ select {
 .requirement-stats .detail-info-grid strong {
   font-size: 14px;
 }
+
+.failure-overview {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px;
+  margin-top: 12px;
+  background: #fff2ed;
+  border: 1px solid #dfa99c;
+  border-radius: 7px;
+  color: #934839;
+  font-size: 11px;
+}
+.failure-overview > svg {
+  flex-shrink: 0;
+}
+.failure-overview p {
+  font-size: 10px;
+  line-height: 1.7;
+  margin: 6px 0;
+}
+.failure-overview button,
+.failure-locate button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  margin: 3px 5px 0 0;
+  background: #fff;
+  border: 1px solid #dbb1a6;
+  border-radius: 4px;
+  color: #914b3f;
+  font-size: 10px;
+}
+.failure-list {
+  margin: 0 8px 10px;
+}
+.failure-entry {
+  background: #fff6f2;
+  border: 1px solid #e1b1a3;
+  border-radius: 6px;
+  margin-bottom: 7px;
+  color: #794b43;
+  font-size: 10px;
+}
+.failure-entry > summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.failure-entry > summary > svg {
+  color: #b65a42;
+  flex-shrink: 0;
+}
+.failure-entry > summary > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.failure-entry b {
+  font-weight: 600;
+}
+.failure-entry summary small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.6;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.failure-expand {
+  font-size: 9px;
+  color: #a36351;
+}
+.failure-content {
+  padding: 0 10px 10px;
+}
+.failure-content > p {
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  margin: 6px 0;
+}
+.failure-content code {
+  font-size: 9px;
+}
+.failure-content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 300px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-size: 10px;
+  line-height: 1.7;
+  padding: 9px;
+  border-radius: 4px;
+  background: #fff;
+  border: 1px solid #ead5cf;
+}
+.failure-calls,
+.failure-evidence {
+  margin-top: 10px;
+}
+.failure-calls > summary,
+.failure-evidence > summary {
+  cursor: pointer;
+  line-height: 1.8;
+}
+.failure-calls svg {
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.failure-call-list {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.failure-call-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 3px;
+  color: #4b6590;
+  border-bottom: 1px solid #ecd8d0;
+}
+.failure-call-list button > span {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+}
+.failure-call-list small {
+  display: block;
+  font-size: 9px;
+  margin-top: 3px;
+}
+.factory-node.has-failure {
+  border-color: #c56e58;
+  background: #fff4ef;
+}
+.node-failure-badge {
+  position: absolute;
+  top: -9px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid #d49a86;
+  border-radius: 8px;
+  padding: 2px 5px;
+  background: #fff0e8;
+  color: #a34b34;
+  font-size: 9px;
+}
+.zone-status.status-COMPLETED_WITH_FAILURES,
+.zone-status.status-FAILED {
+  background: #bc6c55;
+}

@@ -13,6 +13,7 @@ import {
 } from "@xyflow/react";
 import {
   Check,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   Crosshair,
@@ -42,7 +43,7 @@ const FactoryNodeView = memo(function FactoryNodeView({
       initial={{ opacity: 0, y: 14, scale: 0.94 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.35 }}
-      className={`factory-node kind-${data.kind} ${data.zone === 0 || data.zone === 3 ? "is-tree" : ""} ${selected ? "is-selected" : ""}`}
+      className={`factory-node kind-${data.kind} ${data.zone === 0 || data.zone === 3 ? "is-tree" : ""} ${data.failureCount ? "has-failure" : ""} ${selected ? "is-selected" : ""}`}
       style={{ "--zone-color": ZONES[data.zone].color } as React.CSSProperties}
     >
       <Handle id="in" type="target" position={Position.Left} />
@@ -60,6 +61,15 @@ const FactoryNodeView = memo(function FactoryNodeView({
       </div>
       {expandable && (
         <span className="node-child-count">{String(data.childCount)} 项</span>
+      )}
+      {!!data.failureCount && (
+        <span
+          className="node-failure-badge"
+          title={`${data.failureCount} 处失败（含折叠子节点）`}
+        >
+          <AlertTriangle size={11} />
+          {String(data.failureCount)}
+        </span>
       )}
       {data.status === "GREEN" && (
         <span
@@ -121,11 +131,15 @@ function MapContent({
   onSelect,
   selected,
   onClear,
+  locateTarget,
+  onFocus,
 }: {
   detail: Detail | null;
   onSelect: (selection: Selection) => void;
   selected: Selection | null;
   onClear: () => void;
+  locateTarget: { id: string; request: number } | null;
+  onFocus: (selection: Selection) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState(-1);
@@ -151,7 +165,7 @@ function MapContent({
   }, [detail?.run.id]);
   const graph = useMemo(
     () => buildGraph(detail, expanded),
-    [detail?.artifacts, expanded],
+    [detail?.artifacts, detail?.failures, expanded],
   );
   const related = useMemo(() => {
     const ids = new Set<string>();
@@ -318,7 +332,7 @@ function MapContent({
       )
       .slice(0, 8);
   }, [graph.catalog, query]);
-  function locate(match: (typeof graph.catalog)[number]) {
+  function locate(match: (typeof graph.catalog)[number], showDetails = true) {
     positions.current.clear();
     setExpanded((before) => new Set([...before, ...match.ancestors]));
     setFollow(false);
@@ -326,8 +340,16 @@ function MapContent({
     setTab(match.selection.zone);
     setPendingFocus("search:" + match.selection.id);
     setQuery("");
-    onSelect(match.selection);
+    if (showDetails) onSelect(match.selection);
+    else onFocus(match.selection);
   }
+  useEffect(() => {
+    if (!locateTarget) return;
+    const match = graph.catalog.find(
+      (item) => item.selection.id === locateTarget.id,
+    );
+    if (match) locate(match, false);
+  }, [locateTarget?.request]);
   function search() {
     if (matches[0]) locate(matches[0]);
   }
@@ -548,6 +570,8 @@ function MapContent({
 }
 export function FactoryMap(props: {
   detail: Detail | null;
+  locateTarget: { id: string; request: number } | null;
+  onFocus: (selection: Selection) => void;
   onSelect: (selection: Selection) => void;
   selected: Selection | null;
   onClear: () => void;

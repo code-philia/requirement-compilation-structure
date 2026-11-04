@@ -21,6 +21,7 @@ import {
   type RecordData,
 } from "../types";
 import { ZONES } from "../graph";
+import { FailureList } from "./FailureList";
 
 export function JsonView({ value }: { value: unknown }) {
   const [copied, setCopied] = useState(false);
@@ -184,6 +185,14 @@ export function NodeDetails({
           <JsonView value={record} />
         ) : (
           <>
+            {detail && (
+              <FailureList
+                detail={detail}
+                failures={(detail.failures || []).filter((failure) =>
+                  failure.node_ids.includes(selection.id),
+                )}
+              />
+            )}
             {record.description && (
               <p className="description">
                 {typeof record.description === "string"
