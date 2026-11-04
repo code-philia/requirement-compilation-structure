@@ -52,21 +52,14 @@ export type FactoryData = {
 };
 export type FactoryNode = Node<FactoryData>;
 
-export function buildGraph(
-  detail: Detail | null,
-  expanded: Set<string>,
-): { nodes: FactoryNode[]; edges: Edge[]; selections: Map<string, Selection> } {
+export function buildGraph(detail: Detail | null, expanded: Set<string>) {
   const nodes: FactoryNode[] = [],
     edges: Edge[] = [],
     selections = new Map<string, Selection>();
   const a = detail?.artifacts || {};
   const edgeIds = new Set<string>();
   const dimensions: Record<string, [number, number]> = {
-    zone: [460, 145],
-    api: [290, 100],
-    entity: [208, 129],
-    trigger: [167, 66],
-    page: [231, 90],
+    zone: [360, 125],
   };
   const add = (
     id: string,
@@ -85,8 +78,8 @@ export function buildGraph(
       id,
       type: kind === "zone" ? "zone" : "factory",
       position: { x, y },
-      initialWidth: dimensions[kind]?.[0] || 212,
-      initialHeight: dimensions[kind]?.[1] || 90,
+      initialWidth: dimensions[kind]?.[0] || 176,
+      initialHeight: dimensions[kind]?.[1] || 68,
       data: {
         label,
         kind,
@@ -137,59 +130,195 @@ export function buildGraph(
       },
     });
   };
+  type Item = {
+    id: string;
+    kind: string;
+    label: string;
+    record: RecordData;
+    subtitle?: string;
+    children: Item[];
+    count?: number;
+  };
+  const catalog: { selection: Selection; ancestors: string[] }[] = [];
+  const elements = a.ui_design?.elements || {};
+  const childrenByParent = new Map<string, string[]>();
+  const triggersBySource = new Map<string, Item[]>();
+  for (const [id, trigger] of Object.entries(
+    a.frontend_triggers?.triggers || {},
+  ) as [string, RecordData][]) {
+    const triggers = triggersBySource.get(trigger.source) || [];
+    triggers.push({
+      id: "trigger:" + id,
+      kind: "trigger",
+      label: trigger.event || id,
+      record: trigger,
+      subtitle: id,
+      children: [],
+    });
+    triggersBySource.set(trigger.source, triggers);
+  }
+  for (const [id, record] of Object.entries(elements) as [
+    string,
+    RecordData,
+  ][]) {
+    const children = childrenByParent.get(record.parent) || [];
+    children.push(id);
+    childrenByParent.set(record.parent, children);
+  }
+  function requirementItem(
+    record: RecordData,
+    seen = new Set<string>(),
+  ): Item[] {
+    if (!record?.id || seen.has(record.id)) return [];
+    const path = new Set(seen).add(record.id);
+    return [
+      {
+        id: "req:" + record.id,
+        kind: "requirement",
+        label: record.name || record.id,
+        record,
+        subtitle: record.id,
+        children: (record.children || []).flatMap((child: RecordData) =>
+          requirementItem(child, path),
+        ),
+      },
+    ];
+  }
+  function uiItem(id: string, seen = new Set<string>()): Item[] {
+    const record = elements[id];
+    if (!record || seen.has(id)) return [];
+    const path = new Set(seen).add(id);
+    const children = (childrenByParent.get(id) || []).flatMap((child) =>
+      uiItem(child, path),
+    );
+    children.push(...(triggersBySource.get(id) || []));
+    return [
+      {
+        id: "ui:" + id,
+        kind: record.type === "page" ? "page" : "element",
+        label: record.prop?.label || record.prop?.text || record.type || id,
+        record: { ...record, id },
+        subtitle:
+          record.type === "page"
+            ? (Object.values(a.ui_design?.pages || {}) as RecordData[]).find(
+                (page) => page.root === id,
+              )?.route
+            : record.type,
+        children,
+      },
+    ];
+  }
+  const trees: Item[][] = [
+    requirementItem(a.requirements || {}),
+    Object.entries(a.db_schema?.entities || {}).map(([name, entity]) => ({
+      id: "db:" + name,
+      kind: "entity",
+      label: name,
+      record: entity as RecordData,
+      subtitle: `${Object.keys((entity as RecordData).fields || {}).length} FIELDS`,
+      children: [],
+    })),
+    Object.entries(a.backend_apis?.apis || {}).map(([id, value]) => {
+      const record = value as RecordData;
+      return {
+        id: "api:" + id,
+        kind: "api",
+        label: record.signature?.name || id,
+        record,
+        subtitle: `${record.signature?.method || "API"} ${record.signature?.path || id}`,
+        children: [],
+      };
+    }),
+    (Object.values(a.ui_design?.pages || {}) as RecordData[]).flatMap((page) =>
+      uiItem(page.root),
+    ),
+  ];
+  // Every level has at most eight cards, including very broad requirement/UI trees.
+  function groupItems(items: Item[], parent: string): Item[] {
+    if (items.length <= 8) return items;
+    const size = 8 ** Math.floor(Math.log(items.length - 1) / Math.log(8));
+    const groups: Item[] = [];
+    for (let offset = 0; offset < items.length; offset += size) {
+      const members = items.slice(offset, offset + size);
+      const id = `${parent}:group:${offset}`;
+      groups.push({
+        id,
+        kind: "group",
+        label: `${members[0].label} 等 ${members.length} 项`,
+        subtitle: `第 ${offset + 1}–${offset + members.length} 项 · 点击展开`,
+        record: {},
+        count: members.length,
+        children: groupItems(members, id),
+      });
+    }
+    return groups;
+  }
+  const totalCounts = [0, 0, 0, 0];
+  function prepare(
+    items: Item[],
+    parent: string,
+    zone: number,
+    ancestors: string[],
+  ): Item[] {
+    const grouped = groupItems(items, parent);
+    for (const item of grouped) {
+      if (item.kind !== "group") {
+        totalCounts[zone]++;
+        item.count = item.children.length;
+        catalog.push({
+          selection: {
+            id: item.id,
+            kind: item.kind,
+            label: item.label,
+            zone,
+            record: item.record,
+          },
+          ancestors,
+        });
+      }
+      item.children = prepare(item.children, item.id, zone, [
+        ...ancestors,
+        item.id,
+      ]);
+    }
+    return grouped;
+  }
+  function render(items: Item[], zone: number, parent?: string) {
+    for (const item of items) {
+      if (selections.has(item.id)) {
+        if (parent) link(parent, item.id, "contain");
+        continue;
+      }
+      add(
+        item.id,
+        item.kind,
+        item.label,
+        zone,
+        item.record,
+        0,
+        0,
+        item.subtitle,
+      );
+      const node = nodes[nodes.length - 1];
+      node.data.childCount = item.count || item.children.length;
+      node.data.expandable = item.children.length > 0;
+      if (parent)
+        link(parent, item.id, item.kind === "trigger" ? "trigger" : "contain");
+      if (expanded.has(item.id)) render(item.children, zone, item.id);
+    }
+  }
   for (let zone = 0; zone < 4; zone++) {
     const info = ZONES[zone];
-    add(
-      "zone:" + zone,
-      "zone",
-      info.title,
-      zone,
-      {},
-      zone * 540,
-      0,
-      info.subtitle,
-    );
-    nodes[nodes.length - 1].data.status =
+    const items = prepare(trees[zone], "zone:" + zone, zone, []);
+    add("zone:" + zone, "zone", info.title, zone, {}, 0, 0, info.subtitle);
+    const heading = nodes[nodes.length - 1];
+    heading.data.count = totalCounts[zone];
+    heading.data.status =
       (!detail?.run.legacy
         ? detail?.stages.find((stage) => stage.id.startsWith(info.stage))
             ?.status
         : undefined) || "PENDING";
-  }
-  let requirementRow = 0;
-  const visit = (node: RecordData, depth: number, parent?: string) => {
-    if (!node?.id) return;
-    const id = "req:" + node.id;
-    add(
-      id,
-      "requirement",
-      node.name || node.id,
-      0,
-      node,
-      30 + Math.min(depth, 3) * 32,
-      160 + requirementRow++ * 106,
-      node.id,
-    );
-    if (parent) link(parent, id, "contain");
-    if (expanded.has(id) || depth === 0)
-      for (const child of node.children || []) visit(child, depth + 1, id);
-  };
-  visit(a.requirements || {}, 0);
-  let index = 0;
-  for (const [name, entity] of Object.entries(a.db_schema?.entities || {}) as [
-    string,
-    RecordData,
-  ][]) {
-    add(
-      "db:" + name,
-      "entity",
-      name,
-      1,
-      entity,
-      570 + (index % 2) * 230,
-      160 + Math.floor(index / 2) * 160,
-      `${Object.keys(entity.fields || {}).length} FIELDS`,
-    );
-    index++;
+    render(items, zone);
   }
   for (const [name, entity] of Object.entries(a.db_schema?.entities || {}) as [
     string,
@@ -200,80 +329,86 @@ export function buildGraph(
         link("db:" + name, "db:" + field.references.split(".")[0], "foreign");
     }
   }
-  index = 0;
-  for (const [id, record] of Object.entries(a.backend_apis?.apis || {}) as [
-    string,
-    RecordData,
-  ][]) {
-    add(
-      "api:" + id,
-      "api",
-      record.signature?.name || id,
-      2,
-      record,
-      1110,
-      160 + index++ * 132,
-      `${record.signature?.method || "API"} ${record.signature?.path || id}`,
-    );
-  }
-  const elements = a.ui_design?.elements || {};
-  let uiRow = 0;
-  const uiVisit = (
-    id: string,
-    depth: number,
-    parent?: string,
-    visited = new Set<string>(),
-  ) => {
-    if (visited.has(id) || depth > 12) return;
-    visited.add(id);
-    const record = elements[id];
-    if (!record) return;
-    const nodeId = "ui:" + id;
-    add(
-      nodeId,
-      record.type === "page" ? "page" : "element",
-      record.prop?.label || record.prop?.text || record.type || id,
-      3,
-      { ...record, id },
-      1650 + Math.min(depth, 4) * 30,
-      160 + uiRow++ * 102,
-      record.type === "page"
-        ? (Object.values(a.ui_design?.pages || {}) as RecordData[]).find(
-            (p) => p.root === id,
-          )?.route
-        : record.type,
-    );
-    if (parent) link(parent, nodeId, "contain");
-    if (expanded.has(nodeId) || record.type === "page") {
-      for (const [childId, child] of Object.entries(elements) as [
-        string,
-        RecordData,
-      ][]) {
-        if (child.parent === id) uiVisit(childId, depth + 1, nodeId, visited);
-      }
-    }
-  };
-  for (const page of Object.values(a.ui_design?.pages || {}) as RecordData[])
-    uiVisit(page.root, 0);
   for (const [id, trigger] of Object.entries(
     a.frontend_triggers?.triggers || {},
   ) as [string, RecordData][]) {
-    const source = nodes.find((node) => node.id === "ui:" + trigger.source);
-    if (!source || !expanded.has(source.id)) continue;
-    add(
-      "trigger:" + id,
-      "trigger",
-      trigger.event || id,
-      3,
-      trigger,
-      source.position.x + 250,
-      source.position.y + 12,
-      id,
-    );
-    link(source.id, "trigger:" + id, "trigger");
-    for (const action of trigger.action || [])
+    for (const action of trigger.action || []) {
       if (action.kind === "api")
         link("trigger:" + id, "api:" + action.api, "call", "CALL");
+    }
+  }
+  // Pack each visible subtree into a grid. Expanded branches reserve their actual
+  // bounds so sibling branches and neighbouring factory zones never overlap.
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const childNodes = new Map<string, FactoryNode[]>();
+  const parented = new Set<string>();
+  for (const edge of edges) {
+    if (edge.data?.kind !== "contain" && edge.data?.kind !== "trigger")
+      continue;
+    const child = nodesById.get(edge.target)!;
+    if (parented.has(child.id)) continue;
+    parented.add(child.id);
+    const children = childNodes.get(edge.source) || [];
+    children.push(child);
+    childNodes.set(edge.source, children);
+  }
+  function pack(items: FactoryNode[]): { width: number; height: number } {
+    if (!items.length) return { width: 0, height: 0 };
+    const blocks = items.map((node) => {
+      const children = childNodes.get(node.id) || [];
+      const bounds = pack(children);
+      const width = Math.max(176, bounds.width);
+      const height = 68 + (children.length ? 38 + bounds.height : 0);
+      return { node, children, width, height };
+    });
+    const columns = Math.min(3, Math.ceil(Math.sqrt(items.length)));
+    const columnWidths = Array(columns).fill(0);
+    for (let i = 0; i < blocks.length; i++)
+      columnWidths[i % columns] = Math.max(
+        columnWidths[i % columns],
+        blocks[i].width,
+      );
+    let y = 0;
+    for (let start = 0; start < blocks.length; start += columns) {
+      const row = blocks.slice(start, start + columns);
+      let x = 0;
+      for (let col = 0; col < row.length; col++) {
+        const block = row[col];
+        block.node.position = { x: x + (columnWidths[col] - 176) / 2, y };
+        const shift = (node: FactoryNode) => {
+          node.position.x += x + (columnWidths[col] - block.width) / 2;
+          node.position.y += y + 106;
+          for (const child of childNodes.get(node.id) || []) shift(child);
+        };
+        for (const child of block.children) shift(child);
+        x += columnWidths[col] + 28;
+      }
+      y += Math.max(...row.map((block) => block.height)) + 28;
+    }
+    return {
+      width:
+        columnWidths.reduce((sum, value) => sum + value, 0) +
+        (columns - 1) * 28,
+      height: y - 28,
+    };
+  }
+  let zoneX = 0;
+  for (let zone = 0; zone < 4; zone++) {
+    const members = nodes.filter(
+      (node) => node.data.zone === zone && node.data.kind !== "zone",
+    );
+    const roots = members.filter((node) => !parented.has(node.id));
+    const bounds = pack(roots);
+    const width = Math.max(360, bounds.width + 32);
+    const heading = nodes.find((node) => node.id === "zone:" + zone)!;
+    heading.position = { x: zoneX, y: 0 };
+    heading.style = { width };
+    heading.initialWidth = width;
+    for (const node of members) {
+      node.position.x += zoneX + 16;
+      node.position.y += 145;
+    }
+    zoneX += width + 70;
   }
   // Associations come only from accepted IR records, never label matching.
   for (const [rid, fields] of Object.entries(
@@ -304,5 +439,5 @@ export function buildGraph(
   ][]) {
     for (const id of ids) link("req:" + rid, "ui:" + id, "association");
   }
-  return { nodes, edges, selections };
+  return { nodes, edges, selections, catalog };
 }

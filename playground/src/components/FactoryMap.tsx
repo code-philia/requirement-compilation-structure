@@ -36,10 +36,7 @@ const FactoryNodeView = memo(function FactoryNodeView({
   data,
   selected,
 }: NodeProps<FactoryNode>) {
-  const expandable =
-    data.kind === "requirement" ||
-    data.kind === "page" ||
-    data.kind === "element";
+  const expandable = !!data.expandable;
   return (
     <motion.div
       initial={{ opacity: 0, y: 14, scale: 0.94 }}
@@ -51,12 +48,19 @@ const FactoryNodeView = memo(function FactoryNodeView({
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
       <div className="node-illustration">
-        <FactoryArt kind={data.kind} color={ZONES[data.zone].color} />
+        {data.kind === "group" ? (
+          <Layers3 size={27} />
+        ) : (
+          <FactoryArt kind={data.kind} color={ZONES[data.zone].color} />
+        )}
       </div>
       <div className="node-caption">
         <span className="node-eyebrow">{data.subtitle || data.kind}</span>
         <strong title={data.label}>{data.label}</strong>
       </div>
+      {expandable && (
+        <span className="node-child-count">{String(data.childCount)} 项</span>
+      )}
       {data.status === "GREEN" && (
         <span
           className="node-verified"
@@ -70,6 +74,7 @@ const FactoryNodeView = memo(function FactoryNodeView({
           className="node-expand nodrag"
           title="展开或折叠子节点与交互"
           aria-label="展开或折叠子节点"
+          aria-expanded={!!data.expanded}
           onClick={(event) => {
             event.stopPropagation();
             (data.onExpand as () => void)?.();
@@ -128,6 +133,7 @@ function MapContent({
   const [follow, setFollow] = useState(true);
   const [relatedOnly, setRelatedOnly] = useState(false);
   const [allLinks, setAllLinks] = useState(false);
+  const [pendingFocus, setPendingFocus] = useState("");
   const { fitView, setCenter } = useReactFlow();
   const reduce = useReducedMotion();
   const positions = useRef(new Map<string, { x: number; y: number }>());
@@ -140,6 +146,8 @@ function MapContent({
     fitted.current = "";
     setTab(-1);
     setRelatedOnly(false);
+    setQuery("");
+    setPendingFocus("");
   }, [detail?.run.id]);
   const graph = useMemo(
     () => buildGraph(detail, expanded),
@@ -186,18 +194,18 @@ function MapContent({
       className: `${selected && node.data.kind !== "zone" && !related.has(node.id) ? "node-muted" : ""} ${!isMatch && node.data.kind !== "zone" ? "search-muted" : ""}`,
       data: {
         ...node.data,
-        count: graph.nodes.filter(
-          (item) =>
-            item.data.zone === node.data.zone && item.data.kind !== "zone",
-        ).length,
         expanded: expanded.has(node.id),
-        onExpand: () =>
+        onExpand: () => {
+          positions.current.clear();
+          setFollow(false);
+          setPendingFocus(node.id);
           setExpanded((before) => {
             const next = new Set(before);
             if (next.has(node.id)) next.delete(node.id);
             else next.add(node.id);
             return next;
-          }),
+          });
+        },
       },
     };
   });
@@ -233,55 +241,95 @@ function MapContent({
     if (graph.nodes.length <= 4 || fitted.current === detail?.run.id) return;
     const timer = setTimeout(() => {
       fitView({
-        nodes: graph.nodes.filter((node) => node.position.y < 750),
+        nodes: graph.nodes,
         padding: 0.13,
         duration: reduce ? 0 : 650,
-        maxZoom: 0.7,
+        maxZoom: 0.9,
       });
       fitted.current = detail?.run.id || "";
     }, 250);
     return () => clearTimeout(timer);
   }, [graph.nodes.length, detail?.run.id, fitView, reduce]);
-  useEffect(() => {
-    if (follow && activeZone >= 0) {
-      setCenter(activeZone * 540 + 230, 300, {
-        zoom: 0.95,
-        duration: reduce ? 0 : 700,
-      });
-      setTab(activeZone);
-    }
-  }, [follow, activeZone, setCenter, reduce]);
   function focusZone(zone: number) {
     setTab(zone);
     setFollow(false);
-    if (zone < 0)
-      fitView({
-        nodes: graph.nodes.filter((node) => node.position.y < 750),
-        padding: 0.13,
-        duration: reduce ? 0 : 650,
-        maxZoom: 0.7,
-      });
-    else
-      setCenter(zone * 540 + 230, 340, {
-        zoom: 0.95,
-        duration: reduce ? 0 : 650,
-      });
+    fitView({
+      nodes: graph.nodes.filter((node) => zone < 0 || node.data.zone === zone),
+      padding: 0.18,
+      duration: reduce ? 0 : 550,
+      maxZoom: zone < 0 ? 0.9 : 1.15,
+    });
+  }
+  useEffect(() => {
+    if (!follow || activeZone < 0) return;
+    setTab(activeZone);
+    fitView({
+      nodes: graph.nodes.filter((node) => node.data.zone === activeZone),
+      padding: 0.2,
+      maxZoom: 1.05,
+      duration: reduce ? 0 : 650,
+    });
+  }, [follow, activeZone, fitView, reduce]);
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const timer = setTimeout(() => {
+      if (pendingFocus === "overview") {
+        focusZone(-1);
+      } else if (pendingFocus.startsWith("search:")) {
+        const node = graph.nodes.find(
+          (node) => node.id === pendingFocus.slice(7),
+        );
+        if (node)
+          setCenter(node.position.x + 88, node.position.y + 34, {
+            zoom: 1.2,
+            duration: reduce ? 0 : 550,
+          });
+      } else {
+        const children = new Set(
+          graph.edges
+            .filter(
+              (edge) =>
+                edge.source === pendingFocus &&
+                (edge.data?.kind === "contain" ||
+                  edge.data?.kind === "trigger"),
+            )
+            .map((edge) => edge.target),
+        );
+        children.add(pendingFocus);
+        fitView({
+          nodes: graph.nodes.filter((node) => children.has(node.id)),
+          padding: 0.3,
+          maxZoom: 1.1,
+          duration: reduce ? 0 : 500,
+        });
+      }
+      setPendingFocus("");
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [pendingFocus, graph, fitView, setCenter, reduce]);
+  const matches = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return [];
+    return graph.catalog
+      .filter(({ selection }) =>
+        `${selection.label} ${selection.id} ${selection.record.signature?.path || ""}`
+          .toLowerCase()
+          .includes(term),
+      )
+      .slice(0, 8);
+  }, [graph.catalog, query]);
+  function locate(match: (typeof graph.catalog)[number]) {
+    positions.current.clear();
+    setExpanded((before) => new Set([...before, ...match.ancestors]));
+    setFollow(false);
+    setRelatedOnly(false);
+    setTab(match.selection.zone);
+    setPendingFocus("search:" + match.selection.id);
+    setQuery("");
+    onSelect(match.selection);
   }
   function search() {
-    const match = filteredNodes.find(
-      (node) =>
-        node.data.kind !== "zone" &&
-        `${node.data.label} ${node.id}`
-          .toLowerCase()
-          .includes(query.toLowerCase()),
-    );
-    if (match) {
-      setCenter(match.position.x + 110, match.position.y + 45, {
-        zoom: 1.1,
-        duration: 500,
-      });
-      onSelect(match.data.selection);
-    }
+    if (matches[0]) locate(matches[0]);
   }
   return (
     <div className="factory-map">
@@ -317,13 +365,51 @@ function MapContent({
           }}
         />
         <kbd>↵</kbd>
+        {query.trim() && (
+          <div className="map-search-results">
+            {matches.map((match) => (
+              <button key={match.selection.id} onClick={() => locate(match)}>
+                <span>{match.selection.label}</span>
+                <small>
+                  {match.selection.id} · {ZONES[match.selection.zone].title}
+                </small>
+              </button>
+            ))}
+            {!matches.length && <p>没有匹配的节点</p>}
+          </div>
+        )}
       </div>
+      {detail && (
+        <div className="map-disclosure-toolbar">
+          <span>
+            {
+              graph.nodes.filter(
+                (node) =>
+                  node.data.kind !== "zone" && node.data.kind !== "group",
+              ).length
+            }{" "}
+            / {graph.catalog.length} 个节点可见
+          </span>
+          <button
+            onClick={() => {
+              positions.current.clear();
+              setExpanded(new Set());
+              setFollow(false);
+              onClear();
+              setPendingFocus("overview");
+            }}
+          >
+            收起全部
+          </button>
+          <small>点击数量按钮逐层展开 · 搜索可定位折叠节点</small>
+        </div>
+      )}
       <div className="map-canvas">
         <ReactFlow
           nodes={filteredNodes}
           edges={filteredEdges}
           nodeTypes={nodeTypes}
-          minZoom={0.2}
+          minZoom={0.04}
           maxZoom={1.8}
           defaultViewport={{ x: 55, y: 190, zoom: 0.53 }}
           nodesConnectable={false}
@@ -340,6 +426,8 @@ function MapContent({
           }}
           onNodeClick={(_, node) => {
             if (node.data.kind === "zone") focusZone(node.data.zone);
+            else if (node.data.kind === "group")
+              (node.data.onExpand as () => void)?.();
             else onSelect(node.data.selection);
           }}
           onNodeDragStop={(_, node) =>

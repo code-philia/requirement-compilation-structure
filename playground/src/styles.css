@@ -756,12 +756,12 @@ select {
   outline: 0 !important;
 }
 .react-flow__node-zone {
-  width: 460px;
+  width: 360px;
 }
 .zone-heading {
   color: var(--zone-color);
   padding: 0 15px 12px;
-  width: 460px;
+  width: 100%;
 }
 .zone-title-row {
   display: flex;
@@ -819,8 +819,9 @@ select {
 .factory-node {
   display: flex;
   align-items: center;
-  width: 212px;
-  min-height: 90px;
+  width: 176px;
+  height: 68px;
+  min-height: 68px;
   border: 1px solid #d0d9e5;
   background: linear-gradient(145deg, #fff, #fafcff);
   border-radius: 19px 19px 19px 8px;
@@ -853,8 +854,8 @@ select {
   background: #f6f8ff;
 }
 .node-illustration {
-  width: 80px;
-  padding: 4px 0 4px 6px;
+  width: 49px;
+  padding: 4px 0 4px 5px;
   flex-shrink: 0;
 }
 .factory-art {
@@ -863,7 +864,7 @@ select {
   display: block;
 }
 .node-caption {
-  padding: 12px 13px 12px 2px;
+  padding: 9px 12px 9px 3px;
   min-width: 0;
   flex: 1;
 }
@@ -871,7 +872,7 @@ select {
   font-family: "IBM Plex Mono", monospace;
   display: block;
   font-size: 7px;
-  color: #9ca8bb;
+  color: #74849c;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -880,7 +881,7 @@ select {
 .node-caption strong {
   display: block;
   margin-top: 7px;
-  color: #61738c;
+  color: #425b7d;
   font-size: 11px;
   font-weight: 500;
   max-width: 119px;
@@ -908,60 +909,95 @@ select {
   border-color: #829bcd;
 }
 .kind-entity {
-  width: 208px;
-  height: 129px;
-  flex-direction: column;
-  justify-content: flex-start;
-  border-radius: 29px 29px 23px 23px;
-}
-.kind-entity .node-illustration {
-  width: 108px;
-  height: 85px;
-  padding: 0;
-  margin-top: -10px;
-}
-.kind-entity .node-caption {
-  text-align: center;
-  padding: 0 10px 13px;
-}
-.kind-entity .node-caption strong {
-  max-width: 170px;
-  font-size: 12px;
-  margin-top: 4px;
-}
-.kind-entity .node-eyebrow {
-  max-width: 170px;
-  letter-spacing: 1.2px;
-}
-.kind-api {
-  width: 290px;
-  min-height: 100px;
-}
-.kind-api .node-illustration {
-  width: 104px;
-}
-.kind-api .node-eyebrow {
-  max-width: 163px;
-  font-size: 8px;
-}
-.kind-api .node-caption strong {
-  max-width: 165px;
-  font-size: 12px;
+  background: #f7fcf9;
 }
 .kind-page {
-  width: 231px;
   background: #fcfaff;
 }
 .kind-trigger {
-  width: 167px;
-  min-height: 66px;
   background: #faf6ff;
 }
-.kind-trigger .node-illustration {
-  width: 54px;
+.kind-group {
+  background: #f3f7fe;
+  border-color: #acbfde;
+  border-style: dashed;
+  cursor: pointer;
 }
-.kind-trigger .node-eyebrow {
-  max-width: 90px;
+.kind-group .node-illustration {
+  display: grid;
+  place-items: center;
+  color: var(--zone-color);
+}
+.node-child-count {
+  position: absolute;
+  right: 12px;
+  bottom: -9px;
+  z-index: 1;
+  font-size: 9px;
+  padding: 2px 6px;
+  border: 1px solid #ccd9ec;
+  border-radius: 8px;
+  color: #536e96;
+  background: #fff;
+}
+.map-disclosure-toolbar {
+  position: absolute;
+  z-index: 5;
+  top: 116px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  pointer-events: none;
+  font-size: 10px;
+  color: #627591;
+}
+.map-disclosure-toolbar button {
+  pointer-events: auto;
+  padding: 5px 9px;
+  border: 1px solid #c7d6ed;
+  background: #f9fbff;
+  border-radius: 6px;
+  color: #4568a5;
+}
+.map-disclosure-toolbar small {
+  font-size: 9px;
+}
+.map-search-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  background: #fff;
+  border: 1px solid #cbd8ec;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #365b9520;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.map-search-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  color: #425b7d;
+  font-size: 11px;
+}
+.map-search-results button:hover {
+  background: #edf3ff;
+}
+.map-search-results small {
+  display: block;
+  color: #6c7f9a;
+  font-size: 9px;
+  margin-top: 4px;
+}
+.map-search-results p {
+  padding: 12px;
+  font-size: 11px;
+  color: #6c7f9a;
 }
 .trigger-badge {
   position: absolute;
@@ -2599,10 +2635,10 @@ select {
   padding: 0;
 }
 .map-canvas:not(:has(.detail-zoom)) .node-caption strong {
-  font-size: 22px;
+  font-size: 15px;
 }
 .map-canvas:not(:has(.detail-zoom)) .node-eyebrow {
-  font-size: 13px;
+  font-size: 9px;
 }
 .map-canvas:not(:has(.detail-zoom)) .node-caption {
   padding-left: 0;
