@@ -361,7 +361,7 @@ export function RunControls({
                 }
               />
               <label className="field-label">
-                高峰期价格 · 人民币 / 百万 tokens
+                闲时价格 · 人民币 / 百万 tokens
               </label>
               <div className="price-fields">
                 {(["input", "cached", "output"] as const).map((key, index) => (
@@ -376,7 +376,7 @@ export function RunControls({
                 ))}
               </div>
               <p className="field-hint">
-                费率统一维护在模型价格表中，使用高峰期单价；缓存命中是输入 token
+                费率统一维护在模型价格表中，使用闲时单价；缓存命中是输入 token
                 的一部分，不重复收费。
               </p>
               <label className="field-label">生成应用端口</label>

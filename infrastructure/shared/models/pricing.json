@@ -1,9 +1,17 @@
 {
   "currency": "CNY",
-  "period": "peak",
+  "period": "off_peak",
   "unit_tokens": 1000000,
   "models": {
-    "deepseek-flash": {"input": 2.0, "cached": 0.04, "output": 8.0},
-    "deepseek-v4-pro": {"input": 9.0, "cached": 0.30, "output": 27.0}
+    "deepseek-flash": {
+      "input": 1.0,
+      "cached": 0.02,
+      "output": 4.0
+    },
+    "deepseek-v4-pro": {
+      "input": 4.5,
+      "cached": 0.15,
+      "output": 13.5
+    }
   }
 }

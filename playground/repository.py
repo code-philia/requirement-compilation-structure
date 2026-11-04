@@ -16,8 +16,8 @@ from metrics import (
     recorded_stages,
     calls_from_terminal,
     telemetry_summary,
-    metrics_from_totals,
     MODEL_PRICES,
+    PRICE_TABLE,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -167,7 +167,9 @@ class Repository:
         artifacts = {name: read_json(base / (name + ".json")) for name in ARTIFACTS}
         metrics = aggregate(calls, self.prices)
         settings = dict(run.get("settings", {}))
-        settings.update(prices=self.prices, currency="CNY", pricing_period="peak")
+        settings.update(
+            prices=self.prices, currency="CNY", pricing_period=PRICE_TABLE["period"]
+        )
         if not settings.get("model"):
             settings["model"] = next(
                 (call["model"] for call in calls if call.get("model")), None
@@ -189,9 +191,6 @@ class Repository:
             actions = [dict(action) for action in telemetry["actions"]]
             parents = {task["id"]: task.get("parent_id") for task in tasks}
             for task in tasks:
-                if "usage" in task:
-                    task["metrics"] = metrics_from_totals(task["usage"])
-                    continue
                 task_calls = []
                 for call in calls:
                     ancestor = call.get("task_span_id")
@@ -202,10 +201,13 @@ class Repository:
                         ancestor = parents.get(ancestor)
                 task["metrics"] = aggregate(task_calls, self.prices)
             for action in actions:
-                action["metrics"] = metrics_from_totals(action.get("usage", {}))
+                action_calls = [
+                    call for call in calls if call.get("action_id") == action["id"]
+                ]
+                action["metrics"] = aggregate(action_calls, self.prices)
         elif run.get("legacy"):
             run["data_note"] = (
-                "按历史日志中已报告的数据统计；未保存的模型输入输出和时间戳无法恢复。费用按高峰期人民币单价估算。"
+                "按历史日志中已报告的数据统计；未保存的模型输入输出和时间戳无法恢复。费用按当前闲时人民币单价估算。"
             )
             if recorded:
                 known = {stage[:2]: stage for stage in stage_records}

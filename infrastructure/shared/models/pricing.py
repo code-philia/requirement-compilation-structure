@@ -1,4 +1,4 @@
-"""Shared peak-period model prices and provider usage normalization, in CNY."""
+"""Shared model prices and provider usage normalization, in CNY."""
 
 import json
 from pathlib import Path

@@ -6,7 +6,11 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from infrastructure.shared.models.pricing import MODEL_PRICES, estimate_cost
+from infrastructure.shared.models.pricing import (
+    MODEL_PRICES,
+    PRICE_TABLE,
+    estimate_cost,
+)
 
 
 def read_json(path, default=None):
@@ -139,17 +143,14 @@ def aggregate(calls, prices=None):
             result["usage_calls"] += 1
         for field in ("input", "output", "cached"):
             result[field] += call.get(field) or 0
-        if call.get("source") == "structured":
-            cost = call.get("cost")
-        else:
-            usage = {
-                "input_tokens": call.get("input"),
-                "cached_input_tokens": call.get("cached"),
-                "output_tokens": call.get("output"),
-            }
-            cost = estimate_cost(
-                call.get("model"), usage, MODEL_PRICES if prices is None else prices
-            )
+        usage = {
+            "input_tokens": call.get("input"),
+            "cached_input_tokens": call.get("cached"),
+            "output_tokens": call.get("output"),
+        }
+        cost = estimate_cost(
+            call.get("model"), usage, MODEL_PRICES if prices is None else prices
+        )
         call["cost"] = cost
         call["currency"] = "CNY"
         if cost is not None:
@@ -352,6 +353,7 @@ def telemetry_summary(records):
                     or "模型调用",
                     "task_id": record.get("task_id"),
                     "task_span_id": record.get("task_span_id"),
+                    "action_id": record.get("action_id"),
                     "requirement_ids": record.get("requirement_ids", []),
                     "source": "structured",
                     "status": "RUNNING",

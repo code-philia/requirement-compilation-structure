@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
-from metrics import read_json, write_json, MODEL_PRICES
+from metrics import read_json, write_json, MODEL_PRICES, PRICE_TABLE
 from repository import ROOT, Repository, STAGES
 
 HERE = Path(__file__).resolve().parent
@@ -445,7 +445,7 @@ def start(body: StartRun):
                 "port": body.port,
                 "prices": repository.prices,
                 "currency": "CNY",
-                "pricing_period": "peak",
+                "pricing_period": PRICE_TABLE["period"],
             },
         }
         write_json(archive / "run.json", manifest)
