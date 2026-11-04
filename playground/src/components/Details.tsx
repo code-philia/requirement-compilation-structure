@@ -11,7 +11,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   duration,
   compact,
@@ -24,8 +24,38 @@ import { ZONES } from "../graph";
 
 export function JsonView({ value }: { value: unknown }) {
   const [copied, setCopied] = useState(false);
-  const text =
-    typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const { text, isJson } = useMemo(() => {
+    let parsed = value;
+    if (typeof value === "string") {
+      const fenced = value.trim().match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i);
+      try {
+        parsed = JSON.parse(fenced ? fenced[1] : value);
+      } catch {
+        return { text: value, isJson: false };
+      }
+    }
+    return { text: JSON.stringify(parsed, null, 2) || "", isJson: true };
+  }, [value]);
+  const rendered = useMemo(() => {
+    if (!isJson) return text;
+    return text
+      .split(
+        /("(?:\\.|[^"\\])*"\s*:|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b)/g,
+      )
+      .map((token, index) => {
+        if (index % 2 === 0) return token;
+        let kind = "number";
+        if (token.startsWith('"'))
+          kind = token.endsWith(":") ? "key" : "string";
+        else if (token === "null") kind = "null";
+        else if (token === "true" || token === "false") kind = "boolean";
+        return (
+          <span className={`json-${kind}`} key={index}>
+            {token}
+          </span>
+        );
+      });
+  }, [text, isJson]);
   return (
     <div className="json-view">
       <button
@@ -40,7 +70,7 @@ export function JsonView({ value }: { value: unknown }) {
       >
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </button>
-      <pre>{text}</pre>
+      <pre>{rendered}</pre>
     </div>
   );
 }
