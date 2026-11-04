@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from infrastructure.shared.models.pricing import (
     MODEL_PRICES,
+    PRICE_TABLE,
     estimate_cost,
     normalize_usage,
 )
@@ -133,12 +134,7 @@ def begin_run(output, input_dir, stage):
             "stage": stage,
             "currency": "CNY",
         },
-        pricing={
-            "currency": "CNY",
-            "period": "peak",
-            "unit_tokens": 1000000,
-            "models": MODEL_PRICES,
-        },
+        pricing=PRICE_TABLE,
     )
     return token, state["id"]
 
