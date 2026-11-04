@@ -1,7 +1,6 @@
 """Discover local output workspaces and read immutable playground run archives."""
 
 import hashlib
-import os
 from pathlib import Path
 import re
 import time
@@ -61,23 +60,13 @@ class Repository:
         if not force and time.monotonic() - self.last_scan < 10:
             return list(self.entries.values())
         outputs = set(self.extra_outputs)
-        for directory, subdirs, _ in os.walk(ROOT / "outputs"):
-            subdirs[:] = [
-                name
-                for name in subdirs
-                if name
-                not in {
-                    "node_modules",
-                    ".git",
-                    "dist",
-                    "build",
-                    "test-results",
-                    "playwright-report",
-                }
-            ]
-            if ".arc" in subdirs:
-                outputs.add(Path(directory))
-                subdirs[:] = []
+        output_root = ROOT / "outputs"
+        if output_root.is_dir():
+            for output in output_root.iterdir():
+                if output.is_symlink() or not output.is_dir():
+                    continue
+                if (output / ".arc").is_dir():
+                    outputs.add(output)
         entries = {}
         for output in outputs:
             if not (output / ".arc").is_dir():
