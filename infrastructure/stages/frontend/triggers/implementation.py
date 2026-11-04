@@ -1,4 +1,4 @@
-"""Step 12 orchestration: scenario test generation -> trigger repair -> regression.
+"""Step 10 orchestration: scenario test generation -> trigger repair -> regression.
 
 For each leaf requirement, one agent generates key E2E cases and another repairs
 the trigger implementation. Complete that requirement before advancing; include
@@ -63,8 +63,8 @@ def test_run_status(result):
 
 TEST_INSTRUCTIONS = """Write a small Playwright functional smoke suite for the CURRENT requirement.
 The goal is to verify that real UI input reaches the backend API and its result is
-reflected in the application. Backend contract details were already tested in step 08;
-UI presentation was already tested in step 10.
+reflected in the application. Backend contract details were already tested in step 06;
+UI presentation was already tested in step 08.
 
 Normally write one primary successful workflow. Add a second case only for a critical
 business rejection or anonymous state required by this requirement. Stay within max_tests;
@@ -115,7 +115,7 @@ business result. Compilation and a real browser run check the suite before code 
 """
 
 IMPLEMENT_INSTRUCTIONS = """Implement the current requirement's interactions in the actual application.
-Step 11's triggers are a reference prototype: preserve their requirement-defined behavior,
+Step 09's triggers are a reference prototype: preserve their requirement-defined behavior,
 not a fixed handler/context ABI, event dispatcher, store or routing implementation.
 Read the actual entrypoints, relevant components and supplied package/configuration first.
 Use the project's framework and installed dependencies. You own component events, lifecycle
@@ -173,7 +173,7 @@ errors visibly and prevent stale requests from overwriting a later selection/res
 
 Only task.target_trigger_ids belong to this implementation task. Other controls on supplied
 pages are context, not a demand to build future workflows. Required entry/loading behavior
-should be explicitly associated by step 11. Read missing designs/sources on demand; do not
+should be explicitly associated by step 09. Read missing designs/sources on demand; do not
 recursively implement all mount/navigation behavior of every reachable page. Preserve any
 previously working supporting behavior. If a necessary dependency is missing, implement
 only the minimal behavior needed for this requirement and explain it in diagnosis.
@@ -218,7 +218,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     install_dependencies(output)
     checks = E2EChecks(output, max_tests)
     checks.install_browser()
-    checkpoint(output, stage="12", task="runtime", action="Prepare real-app browser tests and isolated database fixtures",
+    checkpoint(output, stage="10", task="runtime", action="Prepare real-app browser tests and isolated database fixtures",
         details={"pages": list(ui["pages"]), "trigger_ids": list(design["triggers"])})
     accepted, implemented = [], set()
     ui_checks = FrontendChecks(output)
@@ -384,7 +384,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             current = {"typecheck": generated["typecheck"], "e2e": generated["behavior"]}
             report["requirements"][rid]["status"] = generated["status"]
             save_json(arc_dir / "frontend_e2e.json", report)
-            checkpoint(output, stage="12", task=rid, action="Publish functional smoke tests before implementation",
+            checkpoint(output, stage="10", task=rid, action="Publish functional smoke tests before implementation",
                 status=generated["status"], details={"test_path": relative, "checks": generated})
             report["requirements"][rid]["status"] = "IMPLEMENTING"
             task = {**model_context(context),

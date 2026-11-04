@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 from infrastructure.utils.presentation.model_io import http_client, invoke
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.shared.agent.proposals import propose_json
-from infrastructure.shared.models.text import JSON_OUTPUT_RULE, reasoning_arguments, reasoning_rejected
+from infrastructure.shared.models.text import DEFAULT_MODEL, JSON_OUTPUT_RULE, reasoning_arguments, reasoning_rejected
 
 
 VISION_INSTRUCTIONS = """Describe the supplied UI reference using visible evidence only.
@@ -52,11 +52,11 @@ class VisualModel:
     def __init__(self) -> None:
         """Read compiler/.env and configure the image-capable model, falling back to text-model settings."""
         load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
-        self.name = os.getenv("VISUAL_MODEL") or os.getenv("MODEL")
+        self.name = os.getenv("VISUAL_MODEL") or os.getenv("MODEL") or DEFAULT_MODEL
         api_key = os.getenv("VISUAL_API_KEY") or os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("VISUAL_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-        if not self.name or not api_key:
-            raise ValueError("Set MODEL and OPENAI_API_KEY in compiler/.env; the model must accept images")
+        if not api_key:
+            raise ValueError("Set VISUAL_API_KEY or OPENAI_API_KEY in compiler/.env; the model must accept images")
         self.reasoning = os.getenv("VISUAL_REASONING", os.getenv("MODEL_REASONING", "low")).lower()
         if self.reasoning not in {"auto", "provider", "none", "low", "high", "max"}:
             raise ValueError("VISUAL_REASONING must be auto, provider, none, low, high or max")

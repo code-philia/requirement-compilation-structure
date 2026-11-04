@@ -1,11 +1,11 @@
-"""Zip the current Git working directory, respecting Git ignore rules.
+"""Zip the current Git working directory, respecting Git ignore rules except for .env.
 
 Windows:       python scripts/package.py
 Linux / macOS: python3 scripts/package.py
 Custom name:   python scripts/package.py --output release.zip
 
 Requires Git on PATH and a working tree containing the current directory.
-Include .gitignore files, modified files, and non-ignored untracked files.
+Include .env files, .gitignore files, modified files, and non-ignored untracked files.
 Exclude .git metadata and this invocation's output and temporary archive.
 Nested repositories such as arc-bench use their own Git ignore rules.
 Symbolic links are stored as links without traversing their targets.
@@ -31,7 +31,7 @@ def ignored_names(directory: Path, paths: list[Path]) -> set[str]:
 
 
 def package_directory(root: Path, output: Path) -> int:
-    """Archive non-ignored entries, replacing the output only on success."""
+    """Archive non-ignored entries and .env, replacing the output only on success."""
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(prefix=f".{output.name}.", suffix=".tmp",
             dir=output.parent, delete=False) as temporary:
@@ -51,7 +51,7 @@ def package_directory(root: Path, output: Path) -> int:
                     continue
                 ignored = ignored_names(directory, paths)
                 for path in paths:
-                    if path.name in ignored:
+                    if path.name in ignored and path.name != ".env":
                         continue
                     relative = path.relative_to(root).as_posix()
                     if path.is_symlink():

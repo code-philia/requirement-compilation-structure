@@ -1,16 +1,13 @@
-"""Step 05: implement tables, per-table prerequisite inserts and real initialization."""
+"""Step 04: implement tables, per-table prerequisite inserts and real initialization."""
 
 import json
-from contextlib import ExitStack
 from pathlib import Path
 
-from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.stages.database.order import implementation_groups, table_dependencies
 from infrastructure.stages.database.runtime import initializer_source
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
-from infrastructure.utils.presentation.logging import console_log
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.tasks import TaskFailures
@@ -20,7 +17,7 @@ from infrastructure.stages.database.implementation import implement_startup_data
 from infrastructure.utils.files import read_source
 
 
-# --- Extension point 05A: SQL lowering policy ---------------------------------
+# --- Extension point 04A: SQL lowering policy ---------------------------------
 # The model writes DDL through the shared edit_file tool at the supplied table path.
 # The real initializer and compiled startup are checked and repaired in this pass.
 INSTRUCTIONS = """Implement entity as SQLite DDL for the compiler-selected output_path.
@@ -57,14 +54,14 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
         raise ValueError("--max-turns must be positive")
     source = arc_dir / "db_schema.json"
     if not source.is_file():
-        raise ValueError("Run 02_build_db_schema.py first to create .arc/db_schema.json")
+        raise ValueError("Run main.py --stage 02 first to create .arc/db_schema.json")
     output_dir = arc_dir.parent.resolve()
     for required in ("backend/package.json", "backend/src/db/client.ts", "backend/src/db/initialize.ts"):
         if not (output_dir / required).is_file():
-            raise ValueError("Run 00_project_initialization.py first to initialize the project structure")
+            raise ValueError("Run main.py --stage 00 first to initialize the project structure")
     schema = json.loads(source.read_text(encoding="utf-8-sig"))
     console = DemoConsole(pause)
-    # --- Extension point 05B: dependency-aware table implementation -----------
+    # --- Extension point 04B: dependency-aware table implementation -----------
     # Referenced tables precede dependents. Cyclic groups use forward references;
     # available implementations and unresolved target definitions remain explicit.
     groups = implementation_groups(schema)
@@ -73,7 +70,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
     print("Table implementation order: " + (" -> ".join(order) or "(No tables.)"), flush=True)
     model = TextModel() if order else None
     implementations = {}
-    failures = TaskFailures(arc_dir, "05_implement_db", console)
+    failures = TaskFailures(arc_dir, "04_implement_db", console)
     for group in groups:
         for name in group:
             with failures.task(name):
@@ -97,7 +94,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                         for target, item in referenced.items()
                     ) or "(No referenced tables.)"
                 ))
-                # --- Extension point 05C: generation context and correction -------
+                # --- Extension point 04C: generation context and correction -------
                 expected_path = f"backend/src/db/tables/{name}.sql"
                 request = {
                     "entity_name": name, "entity": entity, "output_path": expected_path,
@@ -132,7 +129,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
     if not initializer.resolve().is_relative_to(output_dir):
         raise ValueError("DB initializer path escapes the output directory")
     save_text(initializer, initializer_source(implementations))
-    checkpoint(output_dir, stage="05", task="database initializer", action="Publish ordered SQL initialization",
+    checkpoint(output_dir, stage="04", task="database initializer", action="Publish ordered SQL initialization",
         details={"table_order": order, "published_tables": list(implementations)})
     print(f"Database initialization wired: {initializer}", flush=True)
     if order:
@@ -151,21 +148,3 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
         console.show("Database runtime | GREEN", json.dumps(verified, ensure_ascii=False, indent=2))
     failures.finish()
     return implementations
-
-
-def main() -> None:
-    parser = create_parser("Step 05: Implement DB Tables and Required Startup Data")
-    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per table or startup-data requirement (default: 10)")
-    parser.add_argument("--max-turns", type=int, default=10, help="Maximum real database/startup repair rounds")
-    args = parser.parse_args()
-    with ExitStack() as stack:
-        try:
-            _, output_dir = resolve_directories(args)
-            stack.enter_context(console_log(output_dir, debug_model_io=args.debug_model_io))
-            implement_db(output_dir / ".arc", args.pause, args.max_attempts, args.max_turns)
-        except (OSError, ValueError, RuntimeError) as error:
-            parser.exit(1, f"Execution failed: {error}\n")
-
-
-if __name__ == "__main__":
-    main()

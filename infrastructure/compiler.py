@@ -1,19 +1,44 @@
-"""Run the complete requirement compiler in one process using the existing passes."""
+"""Run all compilation passes or one selected pass in the same pipeline."""
 
-from importlib import import_module
 from pathlib import Path
 import traceback
 
+from infrastructure.pipeline.project_initialization import project_initialization
+from infrastructure.pipeline.requirements import explore_requirement
+from infrastructure.pipeline.db_schema import build_db_schema
+from infrastructure.pipeline.db_obligations import infer_db_obligations
+from infrastructure.pipeline.database import implement_db
+from infrastructure.pipeline.backend_apis import design_backend_apis
+from infrastructure.pipeline.backend_implementation import implement_backend_tdd
+from infrastructure.pipeline.ui_design import design_frontend_ui
+from infrastructure.pipeline.ui_implementation import implement_frontend_ui
+from infrastructure.pipeline.frontend_triggers import design_frontend_triggers
+from infrastructure.pipeline.frontend_implementation import implement_frontend_triggers
 from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
 from infrastructure.shared.project.git import checkpoint
 
 
+PIPELINE = (
+    ("00_project_initialization", project_initialization, "project_files"),
+    ("01_explore_requirement", explore_requirement, "requirements"),
+    ("02_build_db_schema", build_db_schema, "db_schema"),
+    ("03_infer_db_obligations", infer_db_obligations, "db_obligations"),
+    ("04_implement_db", implement_db, "db_implementations"),
+    ("05_design_backend_apis", design_backend_apis, "backend_apis"),
+    ("06_implement_backend_tdd", implement_backend_tdd, "backend_checks"),
+    ("07_design_ui", design_frontend_ui, "ui_design"),
+    ("08_implement_ui", implement_frontend_ui, "ui_checks"),
+    ("09_design_frontend_triggers", design_frontend_triggers, "frontend_triggers"),
+    ("10_implement_frontend_tdd", implement_frontend_triggers, "frontend_e2e"),
+)
+
 class Compiler:
     """Own shared paths, configuration, and results for one compilation."""
 
-    def __init__(self, input_dir: Path, output_dir: Path, model_log: bool = False, port: int = 3000) -> None:
+    def __init__(self, input_dir: Path, output_dir: Path, model_log: bool = False,
+            port: int = 3000, pause: bool = False) -> None:
         if not 1 <= port <= 65535:
             raise ValueError("Backend port must be between 1 and 65535")
         self.input_dir = Path(input_dir).expanduser().resolve()
@@ -21,76 +46,69 @@ class Compiler:
         self.arc_dir = self.output_dir / ".arc"
         self.model_log = model_log
         self.port = port
+        self.pause = pause
         self.artifacts: dict[str, object] = {}
         self.current_stage: str | None = None
         self.report = {"status": "NOT_STARTED", "stages": {}}
 
-    def _run(self, module: str, function: str, *arguments, **options):
+    def _run(self, stage: str, function, *arguments, **options):
         """Attempt every pass; keep failures explicit without aborting later passes."""
-        self.current_stage = module + ".py"
+        self.current_stage = stage
         try:
-            with console_log(self.output_dir, stage=self.current_stage,
+            with console_log(self.output_dir, stage=stage,
                     model_log=self.model_log, debug_model_io=self.model_log):
-                result = getattr(import_module(module), function)(*arguments, **options)
+                result = function(*arguments, **options)
         except KeyboardInterrupt as error:
             self.report["status"] = "INTERRUPTED"
-            self.report["stages"][module] = {"status": "INTERRUPTED", "error": str(error)}
+            self.report["stages"][stage] = {"status": "INTERRUPTED", "error": str(error)}
             save_json(self.arc_dir / "compilation.json", self.report)
-            checkpoint(self.output_dir, stage=module, task="stage report", action="Record interrupted pass",
-                status="INTERRUPTED", details=self.report["stages"][module])
+            checkpoint(self.output_dir, stage=stage, task="stage report", action="Record interrupted pass",
+                status="INTERRUPTED", details=self.report["stages"][stage])
             raise
         except Exception as error:
             result = {"status": "FAILED", "error": str(error),
                 "error_type": type(error).__name__, "traceback": traceback.format_exc()}
             if getattr(error, "failures", None):
                 result.update(status="COMPLETED_WITH_FAILURES", failures=error.failures)
-            show_panel("[FAILED; continuing] " + module,
+            show_panel("[FAILED; continuing] " + stage,
                 result["error"] + "\nAccepted artifacts remain available. Attempt the next pass.", tone="error")
         status = result.get("status", "GREEN") if isinstance(result, dict) else "GREEN"
-        self.report["stages"][module] = {"status": status}
+        self.report["stages"][stage] = {"status": status}
         if isinstance(result, dict):
             for key in ("failures", "verification", "error", "error_type", "traceback"):
                 if key in result:
-                    self.report["stages"][module][key] = result[key]
+                    self.report["stages"][stage][key] = result[key]
         save_json(self.arc_dir / "compilation.json", self.report)
-        checkpoint(self.output_dir, stage=module, task="stage report", action="Publish pass result",
-            status=status, details=self.report["stages"][module])
+        checkpoint(self.output_dir, stage=stage, task="stage report", action="Publish pass result",
+            status=status, details=self.report["stages"][stage])
         return result
 
-    def compile(self) -> Path:
-        """Execute the 13 compilation passes in order and return the generated application directory."""
+    def compile(self, stage: str | None = None) -> Path:
+        """Execute every pass, or only the selected pass using existing artifacts."""
+        passes = PIPELINE
+        if stage is not None:
+            passes = ()
+            for entry in PIPELINE:
+                if entry[0] == stage:
+                    passes = (entry,)
+                    break
+            if not passes:
+                raise ValueError(f"Unknown stage: {stage}. Use a full stage name such as 06_implement_backend_tdd.")
         self.artifacts.clear()
         self.report = {"status": "RUNNING", "stages": {}}
         show_panel("Requirement compiler | Pipeline",
-            f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: 13\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
-        self.artifacts["project_files"] = self._run(
-            "00_project_initialization", "project_initialization", self.output_dir, port=self.port)
-        self.artifacts["requirements"] = self._run(
-            "01_explore_requirement", "explore_requirement", self.input_dir, self.arc_dir)
-        self.artifacts["db_schema"] = self._run(
-            "02_build_db_schema", "build_db_schema", self.arc_dir)
-        self.artifacts["db_obligations"] = self._run(
-            "03_infer_db_obligations", "infer_db_obligations", self.arc_dir)
-        self.artifacts["db_obligations"] = self._run(
-            "04_check_db_obligations", "check_db_obligations", self.arc_dir)
-        self.artifacts["db_implementations"] = self._run(
-            "05_implement_db", "implement_db", self.arc_dir)
-        self.artifacts["backend_apis"] = self._run(
-            "06_design_backend_apis", "design_backend_apis", self.arc_dir)
-        self.artifacts["backend_apis"] = self._run(
-            "07_check_backend_apis", "check_backend_apis", self.arc_dir)
-        self.artifacts["backend_checks"] = self._run(
-            "08_implement_backend_tdd", "implement_backend_tdd", self.arc_dir)
-        self.artifacts["ui_design"] = self._run(
-            "09_design_ui", "design_frontend_ui", self.input_dir, self.arc_dir)
-        self.artifacts["ui_checks"] = self._run(
-            "10_implement_ui", "implement_frontend_ui", self.input_dir, self.arc_dir)
-        self.artifacts["frontend_triggers"] = self._run(
-            "11_design_frontend_triggers", "design_frontend_triggers", self.input_dir, self.arc_dir)
-        self.artifacts["frontend_e2e"] = self._run(
-            "12_implement_frontend_tdd", "implement_frontend_triggers", self.input_dir, self.arc_dir)
+            f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: {len(passes)}\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
+        for name, function, artifact in passes:
+            if function is project_initialization:
+                result = self._run(name, function, self.output_dir, port=self.port, pause=self.pause)
+            elif function in (explore_requirement, design_frontend_ui, implement_frontend_ui,
+                    design_frontend_triggers, implement_frontend_triggers):
+                result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
+            else:
+                result = self._run(name, function, self.arc_dir, pause=self.pause)
+            self.artifacts[artifact] = result
         self.current_stage = None
-        incomplete = [stage for stage, result in self.report["stages"].items()
+        incomplete = [name for name, result in self.report["stages"].items()
             if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
         self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
         save_json(self.arc_dir / "compilation.json", self.report)

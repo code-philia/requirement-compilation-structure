@@ -25,10 +25,11 @@ from infrastructure.shared.project.git import checkpoint
 
 INSTRUCTIONS = '''Write independent final acceptance tests for ONE original requirement.
 Derive expected results from original_requirement and its Given/When/Then scenarios.
-Interface details are supplied only to locate UI elements/routes and prepare valid Given
-fixtures; they are not authority to weaken an original business requirement. Neither
-application source nor implementation-owned tests are supplied. Do not infer expected
-behavior from an observed implementation result or duplicate process smoke tests.
+Read project files as needed to understand test configuration, database initialization,
+fixtures, UI locators and API wiring. Source code and existing tests describe how to run
+the application; they are not authority for expected business behavior. Derive assertions
+from the original requirement, not the current implementation or process smoke tests.
+Only test_path is writable. Reading a file does not grant permission to modify it.
 
 Write a small Playwright suite at test_path using the supplied test/expect/database
 fixture. Drive When actions through the real browser without mocks or injected state.
@@ -63,7 +64,9 @@ shows the test is wrong. Preserve every required business outcome. If the implem
 or environment is wrong, return tool_calls=[] and explain it; the failed acceptance remains
 failed. Compilation passing is enough to finish this review; you are NOT asked to turn a
 business failure GREEN. Never adjust expected values just to match observed wrong behavior.
-Use original requirements as authority; no application source or process tests are available.'''
+Read project files as needed to understand wiring, fixtures and failure evidence. Use
+original requirements as authority for expected business behavior; source code and existing
+tests do not override them. Only test_path is writable; all other files remain read-only.'''
 
 
 def require_acceptance(result):
@@ -125,8 +128,7 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                 continue
             task['shared_conventions'] = task_conventions(output, {'requirement': task['original_requirement']})
             workspace = FileTools.for_target(output, 'acceptance_test', rid, fixed_path=path,
-                references=[FIXTURE, 'backend/tests/support/context.ts'],
-                readable=[path, FIXTURE, 'backend/tests/support/context.ts'])
+                references=[FIXTURE, 'backend/tests/support/context.ts'])
 
             def compile_suite():
                 if not (output / path).is_file():
@@ -149,7 +151,7 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
                 # gate intentionally does not demand behavioral GREEN.
                 entry['initial_failure'] = result
                 save_json(arc_dir / 'independent_acceptance.json', report)
-                checkpoint(output, stage="12", task=rid, action="Record independent acceptance before test review",
+                checkpoint(output, stage="10", task=rid, action="Record independent acceptance before test review",
                     status="FAILED", details={"test_path": path, "checks": result})
                 review = run_file_agent(model, REVIEW_INSTRUCTIONS, task, workspace, compile_suite,
                     max_turns, console, label + ' / Test review', feedback=result)
@@ -243,12 +245,12 @@ def run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, design, 
             entry.update(status='FAILED', error=str(error))
         finally:
             save_json(arc_dir / 'independent_acceptance.json', report)
-            checkpoint(output, stage="12", task=rid, action="Publish independent requirement acceptance",
+            checkpoint(output, stage="10", task=rid, action="Publish independent requirement acceptance",
                 status=entry['status'], details=entry)
             console.show(label + ' | ' + entry['status'], entry.get('error', 'Real acceptance checks completed'))
     report['status'] = 'GREEN' if report['requirements'] and all(
         entry['status'] == 'GREEN' for entry in report['requirements'].values()) else 'COMPLETED_WITH_FAILURES'
     save_json(arc_dir / 'independent_acceptance.json', report)
-    checkpoint(output, stage="12", task="independent acceptance", action="Publish final independent acceptance report",
+    checkpoint(output, stage="10", task="independent acceptance", action="Publish final independent acceptance report",
         status=report['status'], details=report)
     return report

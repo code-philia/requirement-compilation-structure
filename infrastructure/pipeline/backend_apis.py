@@ -1,18 +1,15 @@
-"""Step 06: design complete APIs with interfaces, obligations and P/Q."""
+"""Step 05: design complete APIs with interfaces, obligations and P/Q."""
 
 import json
-from contextlib import ExitStack
 from pathlib import Path
 
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
 from infrastructure.stages.database.obligations.records import check_symbols
 from infrastructure.stages.backend.primitives import apply_decomposition, validate_design
-from infrastructure.utils.cli import create_parser, resolve_directories
 from infrastructure.shared.models.text import TextModel
 from infrastructure.stages.database.obligations.rules import union
 from infrastructure.utils.presentation.formatting import format_apis
 from infrastructure.utils.presentation.console import DemoConsole
-from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.shared.rag.apis import ApiRetriever
 from infrastructure.utils.files import save_json
@@ -139,8 +136,8 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
     conventions = load_conventions(arc_dir)
     # Parents organize requirements; they do not receive APIs or coverage checks.
     design = {"apis": {}, "requirements": {rid: [] for rid in tree.requirements if tree.children[rid]}}
-    # --- Extension point 06A: leaf order and reusable API discovery ------------
-    failures = TaskFailures(arc_dir, "06_design_backend_apis", console)
+    # --- Extension point 05A: leaf order and reusable API discovery ------------
+    failures = TaskFailures(arc_dir, "05_design_backend_apis", console)
     save_json(arc_dir / "backend_apis.json", design)
     for number, rid in enumerate(tree.leaves, 1):
         with failures.task(rid):
@@ -200,27 +197,9 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
             save_json(arc_dir / "shared_conventions.json", conventions)
             console.artifact("backend_apis", design, f"{label} | Accepted APIs")
     failures.finish()
-    # --- Extension point 06B: API -> DB Access Primitive decomposition ---------
-    # Intentionally absent: an API directly accesses the database in step 08.
+    # --- Extension point 05B: API -> DB Access Primitive decomposition ---------
+    # Intentionally absent: an API directly accesses the database in step 06.
     validate_design(design, obligations, tree=tree)
     save_json(arc_dir / "backend_apis.json", design)
     print(f"Backend API Primitives saved: {arc_dir / 'backend_apis.json'}", flush=True)
     return design
-
-
-def main() -> None:
-    parser = create_parser("Step 06: Complete Backend API Design / Obligation Propagation")
-    parser.add_argument("--top-k", type=int, default=6, help="Number of API retrieval hits")
-    parser.add_argument("--max-attempts", type=int, default=10, help="Maximum proposals per requirement; including the first proposal (default: 10)")
-    args = parser.parse_args()
-    with ExitStack() as stack:
-        try:
-            _, output = resolve_directories(args)
-            stack.enter_context(console_log(output, debug_model_io=args.debug_model_io))
-            design_backend_apis(output / ".arc", args.pause, args.top_k, args.max_attempts)
-        except (OSError, ValueError, RuntimeError) as error:
-            parser.exit(1, f"Execution failed: {error}\n")
-
-
-if __name__ == "__main__":
-    main()

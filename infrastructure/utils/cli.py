@@ -1,26 +1,7 @@
-"""Consistent source, output, and pause options across all step scripts."""
+"""Resolve the compiler input and output directories."""
 
 import argparse
 from pathlib import Path
-
-
-COMPILER_DIR = Path(__file__).resolve().parents[2]
-
-
-def create_parser(description: str) -> argparse.ArgumentParser:
-    """Create the common input, output, and optional teaching-pause arguments used by numbered entry scripts."""
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "--input", type=Path, default=COMPILER_DIR / "input",
-        help="Source requirement/image directory (used by steps 01/09/10/11/12; default: compiler/input)",
-    )
-    parser.add_argument(
-        "--output", type=Path, default=COMPILER_DIR / "output",
-        help="Target directory containing shared .arc artifacts (default: compiler/output)",
-    )
-    parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
-    parser.add_argument("--debug-model-io", action="store_true", help="Save raw model requests/responses under OUTPUT/.arc/model_logs")
-    return parser
 
 
 def resolve_directories(args: argparse.Namespace) -> tuple[Path, Path]:

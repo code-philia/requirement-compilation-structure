@@ -1,6 +1,6 @@
-"""Step 10 orchestration: UI existence tests -> component repair -> regression.
+"""Step 08 orchestration: UI existence tests -> component repair -> regression.
 
-Tests are rendered deterministically from the complete step 09 design. A shared
+Tests are rendered deterministically from the complete step 07 design. A shared
 file agent implements one page at a time, with previously accepted page tests
 included in its checks. Application integration is model-owned; shared test tools remain read-only."""
 
@@ -55,7 +55,7 @@ generated design or reference image conflicts with an explicit original UI contr
 the original requirement and explain the discrepancy. Unspecified wording is an implementation
 choice; business object names still come from actual data, not reference examples.
 This stage builds presentation, native editing and navigation, not business API operations,
-session restoration or later requirements' workflows. Step 12 adds those interactions.
+session restoration or later requirements' workflows. Step 10 adds those interactions.
 Keep one clear owner for each native form/navigation action. Later implementation must
 extend that existing handler, not add another independently firing click/submit listener.
 
@@ -85,7 +85,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     install_dependencies(output)
     checks = FrontendChecks(output)
     checks.install_browser()
-    checkpoint(output, stage="10", task="runtime", action="Prepare presentation adapter and browser tests",
+    checkpoint(output, stage="08", task="runtime", action="Prepare presentation adapter and browser tests",
         details={"pages": list(design["pages"])})
     accepted = []
     selection = SourceFiles(output, design)
@@ -103,7 +103,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         report["pages"][pid] = {"status": "TESTS_READY", "requirements": uses, "test_path": relative}
         save_json(arc_dir / "ui_checks.json", report)
         label = f"UI {number}/{len(design['pages'])} {pid}"
-        checkpoint(output, stage="10", task=pid, action="Publish UI existence suite before implementation",
+        checkpoint(output, stage="08", task=pid, action="Publish UI existence suite before implementation",
             status="TESTS_READY", details={"test_path": relative, "requirements": uses})
         console.show(label + " | Existence tests before implementation", (output / relative).read_text(encoding="utf-8"))
         files = [test_path(key) for key in [*accepted, pid]]

@@ -18,7 +18,7 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
     result = empty_triggers(tree)
     obligations = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
     accepted = []
-    failures = TaskFailures(arc_dir, "11_design_frontend_triggers", console)
+    failures = TaskFailures(arc_dir, "09_design_frontend_triggers", console)
     save_json(arc_dir / "frontend_triggers.json", result)
     for rid in tree.leaves:
         with failures.task(rid):

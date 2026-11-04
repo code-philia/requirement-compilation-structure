@@ -4,14 +4,18 @@ import argparse
 from pathlib import Path
 import sys
 
-from infrastructure.compiler import Compiler
+from infrastructure.compiler import Compiler, PIPELINE
 from infrastructure.utils.cli import resolve_directories
 from infrastructure.utils.presentation.logging import configure_console
+from infrastructure.utils.presentation.stages import stage_label
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Read public options and validate paths and the backend port before compilation."""
-    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Stages:\n" + "\n".join(
+            "  " + stage_label(name) + f"  (--stage {name})" for name, _, _ in PIPELINE))
     parser.add_argument("requirement_path", type=Path,
         help="Requirement directory containing requirements.yaml and reference assets")
     parser.add_argument("-o", "--output-dir", type=Path, required=True,
@@ -20,6 +24,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Show detailed model I/O and save per-call prompt/response logs; usage and timing are always shown")
     parser.add_argument("--port", type=int, default=3000,
         help="Default generated backend port and frontend API proxy target (default: 3000)")
+    parser.add_argument("--stage", choices=[name for name, _, _ in PIPELINE], metavar="STAGE",
+        help="Run one stage by its full name (e.g. 06_implement_backend_tdd); omit for the full pipeline")
+    parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
     args = parser.parse_args(argv)
     try:
         if not 1 <= args.port <= 65535:
@@ -40,9 +47,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     configure_console()
     args = parse_args(argv)
-    compiler = Compiler(args.requirement_path, args.output_dir, model_log=args.model_log, port=args.port)
+    compiler = Compiler(args.requirement_path, args.output_dir,
+        model_log=args.model_log, port=args.port, pause=args.pause)
     try:
-        compiler.compile()
+        compiler.compile(stage=args.stage)
     except KeyboardInterrupt:
         print(f"Compilation interrupted at {compiler.current_stage or 'startup'}.", file=sys.stderr)
         raise SystemExit(130)
