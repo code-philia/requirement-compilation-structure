@@ -104,8 +104,10 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                 }
                 related_files = [f"backend/src/db/tables/{target}.sql" for target in dependencies[name]
                     if (output_dir / f"backend/src/db/tables/{target}.sql").is_file()]
-                tools = FileTools.for_target(output_dir, "db", name, fixed_path=expected_path,
-                    references=related_files,
+                requirement_ids = [rid for rid, fields in schema["requirements"].items()
+                    if any(field.split(".", 1)[0] == name for field in fields)]
+                tools = FileTools(output_dir, ["backend/src/db/tables"], requirements=requirement_ids,
+                    stage="database", files=[expected_path, *related_files], writable=[expected_path],
                     readable=[f"backend/src/db/tables/{entity}.sql" for entity in order])
 
                 def generated_table():
@@ -114,7 +116,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                     return {"path": expected_path, "status": "GENERATED"}
 
                 run_file_agent(model, INSTRUCTIONS, request, tools, generated_table,
-                    max_attempts, console, f"SQL implementation {name}", allow_discovery=False)
+                    max_attempts, console, f"SQL implementation {name}")
                 content = read_source(output_dir / expected_path)
                 proposal = {"path": expected_path, "content": content}
                 target = output_dir / expected_path

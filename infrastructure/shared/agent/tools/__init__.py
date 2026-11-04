@@ -3,125 +3,160 @@
 from copy import deepcopy
 from pathlib import Path
 
-from infrastructure.shared.agent.targets import FileTarget
-from infrastructure.shared.project.entrypoints import selected_path
+from infrastructure.shared.agent.context import FILE_LINKS, project_files, related_files, record_files
+from infrastructure.shared.agent.files import editable_application_path, source_paths
 from infrastructure.utils.files import read_source, save_bytes, save_text
 
-from .files import FileToolError, edit_file, read_file, workspace_path
+from .files import FileToolError, workspace_path
 from .schemas import TOOL_REGISTRY
 
 
 class FileTools:
-    """Pin useful task files and dispatch shared tools; no full-file observation/version map."""
+    """One scoped read/write workspace with automatic requirement-file associations."""
 
-    def __init__(self, output, writable=(), references=(), *, target=None, allow_write=None, readable=None):
+    def __init__(self, output, scope, *, requirements=(), stage, files=(), writable=None,
+            readable=None, allow_write=None):
         self.output = Path(output).resolve()
-        self.writable, self.files = set(writable), set(writable) | set(references)
-        self.target, self.allow_write = target, allow_write
+        self.scope = tuple(scope)
+        if not self.scope:
+            raise ValueError("Implementation requires at least one project scope")
+        for directory in self.scope:
+            if not directory or Path(directory).is_absolute() or ".." in Path(directory).parts or directory.startswith("."):
+                raise ValueError(f"Invalid project scope: {directory}")
+        self.requirements = list(dict.fromkeys(requirements))
+        self.stage = stage
+        self.related_files = set(files) | related_files(self.output, self.requirements)
+        self.files = self.related_files | project_files(self.output, self.scope)
+        self.writable = set(writable) if writable is not None else None
+        self.allow_write = allow_write
         self.readable = set(readable) if readable is not None else None
+        if self.readable is not None:
+            self.files.intersection_update(self.readable)
         self.changed_paths, self.last_changes = set(), []
-        self._pending, self._target_path = {}, None
+        self.available_paths = set(self.files)
+        for directory in self.scope:
+            self.available_paths.update(source_paths(self.output, directory))
+        self.available_paths = {path for path in self.available_paths if self.can_read(path)}
+        self.supplied_contents, self.read_files, self._pending = {}, {}, {}
         for path in self.files:
             self.path(path)
-
-    @classmethod
-    def for_target(cls, output, kind, identity, references=(), writable=(), existing=None, fixed_path=None, **kwargs):
-        output = Path(output).resolve()
-        target = FileTarget.load(output, kind, identity, existing, fixed_path)
-        paths = set(writable) | ({target.path} if target.path else set())
-        return cls(output, paths, references, target=target, **kwargs)
 
     def path(self, path):
         return workspace_path(self.output, path)
 
-    @property
-    def pending_target(self):
-        return self.target is not None and (self.target.path is None or not self.path(self.target.path).is_file())
+    def in_scope(self, path):
+        return any(path == directory or path.startswith(directory.rstrip("/") + "/") for directory in self.scope)
+
+    def can_read(self, path):
+        if self.readable is not None:
+            return path in self.readable
+        return self.in_scope(path) or path in self.files
 
     def can_write(self, path):
-        return path in self.writable or bool(self.allow_write and self.allow_write(path))
+        if not self.in_scope(path):
+            return False
+        if self.writable is not None:
+            return path in self.writable
+        if self.allow_write is not None:
+            return self.allow_write(path)
+        return editable_application_path(self.output, path)
+
+    def scope_state(self):
+        return {"directories": list(self.scope), "existing_files": sorted(self.available_paths),
+            "writable_files": sorted(self.writable) if self.writable is not None else "application sources inside scope",
+            "requirement_ids": self.requirements,
+            "readable_files": sorted(self.readable) if self.readable is not None else "scope and related reference files",
+            "related_files": sorted(path for path in self.related_files if self.can_read(path))}
 
     def state(self):
-        return {path: {"content": read_source(self.path(path)) if self.path(path).is_file() else None,
-            "writable": self.can_write(path)} for path in sorted(self.files)}
-
-    def task_state(self, task):
-        task = {**task}
-        if self.target:
-            task["file_target"] = self.target.context()
-            if self.target.path:
-                key = "test_path" if self.target.kind.endswith("test") else "implementation_path"
-                task[key] = self.target.path
-        for key, kind in (("implementation_paths", "trigger"), ("page_paths", "page")):
-            if isinstance(task.get(key), dict):
-                task[key] = {identity: selected_path(self.output, kind, identity) or path
-                    for identity, path in task[key].items()}
-        return task
+        """Supply complete current readable contents, so related files need no extra read call."""
+        records = {}
+        self.supplied_contents = {}
+        for path in sorted(self.files):
+            target = self.path(path)
+            readable = self.can_read(path)
+            content = read_source(target) if target.is_file() and readable else None
+            records[path] = {"content": content, "readable": readable,
+                "writable": self.can_write(path), "exists": target.is_file()}
+            if content is not None:
+                self.supplied_contents[path] = content
+        return records
 
     def schemas(self):
         return deepcopy([item[1] for item in TOOL_REGISTRY.values()])
 
     def effect(self, calls):
-        """Registered effects determine whether to continue reading or run acceptance."""
+        """Classify a batch before execution; read arguments are validated per item."""
         if not isinstance(calls, list):
             raise FileToolError("INVALID_CALLS", "tool_calls must be an array")
         effects = set()
         for number, call in enumerate(calls, 1):
             if not isinstance(call, dict) or not isinstance(call.get("tool"), str):
-                raise FileToolError("INVALID_CALL", "Each tool_calls item must be an object with a tool name",
-                    call_index=number, examples=[item[1]["example"] for item in TOOL_REGISTRY.values()])
+                raise FileToolError("INVALID_CALL", "Each tool_calls item must be an object with a tool name", call_index=number)
             name = call["tool"]
             if name not in TOOL_REGISTRY:
-                raise FileToolError("UNKNOWN_TOOL", f"Unknown tool {name!r}; use read_file or edit_file",
-                    call_index=number, tool=name, available_tools=list(TOOL_REGISTRY))
-            schema = TOOL_REGISTRY[name][1]
-            parameters = schema["parameters"]
-            missing = [key for key in parameters["required"] if key not in call]
-            unexpected = sorted(set(call) - set(parameters["properties"]))
-            invalid = []
-            for key, rule in parameters["properties"].items():
-                if key not in call:
-                    continue
-                value = call[key]
-                if rule["type"] == "string" and not isinstance(value, str):
-                    invalid.append(f"{key} must be a string")
-                elif rule["type"] == "integer" and type(value) is not int:
-                    invalid.append(f"{key} must be an integer")
-                elif "minimum" in rule and value < rule["minimum"]:
-                    invalid.append(f"{key} must be >= {rule['minimum']}")
-                elif "enum" in rule and value not in rule["enum"]:
-                    invalid.append(f"{key} must be one of {rule['enum']}")
-            if missing or unexpected or invalid:
-                raise FileToolError("INVALID_CALL", f"Invalid {name} call at tool_calls item {number}. "
-                    "Put path and other parameters beside tool, without an arguments wrapper.",
-                    call_index=number, tool=name, missing_fields=missing, unexpected_fields=unexpected,
-                    invalid_fields=invalid, example=schema["example"])
+                raise FileToolError("UNKNOWN_TOOL", f"Unknown tool {name!r}",
+                    call_index=number, available_tools=list(TOOL_REGISTRY))
             effects.add(TOOL_REGISTRY[name][2])
         if len(effects) > 1:
             raise FileToolError("MIXED_TOOL_BATCH", "Separate read calls from edit calls; inspect reads before editing")
         return next(iter(effects), "write")
 
+    def validate_call(self, call, number):
+        schema = TOOL_REGISTRY[call["tool"]][1]
+        parameters = schema["parameters"]
+        missing = [key for key in parameters["required"] if key not in call]
+        unexpected = sorted(set(call) - set(parameters["properties"]))
+        invalid = []
+        for key, rule in parameters["properties"].items():
+            if key not in call:
+                continue
+            value = call[key]
+            if rule["type"] == "string" and not isinstance(value, str):
+                invalid.append(f"{key} must be a string")
+            elif rule["type"] == "integer" and type(value) is not int:
+                invalid.append(f"{key} must be an integer")
+            elif "minimum" in rule and value < rule["minimum"]:
+                invalid.append(f"{key} must be >= {rule['minimum']}")
+            elif "enum" in rule and value not in rule["enum"]:
+                invalid.append(f"{key} must be one of {rule['enum']}")
+        if missing or unexpected or invalid:
+            raise FileToolError("INVALID_CALL", f"Invalid {call['tool']} call at item {number}. Put parameters beside tool, without an arguments wrapper.",
+                call_index=number, tool=call["tool"], missing_fields=missing,
+                unexpected_fields=unexpected, invalid_fields=invalid, example=schema["example"])
+
     def execute(self, calls):
-        """Validate/stage a complete edit batch, then publish or restore every affected file."""
-        self.effect(calls)
-        self._pending, self._target_path, self.last_changes = {}, None, []
+        """Keep read results independent; publish writes and requirement links atomically."""
+        effect = self.effect(calls)
+        self._pending, self.last_changes = {}, []
         results, originals, written = [], {}, []
-        index_path = self.output / ".arc/implementation_paths.json"
-        index_before = index_path.read_bytes() if index_path.is_file() else None
+        index_path = self.output / ".arc" / FILE_LINKS
+        index_before = index_path.read_bytes() if effect == "write" and index_path.is_file() else None
+        index_changed = False
         try:
             for number, call in enumerate(calls, 1):
                 name = call["tool"]
                 function, schema, _effect = TOOL_REGISTRY[name]
                 parameters = {key: value for key, value in call.items() if key != "tool"}
                 try:
+                    self.validate_call(call, number)
                     result = function(self, **parameters)
                 except FileToolError as error:
                     error.feedback.update(call_index=number, tool=name, example=schema["example"])
+                    if effect == "read":
+                        results.append({"tool": name, "error": error.feedback})
+                        continue
                     raise
                 except (ValueError, TypeError, OSError) as error:
-                    raise FileToolError("FILE_TOOL_FAILED", str(error), call.get("path"),
-                        call_index=number, tool=name, example=schema["example"]) from error
+                    failure = FileToolError("FILE_TOOL_FAILED", str(error), call.get("path"),
+                        call_index=number, tool=name, example=schema["example"])
+                    if effect == "read":
+                        results.append({"tool": name, "error": failure.feedback})
+                        continue
+                    raise failure from error
                 results.append({"tool": name, "result": result})
+            if effect == "read":
+                return results
             for path, content in self._pending.items():
                 target = self.path(path)
                 originals[path] = target.read_bytes() if target.is_file() else None
@@ -130,10 +165,13 @@ class FileTools:
             for path, content in self._pending.items():
                 save_text(self.path(path), content)
                 written.append(path)
-            if self._target_path is not None:
-                self.target.bind(self.output, self._target_path)
-                self.files.add(self._target_path)
-                self.writable.add(self._target_path)
+            known = {path for path in self.related_files if self.can_write(path) and self.path(path).is_file()} | set(self._pending)
+            if self.requirements and known:
+                index_changed = True
+                record_files(self.output, self.requirements, self.stage, known)
+            self.related_files.update(self._pending)
+            self.files.update(self._pending)
+            self.available_paths.update(self._pending)
             self.changed_paths.update(self._pending)
             return results
         except Exception:
@@ -143,7 +181,7 @@ class FileTools:
                     target.unlink(missing_ok=True)
                 else:
                     save_bytes(target, originals[path])
-            if written and self._target_path is not None:
+            if index_changed:
                 if index_before is None:
                     index_path.unlink(missing_ok=True)
                 else:
@@ -151,4 +189,4 @@ class FileTools:
             self.last_changes = []
             raise
         finally:
-            self._pending, self._target_path = {}, None
+            self._pending = {}

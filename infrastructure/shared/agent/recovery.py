@@ -15,7 +15,7 @@ def _snapshot(output):
         for root in ("backend/src", "backend/tests", "frontend/src", "frontend/tests")
         for path in (output / root).rglob("*") if path.is_file() and not path.is_symlink()
         and not any(part in EXCLUDED or part.startswith(".") for part in path.relative_to(output).parts)}
-    index = ".arc/implementation_paths.json"
+    index = ".arc/requirement_files.json"
     if (output / index).is_file():
         paths.add(index)
     return {path: (output / path).read_bytes() for path in paths}

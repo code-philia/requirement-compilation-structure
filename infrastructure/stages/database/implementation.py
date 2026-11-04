@@ -119,8 +119,8 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
             references = [f"backend/src/db/tables/{name}.sql" for name in entities
                 if (output / f"backend/src/db/tables/{name}.sql").is_file()]
             references.extend(insert_paths[name] for name in sorted(names))
-            files = FileTools(output, references=references, allow_write=lambda path: path in allowed,
-                readable=readable)
+            files = FileTools(output, ["backend/src/db"], requirements=[rid], stage="database",
+                files=references, writable=allowed, readable=readable)
             task = {"requirement": requirement, "entities": entities, "table_names": order,
                 "insert_files": {name: insert_paths[name] for name in sorted(names)}}
 
@@ -128,7 +128,7 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
                 return {"status": "GENERATED", "insert_files": list(files.changed_paths)}
 
             run_file_agent(model, SEED_INSTRUCTIONS, task, files, generated,
-                max_turns, console, "Startup data / " + rid, allow_discovery=False)
+                max_turns, console, "Startup data / " + rid)
 
 
 REPAIR_INSTRUCTIONS = '''Repair the actual database implementation and its startup wiring.
@@ -196,7 +196,8 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
     sql_paths = {name: f"backend/src/db/tables/{name}.sql" for name in schema["entities"]}
     insert_paths = {name: f"backend/src/db/seeds/{name}.sql" for name in schema["entities"]}
     allowed = {*WIRING, *sql_paths.values(), *insert_paths.values()}
-    workspace = FileTools(output, WIRING, allow_write=lambda path: path in allowed, readable=allowed)
+    workspace = FileTools(output, ["backend", "package.json"], requirements=list(schema.get("requirements", {})),
+        stage="database", files=WIRING, writable=allowed, readable=allowed)
     task = {"table_order": [name for group in implementation_groups(schema) for name in group],
         "startup_data_loader": SEED_PATH,
         "insertion_directory": "backend/src/db/seeds",
@@ -224,7 +225,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
     try:
         agent = run_file_agent(model or TextModel(), REPAIR_INSTRUCTIONS, task, workspace, gate,
             max_turns, console, "Database runtime repair", feedback=feedback,
-            feedback_filter=repair_feedback, allow_discovery=False)
+            feedback_filter=repair_feedback)
         report.update(status="GREEN", repair_turns=agent["turns"])
         save_json(path, report)
         return report

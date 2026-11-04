@@ -13,8 +13,9 @@ def definition(name, description, properties, required, example):
 
 STRING = {"type": "string"}
 TOOL_REGISTRY = {
-    "read_file": (read_file, definition("read_file", "Read a relevant project file or inclusive 1-based line range. "
-        "Prefer supplied files; read only missing evidence needed for this task.",
+    "read_file": (read_file, definition("read_file", "Read an additional project file or inclusive 1-based line range ONLY when the current requirement "
+        "cannot be completed correctly using the full related-file contents already in input.files. "
+        "Explain the concrete missing dependency in diagnosis.reason. Do not re-read supplied or retained files.",
         {"path": STRING, "start_line": {"type": "integer", "minimum": 1},
             "end_line": {"type": "integer", "minimum": 1}}, ["path"],
         {"tool": "read_file", "path": "backend/src/db/initialize.ts", "start_line": 1, "end_line": 40}), "read"),

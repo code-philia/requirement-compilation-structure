@@ -1,6 +1,7 @@
 """Source discovery and ownership, independent of model file tools."""
 
 from pathlib import Path
+import os
 
 
 SHARED_SOURCES = {"backend/src/api/register.ts", "backend/src/app.ts", "backend/src/server.ts",
@@ -10,16 +11,18 @@ EXCLUDED = {"node_modules", ".git", ".arc", "dist", "build", "coverage", "__pyca
 
 
 def source_paths(output: Path, root: str) -> list[str]:
-    """Supply text sources from a fixed project directory without a file association index."""
-    return sorted(path.relative_to(output).as_posix() for path in (output / root).rglob("*")
-        if path.is_file() and not path.is_symlink()
-        and not any(part.startswith(".") or part in EXCLUDED for part in path.relative_to(output).parts)
-        and path.suffix in {".ts", ".tsx", ".js", ".jsx", ".css", ".json", ".html", ".sql", ".md"})
-
-
-def editable_sources(output: Path, root: str) -> list[str]:
-    """Allow application repairs while protecting compiler-owned infrastructure."""
-    return [relative for relative in source_paths(output, root) if editable_application_path(output, relative)]
+    """List text files in scope without walking dependencies or build directories."""
+    result = []
+    for directory, folders, filenames in os.walk(output / root, followlinks=False):
+        folders[:] = [name for name in folders if name not in EXCLUDED and not name.startswith(".")
+            and not (Path(directory) / name).is_symlink()]
+        for name in filenames:
+            path = Path(directory) / name
+            if name.startswith(".") or path.is_symlink():
+                continue
+            if path.suffix in {".ts", ".tsx", ".js", ".jsx", ".css", ".json", ".html", ".sql", ".md"}:
+                result.append(path.relative_to(output).as_posix())
+    return sorted(result)
 
 
 def editable_application_path(output, relative):

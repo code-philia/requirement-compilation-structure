@@ -3,12 +3,10 @@
 import json
 from pathlib import Path
 
-from infrastructure.shared.agent.context import SourceFiles
-from infrastructure.shared.agent.discovery import project_index
-from infrastructure.shared.project.entrypoints import selected_path
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
-from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses, supplied_sources, related_schema
+from infrastructure.stages.backend.context import load_context, requirement_context, supplied_sources, related_schema
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.runtime import REGISTER_PATH, TEST_RUNNER_PATH, TEST_SUPPORT_PATH, prepare_runtime, test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green, test_run_status
@@ -72,7 +70,8 @@ against requirement evidence; preserve valid success/rejection coverage and prev
 """
 
 IMPLEMENT_INSTRUCTIONS = """Implement task.api according to its canonical contract against its generated tests.
-Use edit_file to create task.file_target under backend/src or repair implementation_path. Export:
+Read the associated implementation files and extend or create business sources inside the supplied backend scope.
+Choose meaningful filenames, reuse existing helpers, and extend shared API wiring incrementally. For an API module export:
 export async function handle(request: ApiRequest, connection: Database.Database): Promise<ApiResponse>.
 The export is always handle; signature.name identifies the business operation.
 Tests exercise the operation through HTTP, not through an exported test alias. Import ApiRequest and ApiResponse from backend/src/api/types.ts
@@ -138,17 +137,13 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         print("No Backend API Primitives require implementation; no tests or model calls were run.")
         return report
     checks = BackendChecks(output)
-    selection = SourceFiles(output, root="backend/src", tests_root="backend/tests")
     model = TextModel() if contracts["apis"] else None
-    context_index = project_index(output,
-        kinds=("schema", "api", "requirement", "test_requirement", "convention", "file"),
-        file_roots=("backend/src", "backend/tests"))
     owners = {}
     for aid in contracts["apis"]:
         ids = [rid for rid in tree.leaves if aid in contracts["requirements"].get(rid, [])]
         if ids:
             owners[aid] = ids
-    targets = {aid: selected_path(output, "backend_test", aid) or test_path(ids[0], aid) for aid, ids in owners.items()}
+    targets = {aid: test_path(ids[0], aid) for aid, ids in owners.items()}
     report = {"status": "RUNNING", "requirements": {}, "tests": {}, "red": {}, "green": {}, "agents": {}}
     # Publish a current status before work; an old GREEN is never reused as proof.
     save_json(arc_dir / "backend_tdd.json", report)
@@ -172,7 +167,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 console.show(f"{requirement_label} | Reuse accepted APIs", ", ".join(reused) + " already passed their canonical contract tests.")
             for aid in pending:
                 attempted.add(aid)
-                entry = report.setdefault("apis", {}).setdefault(aid, {"status": "GENERATING_TESTS", "api": aid})
+                entry = report.setdefault("apis", {}).setdefault(aid, {"status": "GENERATING_TESTS", "api": aid, "requirements": owners[aid]})
                 with implementation_task(output, entry, console, "08 / " + aid):
                     api_owners = owners[aid]
                     api = contracts["apis"][aid]
@@ -181,7 +176,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     console.show(f"{label} | Test Generation: P / Q / R / W", json.dumps(api, ensure_ascii=False, indent=2))
 
                     def test_gate(aid=aid):
-                        chosen = selected_path(output, "backend_test", aid) or relative
+                        chosen = relative
                         targets[aid] = chosen
                         files_by_api[aid] = [chosen]
                         generation_files = [targets[key] for key in [*accepted, aid]]
@@ -204,15 +199,14 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     context = {
                         "api_id": aid, "api": api,
                         "requirement": requirement_context(tree, rid),
-                        "db_schema": related_schema(schema, [api]), "test_path": relative if (output / relative).is_file() else None,
+                        "db_schema": related_schema(schema, [api]), "test_path": relative,
                         "max_tests": max_tests,
                         "support_module": TEST_SUPPORT_PATH,
                     }
-                    workspace = selection.workspace(target=("backend_test", aid), existing=relative,
-                        references=[*supplied_sources(output, api, schema)])
+                    workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend",
+                        files=[relative, *supplied_sources(output, api, schema)], writable=[relative])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
-                        test_gate, max_turns, console, label + " / Test Generation",
-                        feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
+                        test_gate, max_turns, console, label + " / Test Generation")
                     for owner in api_owners:
                         report["tests"].setdefault(owner, {})[aid] = targets[aid]
                     report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
@@ -240,20 +234,17 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         require_green(result["tests"])
                         return result
 
-                    api_entry = selected_path(output, "api", aid)
-                    current = implementation_checks() if api_entry and (output / api_entry).is_file() else agent["checks"]
+                    current = implementation_checks()
                     context = {
                         "api_id": aid, "api": api, "db_schema": related_schema(schema, [api]),
                         "requirement": requirement_context(tree, rid),
-                        "implementation_path": selected_path(output, "api", aid),
                         "api_wiring": {"registry": REGISTER_PATH, "app": "backend/src/app.ts",
                             "server": "backend/src/server.ts"},
                     }
-                    workspace = selection.workspace(target=("api", aid), paths=[REGISTER_PATH],
-                        references=[*files_by_api[aid], *supplied_sources(output, api, schema)])
+                    workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend",
+                        files=[REGISTER_PATH, *files_by_api[aid], *supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
-                        implementation_gate, max_turns, console, aid + " / Implementation", feedback=current,
-                        feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
+                        implementation_gate, max_turns, console, aid + " / Implementation", feedback=current)
                     accepted.append(aid)
                     result = agent["checks"]["tests"]
                     report["green"][aid] = {key: result[key] for key in ("tests", "pass", "fail")}

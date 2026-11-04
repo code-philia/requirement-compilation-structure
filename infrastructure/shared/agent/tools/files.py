@@ -3,6 +3,7 @@
 from infrastructure.shared.agent.files import EXCLUDED
 from infrastructure.utils.files import normalize_newlines, read_source
 from infrastructure.utils.paths import check_path_case, relative_path
+from difflib import get_close_matches
 
 
 class FileToolError(ValueError):
@@ -24,37 +25,60 @@ def workspace_path(root, path):
         current = current / part
         if current.is_symlink():
             raise FileToolError("INVALID_PATH", "Symlinks are not allowed", path)
-    if not current.resolve().is_relative_to(root.resolve()) or current.is_dir():
+    if not current.resolve().is_relative_to(root.resolve()):
         raise FileToolError("INVALID_PATH", "Use a file inside the working directory", path)
+    if current.is_dir():
+        candidates = sorted(child.relative_to(root).as_posix() for child in current.iterdir()
+            if child.is_file() and not child.is_symlink() and not child.name.startswith("."))[:8]
+        raise FileToolError("PATH_IS_DIRECTORY", "read_file expects a file, not a directory. Choose a concrete file path.",
+            path, available_files=candidates)
     return current
 
 
 def read_file(files, path, start_line=1, end_line=None):
     """Read the requested lines only; reading never expands the pinned source context."""
     target = files.path(path)
-    if files.readable is not None and path not in files.readable:
+    if not files.can_read(path):
         raise FileToolError("READ_NOT_ALLOWED", "This task cannot read this file", path)
     if not target.is_file():
-        raise FileToolError("FILE_NOT_FOUND", "File does not exist; use edit_file/create for a new file", path)
+        candidates = files.available_paths
+        if files.readable is not None:
+            candidates = candidates.intersection(files.readable)
+        suggested = get_close_matches(path, sorted(candidates), n=4, cutoff=0.45)
+        message = "This file does not exist. Use a supplied path or one of the suggested existing files."
+        raise FileToolError("FILE_NOT_FOUND", message, path, suggested_paths=suggested)
     if type(start_line) is not int or start_line < 1 or (end_line is not None and
             (type(end_line) is not int or end_line < start_line)):
         raise FileToolError("INVALID_LINE_RANGE", "Use positive, inclusive line numbers", path)
-    lines = read_source(target).splitlines(keepends=True)
+    content = read_source(target)
+    lines = content.splitlines(keepends=True)
     last = min(end_line if end_line is not None else len(lines), len(lines))
+    reference = None
+    if files.supplied_contents.get(path) == content:
+        reference = f"files[{path}]"
+    else:
+        for excerpt in files.read_files.get(path, []):
+            if (excerpt["total_lines"] == len(lines) and excerpt["start_line"] <= start_line
+                    and excerpt["end_line"] >= last
+                    and excerpt["content"] == "".join(lines[excerpt["start_line"] - 1:excerpt["end_line"]])):
+                reference = f"read_files[{path}]"
+                break
+    if reference:
+        return {"path": path, "cached": True, "context_reference": reference,
+            "start_line": start_line, "end_line": last, "total_lines": len(lines),
+            "writable": files.can_write(path)}
     return {"path": path, "content": "".join(lines[start_line - 1:last]), "start_line": start_line,
         "end_line": last, "total_lines": len(lines), "writable": files.can_write(path)}
 
 
 def edit_file(files, path, operation, new_content, old_content=""):
     """Stage a create, unique exact replacement, prepend or append in the current batch."""
-    files.path(path)  # Reject unsafe paths before attempting task-specific adaptation.
-    requested = path
-    if operation == "create" and files.pending_target and files._target_path is None:
-        path = files.target.adapt(path)
-        files.path(path)
-        files._target_path = path
-    if not files.can_write(path) and path != files._target_path:
-        raise FileToolError("WRITE_NOT_ALLOWED", "File is not writable for this task", path)
+    requested_target = files.path(path)
+    if operation == "create" and (requested_target.exists() or path in files._pending):
+        raise FileToolError("FILE_ALREADY_EXISTS", "The requested path already exists. Read it and use a local replace, prepend or append.",
+            path)
+    if not files.can_write(path):
+        raise FileToolError("WRITE_NOT_ALLOWED", "File is outside this task's writable scope", path)
     if not isinstance(new_content, str) or not isinstance(old_content, str):
         raise FileToolError("INVALID_ARGUMENTS", "old_content and new_content must be strings", path)
     new_content, old_content = normalize_newlines(new_content), normalize_newlines(old_content)
@@ -62,7 +86,8 @@ def edit_file(files, path, operation, new_content, old_content=""):
     current = files._pending.get(path, read_source(target) if target.is_file() else None)
     if operation == "create":
         if current is not None:
-            raise FileToolError("FILE_ALREADY_EXISTS", "Read the existing file and use replace", path)
+            raise FileToolError("FILE_ALREADY_EXISTS", "This file already exists. Read and edit it locally.",
+                path)
         if old_content:
             raise FileToolError("INVALID_ARGUMENTS", "create requires empty old_content", path)
         updated = new_content
@@ -89,9 +114,4 @@ def edit_file(files, path, operation, new_content, old_content=""):
     else:
         raise FileToolError("INVALID_OPERATION", "Use create, replace, prepend or append", path)
     files._pending[path] = updated
-    result = {"path": path, "operation": operation}
-    if path != requested:
-        result["requested_path"] = requested
-        result["notice"] = "Adapted to this task's required destination; use path in future calls and imports"
-    return result
-
+    return {"path": path, "operation": operation}

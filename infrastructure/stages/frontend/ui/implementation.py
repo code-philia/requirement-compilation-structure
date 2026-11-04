@@ -7,11 +7,9 @@ requirements; their presence suites never demand future requirements' controls.
 import json
 from pathlib import Path
 
-from infrastructure.shared.agent.context import SourceFiles
-from infrastructure.shared.agent.discovery import project_index
+from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
-from infrastructure.shared.project.entrypoints import selected_path
 from infrastructure.stages.frontend.ui.design import owners, page_context, page_elements, requirement_ui
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.frontend.ui.runtime import APPLICATION_ENTRYPOINTS, prepare_frontend
@@ -27,7 +25,7 @@ Do not implement future requirements just because they share this page or appear
 Read the existing related components before editing. Extend shared pages incrementally and
 preserve accepted_element_ids and every previously accepted requirement's UI and data bindings.
 Read the supplied package/configuration and actual source to use the project's technology
-stack. Create task.file_target or repair implementation_path, using exports, props and
+stack. Read related files and incrementally edit or create components inside the frontend scope, using exports, props and
 state appropriate to the actual components. The design is a
 reference prototype, not a fixed executable host or mandatory component API.
 
@@ -105,10 +103,6 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
         details={"requirements": tree.leaves, "pages": list(design["pages"])})
     accepted = []
     accepted_pages = []
-    selection = SourceFiles(output, design)
-    context_index = project_index(output,
-        kinds=("page", "ui_element", "ui_data", "requirement", "test_requirement", "file"),
-        file_roots=("frontend/src", "frontend/tests"))
     for number, rid in enumerate(tree.leaves, 1):
         entry = report["requirements"][rid]
         requirement = (requirement_contexts or {}).get(rid, {
@@ -174,17 +168,15 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                         "application_entrypoints": list(APPLICATION_ENTRYPOINTS),
                         "visual_references": {iid: (images or {}).get(iid, image)
                             for iid, image in requirement.get("images", {}).items()},
-                        "implementation_path": selected_path(output, "page", pid),
                     }
-                    workspace = selection.workspace(target=("page", pid),
-                        references=["frontend/src/ui-runtime.ts", *files, "frontend/package.json",
+                    workspace = FileTools(output, ["frontend"], requirements=[rid], stage="ui",
+                        files=["frontend/src/ui-runtime.ts", *files, "frontend/package.json",
                             "frontend/tsconfig.json", "frontend/playwright.ui.config.ts", *APPLICATION_ENTRYPOINTS])
                     agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
-                        max_turns, console, label + " / " + pid + " / Implementation", feedback=current,
-                        feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
+                        max_turns, console, label + " / " + pid + " / Implementation", feedback=current)
                 entry["page_results"][pid] = {
                     "status": "GREEN", "turns": agent["turns"],
-                    "implementation_path": selected_path(output, "page", pid),
+                    "files": agent.get("files", []),
                     "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"},
                 }
                 if pid not in completed_pages:
@@ -201,11 +193,11 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                 result["status"] = "ROLLED_BACK"
         for pid, page in report["pages"].items():
             statuses = [report["requirements"][owner]["status"] for owner in page["requirements"]]
-            page["implementation_path"] = selected_path(output, "page", pid)
             results = [report["requirements"][owner]["page_results"][pid]
                 for owner in page["requirements"]
                 if pid in report["requirements"][owner].get("page_results", {})
                 and report["requirements"][owner]["status"] == "GREEN"]
+            page["files"] = sorted({path for result in results for path in result["files"]})
             page["turns"] = sum(result["turns"] for result in results)
             if results:
                 page["checks"] = results[-1]["checks"]

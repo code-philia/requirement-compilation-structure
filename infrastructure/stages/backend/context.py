@@ -28,8 +28,8 @@ def api_requirement_uses(tree, allocations: dict, aid: str) -> list[dict]:
         for rid, ids in allocations.items() if aid in ids]
 
 
-def supplied_sources(output: Path, api: dict, schema: dict) -> dict:
-    """The caller selects context paths; the agent never explores the codebase."""
+def supplied_sources(output: Path, api: dict, schema: dict) -> list[str]:
+    """Supply known database and fixture paths alongside the backend directory scope."""
     entities = {symbol.split(".")[0] for mode in ("read", "write") for symbol in api[mode]}
     pending = list(entities)
     while pending:
@@ -42,7 +42,9 @@ def supplied_sources(output: Path, api: dict, schema: dict) -> dict:
                     pending.append(target)
     paths = ["backend/src/api/types.ts", "backend/src/db/client.ts", "backend/tests/support/context.ts"]
     paths.extend(f"backend/src/db/tables/{name}.sql" for name in sorted(entities))
-    return {relative: (output / relative).read_text(encoding="utf-8-sig") for relative in paths}
+    paths.extend(f"backend/src/db/seeds/{name}.sql" for name in sorted(entities)
+        if (output / f"backend/src/db/seeds/{name}.sql").is_file())
+    return paths
 
 
 def related_schema(schema, records):
