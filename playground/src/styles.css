@@ -1013,11 +1013,11 @@ select {
   height: 100%;
   position: relative;
   font-size: 10px;
-  color: #9ba5b6;
+  color: #596a82;
   padding: 0 2px;
 }
 .inspector-tabs > button.active {
-  color: #6179b1;
+  color: #365bb0;
 }
 .inspector-tabs > button.active:after {
   content: "";
@@ -1025,7 +1025,7 @@ select {
   bottom: -1px;
   left: 0;
   right: 0;
-  background: #718bc3;
+  background: #4b6ac4;
   height: 2px;
 }
 .inspector-tabs button > span {
@@ -1034,7 +1034,7 @@ select {
   background: #eff2f7;
   border-radius: 4px;
   padding: 2px 4px;
-  color: #9ba7bb;
+  color: #586b87;
 }
 .compare-trigger {
   margin-left: auto;
@@ -1062,7 +1062,7 @@ select {
   align-items: center;
   gap: 5px;
   font-size: 8px;
-  color: #aab3c0;
+  color: #65748b;
 }
 .connection i {
   background: #c4cbd6;
@@ -1070,7 +1070,7 @@ select {
   height: 4px;
 }
 .connection.online {
-  color: #91aa9d;
+  color: #347458;
 }
 .connection.online i {
   background: #89ad98;
@@ -1089,31 +1089,31 @@ select {
 }
 .run-id code {
   font-size: 8px;
-  color: #a6afbe;
+  color: #65748b;
 }
 .status-chip {
   font-size: 8px;
   background: #edf2f8;
-  color: #8f9bae;
+  color: #596b85;
   border-radius: 4px;
   padding: 4px 6px;
   white-space: nowrap;
 }
 .status-chip.status-GREEN {
-  color: #6c9d86;
+  color: #28734e;
   background: #eff6f1;
 }
 .status-chip.status-RUNNING {
-  color: #6b86c7;
+  color: #315bb4;
   background: #edf2ff;
 }
 .status-chip.status-FAILED,
 .status-chip.status-COMPLETED_WITH_FAILURES {
-  color: #bc8179;
+  color: #a0453d;
   background: #fbf0ed;
 }
 .status-chip.status-INTERRUPTED {
-  color: #b2926a;
+  color: #876027;
   background: #faf4eb;
 }
 .metrics-grid {
@@ -1139,7 +1139,7 @@ select {
   align-items: center;
   gap: 4px;
   font-size: 8px;
-  color: #9ba7b9;
+  color: #5d6e88;
   white-space: nowrap;
 }
 .metrics-grid b {
@@ -1147,7 +1147,7 @@ select {
   display: block;
   font-size: 16px;
   font-weight: 400;
-  color: #60718e;
+  color: #334967;
   margin-top: 8px;
   letter-spacing: -0.7px;
   white-space: nowrap;
@@ -1156,11 +1156,11 @@ select {
   font-size: 11px;
   letter-spacing: 0;
   padding-top: 4px;
-  color: #a8b0bd;
+  color: #65748b;
 }
 .metric-note {
   font-size: 8px;
-  color: #b39a79;
+  color: #87622d;
   line-height: 1.6;
   margin-top: 7px;
 }
@@ -1174,7 +1174,7 @@ select {
   align-items: center;
   gap: 8px;
   font-size: 9px;
-  color: #8794a8;
+  color: #526680;
   cursor: pointer;
   list-style: none;
 }
@@ -1185,7 +1185,7 @@ select {
   overflow: hidden;
   white-space: nowrap;
   font-family: "IBM Plex Mono", monospace;
-  color: #a2adbf;
+  color: #64758d;
   font-size: 8px;
 }
 .run-settings dl {
@@ -1197,17 +1197,17 @@ select {
   margin: 15px 0 0;
 }
 .run-settings dt {
-  color: #a2adbd;
+  color: #64758d;
 }
 .run-settings dd {
   margin: 0;
-  color: #77869e;
+  color: #4f6280;
   word-break: break-all;
   font-family: "IBM Plex Mono", monospace;
 }
 .data-note {
   font-size: 9px;
-  color: #a18d70;
+  color: #81602e;
   line-height: 1.9;
   background: #faf6ef;
   border: 1px solid #f0e7d9;
@@ -1217,7 +1217,7 @@ select {
 }
 .error-box {
   font-size: 10px;
-  color: #b77b75;
+  color: #9d423c;
   background: #fbf0ed;
   border: 1px solid #f0dcd6;
   border-radius: 6px;
@@ -1237,13 +1237,13 @@ select {
 }
 .inspector-section-title h3 {
   font-size: 10px;
-  color: #76849b;
+  color: #51647f;
   font-weight: 500;
 }
 .inspector-section-title > span {
   font-family: "IBM Plex Mono", monospace;
   font-size: 8px;
-  color: #aab5c5;
+  color: #65758c;
 }
 .stage-track {
   display: flex;
@@ -1267,7 +1267,7 @@ select {
   gap: 6px;
   font-family: "IBM Plex Mono", monospace;
   font-size: 7px;
-  color: #aab5c5;
+  color: #65758c;
   padding: 0;
   z-index: 1;
   min-width: 14px;
@@ -1304,14 +1304,28 @@ select {
   padding: 0 12px 12px;
 }
 .stage-card {
-  border: 1px solid transparent;
+  border: 1px solid #d6e1f1;
+  background: #f5f8fd;
   border-radius: 7px;
-  margin-bottom: 3px;
+  margin-bottom: 8px;
   scroll-margin-top: 10px;
 }
 .stage-card.expanded {
-  border-color: #e0e7f0;
+  border-color: #90a9d5;
   background: #fff;
+  box-shadow: 0 2px 8px #365b9510;
+}
+.stage-card:has(.status-RUNNING) {
+  border-color: #7699d6;
+  background: #edf3ff;
+}
+.stage-header:hover {
+  background: #e8f0fd;
+}
+.stage-header:focus-visible,
+.call-row:focus-visible {
+  outline: 2px solid #4b6ac4;
+  outline-offset: -2px;
 }
 .stage-header {
   display: block;
@@ -1319,7 +1333,7 @@ select {
   align-items: center;
   gap: 9px;
   padding: 11px 8px;
-  color: #9ba6b7;
+  color: #5b7090;
   text-align: left;
 }
 .stage-number {
@@ -1333,23 +1347,23 @@ select {
   border-radius: 6px;
   font-family: "IBM Plex Mono", monospace;
   font-size: 8px;
-  color: #a6b2c4;
+  color: #66788f;
   background: #f9fbfd;
 }
 .stage-number.status-GREEN {
   border-color: #d6e7dc;
   background: #f1f7f3;
-  color: #8aad98;
+  color: #307953;
 }
 .stage-number.status-RUNNING {
   border-color: #d7e0f6;
   background: #f0f4ff;
-  color: #718bce;
+  color: #315bb4;
 }
 .stage-number.status-FAILED {
   border-color: #ead5cf;
   background: #fbf1ee;
-  color: #ba8a7f;
+  color: #a54d40;
 }
 .stage-heading {
   display: flex;
@@ -1367,14 +1381,14 @@ select {
   gap: 8px;
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid #e9eef5;
+  border-top: 1px solid #d5dfed;
 }
 .stage-overview-metrics > div {
   min-width: 0;
 }
 .stage-overview-metrics > div > span {
   display: block;
-  color: #8290a5;
+  color: #5b6e89;
   font-size: 10px;
   margin-bottom: 5px;
 }
@@ -1383,12 +1397,12 @@ select {
   font-family: "IBM Plex Mono", monospace;
   font-weight: 500;
   font-size: 13px;
-  color: #475b79;
+  color: #2e4668;
   overflow-wrap: anywhere;
 }
 .stage-header .stage-overview-metrics small {
   font-size: 9px;
-  color: #8290a5;
+  color: #5b6e89;
   line-height: 1.5;
 }
 .stage-call-list {
@@ -1411,7 +1425,7 @@ select {
 .stage-header b {
   display: block;
   font-size: 10px;
-  color: #7b899e;
+  color: #435b7c;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -1421,24 +1435,25 @@ select {
   display: block;
   font-size: 8px;
   margin-top: 4px;
-  color: #b1b9c6;
+  color: #64758d;
 }
 .stage-body {
   padding: 0 10px 11px;
 }
 .model-latency {
   font-size: 8px;
-  color: #a8b2c0;
+  color: #64758d;
   margin: 8px 0 10px;
 }
 .artifact-summary {
+  border: 1px solid #bdcfea;
   display: flex;
   gap: 7px;
   align-items: center;
-  background: #f5f8fc;
+  background: #e9f1ff;
   border-radius: 5px;
   padding: 8px;
-  color: #899db7;
+  color: #405f89;
   font-size: 9px;
   margin-bottom: 9px;
 }
@@ -1474,26 +1489,26 @@ select {
 .call-row > span:nth-child(2) {
   flex: 1;
   font-size: 9px;
-  color: #8b9ab0;
+  color: #4f6483;
   min-width: 0;
 }
 .call-row > span:nth-child(3) {
   text-align: right;
   font-family: "IBM Plex Mono", monospace;
   font-size: 8px;
-  color: #99a8bb;
+  color: #586e8d;
 }
 .call-row small {
   display: block;
   font-size: 7px;
-  color: #acb6c4;
+  color: #64758d;
   margin-top: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .call-row > svg {
-  color: #a4b0c2;
+  color: #657997;
 }
 .log-section {
   border-top: 1px solid var(--border);
@@ -1505,7 +1520,7 @@ select {
   width: 100%;
   gap: 7px;
   font-size: 10px;
-  color: #8899b1;
+  color: #50688b;
   padding: 0;
 }
 .log-toggle > svg:last-child {
@@ -1522,7 +1537,7 @@ select {
   border-radius: 6px;
   font-size: 8px;
   line-height: 1.9;
-  color: #7b8da5;
+  color: #405a7a;
   max-height: 350px;
   overflow: auto;
   white-space: pre-wrap;
@@ -1535,7 +1550,7 @@ select {
   gap: 6px;
   width: 100%;
   font-size: 9px;
-  color: #738dbe;
+  color: #365eaa;
 }
 .inspector-footer {
   margin-top: auto;
@@ -1545,7 +1560,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #a3afc1;
+  color: #65758e;
   font-size: 8px;
 }
 .inspector-footer > span {
@@ -1558,7 +1573,7 @@ select {
   align-items: center;
   gap: 5px;
   font-size: 8px;
-  color: #8b9ebc;
+  color: #536e96;
 }
 .inspector-empty {
   flex: 1;
@@ -1608,18 +1623,18 @@ select {
   background: white;
   border-radius: 6px;
   padding: 8px;
-  color: #acb7c8;
+  color: #65758e;
 }
 .history-search input {
   width: 100%;
   border: 0;
   outline: none !important;
   box-shadow: none !important;
-  color: #8999b3;
+  color: #4f6483;
   font-size: 10px;
 }
 .history-search input::placeholder {
-  color: #b3becd;
+  color: #718097;
 }
 .history-list {
   overflow: auto;
@@ -1637,9 +1652,13 @@ select {
   margin-bottom: 8px;
   transition: border-color 0.2s;
 }
-.history-card:hover,
+.history-card:hover {
+  border-color: #9ab3dc;
+  background: #f4f7fe;
+}
 .history-card.chosen {
-  border-color: #b5c7e4;
+  border-color: #7596d2;
+  background: #edf3ff;
 }
 .history-card-top {
   display: flex;
@@ -1653,18 +1672,18 @@ select {
   flex: 1;
   min-width: 0;
   font-size: 11px;
-  color: #7186a6;
+  color: #3e5c86;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .history-project svg {
-  color: #9caec8;
+  color: #5d7da8;
 }
 .history-path {
   display: block;
   font-size: 8px;
-  color: #a6b3c7;
+  color: #63758f;
   margin: 9px 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1672,7 +1691,7 @@ select {
 }
 .history-meta {
   font-size: 8px;
-  color: #acb7c8;
+  color: #65758e;
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -1691,7 +1710,7 @@ select {
   border-top: 1px solid #f0f3f7;
   margin-top: 10px;
   padding-top: 9px;
-  color: #a6b5c9;
+  color: #5f7391;
   font-size: 8px;
 }
 .history-bottom > span {
@@ -1703,7 +1722,7 @@ select {
   display: block;
   margin: 12px auto 4px;
   font-size: 9px;
-  color: #8da0be;
+  color: #4c6b9b;
   padding: 7px;
 }
 .modal-overlay {
