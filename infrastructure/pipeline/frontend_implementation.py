@@ -1,22 +1,22 @@
-"""Step 10: connect frontend triggers to backend APIs through functional smoke tests."""
+"""Step 10: connect frontend triggers to backend APIs through single-pass requirement acceptance tests."""
 
 from pathlib import Path
 
 from infrastructure.stages.frontend.triggers.context import load_e2e_context
-from infrastructure.stages.frontend.triggers.implementation import run_trigger_tdd, verify_frontend
-from infrastructure.stages.frontend.triggers.acceptance import run_independent_acceptance
+from infrastructure.stages.frontend.triggers.implementation import run_trigger_tdd
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.files import save_json
 
 
 def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = False,
-        max_turns: int = 10, max_tests: int = 2) -> dict:
-    if min(max_turns, max_tests) < 1:
-        raise ValueError("--max-turns and --max-tests must be positive")
+        max_turns: int = 10) -> dict:
+    if max_turns < 1:
+        raise ValueError("--max-turns must be positive")
     tree, schema, backend, ui, interactions, images, contexts = load_e2e_context(arc_dir, input_dir)
-    report = {"status": "PREPARING", "requirements": {rid: {"status": "NO_DIRECT_TRIGGERS", "triggers": []}
-        for rid in tree.requirements if tree.children[rid]}}
+    report = {"status": "PREPARING", "requirements": {
+        rid: {"status": "NO_DIRECT_TRIGGERS" if tree.children[rid] else "PENDING", "triggers": []}
+        for rid in tree.requirements}}
     save_json(arc_dir / "frontend_e2e.json", report)
     try:
         if not ui["pages"]:
@@ -25,17 +25,9 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
             return report
         model = TextModel()
         result = run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
-            contexts, model, DemoConsole(pause), report, max_turns, max_tests)
-        acceptance = run_independent_acceptance(input_dir, arc_dir, schema, backend, ui, interactions,
-            model, DemoConsole(pause), max_turns, process_report=result)
-        if any(entry.get("repair_checks") for entry in acceptance["requirements"].values()):
-            result = verify_frontend(arc_dir, tree, backend, ui, DemoConsole(pause), result)
-        result["verification"]["independent_acceptance"] = {"status": "GREEN" if acceptance["status"] == "GREEN" else "FAILED",
-            "report": ".arc/independent_acceptance.json"}
-        if acceptance["status"] != "GREEN":
-            result["status"] = "COMPLETED_WITH_FAILURES"
+            contexts, model, DemoConsole(pause), report, max_turns)
         save_json(arc_dir / "frontend_e2e.json", result)
-        print(f"Frontend functional smoke {result['status']}: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
+        print(f"Frontend requirement acceptance {result['status']}: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
         return result
     except BaseException as error:
         report.update({"status": "FAILED", "error": str(error)})
