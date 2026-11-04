@@ -37,6 +37,18 @@ Edit or create files using edit_file:
 Preserve earlier routes, imports, exports, state, components, fixtures and accepted behavior.
 Extend shared files locally instead of replacing their contents with the current requirement.
 
+Organize application code into focused files as requirements accumulate. Prefer separate
+components for substantial forms, dialogs, lists and independently changing page sections.
+Keep their markup, local state and handlers together; move feature-specific styles or
+services into focused files when they would otherwise crowd shared modules.
+Keep App, shared layouts, route registration and common styles relatively stable in size:
+add small imports, composition or registration changes there, and put new feature details
+in the relevant components or modules. Reuse existing components before creating new ones.
+When extending a long file, extract the relevant cohesive section if it improves readability,
+preserving its state ownership, props, event behavior, selectors and existing callers.
+There is no fixed file-length limit. Split by responsibility, not by line count or design ID;
+avoid tiny wrapper components, unnecessary layers and unrelated refactoring.
+
 The compiler automatically records
 created and edited files under the current requirement and implementation stage, including
 helpers and styles. Do not return a file association registry or create placeholder files for design IDs.
