@@ -16,7 +16,15 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { api, compact, duration, money, type Detail, type Run } from "../types";
+import {
+  api,
+  compact,
+  duration,
+  money,
+  type Call,
+  type Detail,
+  type Run,
+} from "../types";
 import { Modal } from "./Details";
 echarts.use([
   LineChart,
@@ -36,7 +44,11 @@ const colors = [
   "#57a4bc",
 ];
 
-type Metric = "seconds" | "tokens" | "cost";
+type Metric = "seconds" | "tokens" | "cost" | "calls";
+function callRequirementPoints(call: Call): string[] {
+  if (call.requirement_ids?.length) return [...new Set(call.requirement_ids)];
+  return [call.task_id ? "任务 · " + call.task_id : "未关联需求"];
+}
 export default function CompareRuns({
   runs,
   currentId,
@@ -100,9 +112,21 @@ export default function CompareRuns({
         : stages.map((item) => item.id.slice(0, 2) + " " + item.label),
     [stage, taskNames, stages],
   );
+  const callLabels = useMemo(() => {
+    if (!stage) return labels;
+    const points = new Set<string>();
+    for (const detail of selected) {
+      for (const call of detail.calls) {
+        if (call.stage !== stage.slice(0, 2)) continue;
+        for (const point of callRequirementPoints(call)) points.add(point);
+      }
+    }
+    return [...points];
+  }, [selected, stage, labels]);
   function values(detail: Detail, metric: Metric) {
     let sum = 0;
-    return labels.map((label, index) => {
+    const metricLabels = metric === "calls" ? callLabels : labels;
+    return metricLabels.map((label, index) => {
       let value: number | null = null;
       if (!stage) {
         const entry = detail.stages.find(
@@ -116,7 +140,18 @@ export default function CompareRuns({
                 ? entry.metrics.usage_calls || entry.metrics.calls === 0
                   ? entry.metrics.input + entry.metrics.output
                   : null
-                : entry.metrics.cost;
+                : metric === "calls"
+                  ? entry.metrics.calls
+                  : entry.metrics.cost;
+        }
+      } else if (metric === "calls") {
+        const stageEntry = detail.stages.find((item) => item.id === stage);
+        if (stageEntry && stageEntry.status !== "PENDING") {
+          value = detail.calls.filter(
+            (call) =>
+              call.stage === stage.slice(0, 2) &&
+              callRequirementPoints(call).includes(label),
+          ).length;
         }
       } else {
         const tasks = (detail.tasks || []).filter(
@@ -155,7 +190,7 @@ export default function CompareRuns({
       Metric,
       { id: string; name: string; color: string; values: (number | null)[] }[]
     >;
-    for (const metric of ["seconds", "tokens", "cost"] as Metric[]) {
+    for (const metric of ["seconds", "tokens", "cost", "calls"] as Metric[]) {
       result[metric] = selected.map((detail) => ({
         id: detail.run.id,
         name: detail.run.name + " · " + detail.run.id.slice(-6),
@@ -164,7 +199,7 @@ export default function CompareRuns({
       }));
     }
     return result;
-  }, [selected, ids, stage, labels, cumulative]);
+  }, [selected, ids, stage, labels, callLabels, cumulative]);
   return (
     <Modal open onClose={onClose} title="运行对比" eyebrow="RUN ANALYTICS" wide>
       <div className="compare-controls">
@@ -293,6 +328,7 @@ export default function CompareRuns({
                     <th>状态</th>
                     <th>墙钟耗时</th>
                     <th>Token</th>
+                    <th>模型调用次数</th>
                     <th>估算金额</th>
                   </tr>
                 </thead>
@@ -330,6 +366,7 @@ export default function CompareRuns({
                             : null,
                         )}
                       </td>
+                      <td>{detail.metrics.calls.toLocaleString("zh-CN")}</td>
                       <td>
                         {money(detail.metrics.cost)}
                         {detail.metrics.cost != null &&
@@ -353,29 +390,34 @@ export default function CompareRuns({
               {stage
                 ? "结构化记录显示任务实际耗时；历史记录缺少任务计时时显示模型耗时之和。共享 API 按实际任务统计。"
                 : "阶段时间为实际墙钟耗时；历史记录缺失的数据留空。点击图表中的阶段可下钻到执行任务。"}{" "}
-              ＊ 表示部分计价。
+              ＊
+              表示部分计价。阶段内的调用次数按需求点归集，共享调用会计入每个关联需求点，不宜直接相加；缺少关联时按任务展示。
             </p>
-            {(["seconds", "tokens", "cost"] as Metric[]).map((metric) => (
-              <Chart
-                key={metric}
-                title={
-                  metric === "seconds"
-                    ? stage
-                      ? "任务耗时"
-                      : "阶段耗时"
-                    : metric === "tokens"
-                      ? "Token 使用量"
-                      : "估算费用 · CNY"
-                }
-                labels={labels}
-                series={chartData[metric]}
-                line={chartType === "line"}
-                metric={metric}
-                onClick={(index) => {
-                  if (!stage) setStage(stages[index].id);
-                }}
-              />
-            ))}
+            {(["seconds", "tokens", "cost", "calls"] as Metric[]).map(
+              (metric) => (
+                <Chart
+                  key={metric}
+                  title={
+                    metric === "seconds"
+                      ? stage
+                        ? "任务耗时"
+                        : "阶段耗时"
+                      : metric === "tokens"
+                        ? "Token 使用量"
+                        : metric === "calls"
+                          ? "模型调用次数"
+                          : "估算费用 · CNY"
+                  }
+                  labels={metric === "calls" ? callLabels : labels}
+                  series={chartData[metric]}
+                  line={chartType === "line"}
+                  metric={metric}
+                  onClick={(index) => {
+                    if (!stage) setStage(stages[index].id);
+                  }}
+                />
+              ),
+            )}
           </>
         )}
       </div>
@@ -449,6 +491,7 @@ function Chart({
       },
       yAxis: {
         type: "value",
+        minInterval: metric === "calls" ? 1 : 0,
         splitLine: { lineStyle: { color: "#edf0f4" } },
         axisLabel: {
           color: "#8993a3",
