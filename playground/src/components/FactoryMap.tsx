@@ -42,11 +42,11 @@ const FactoryNodeView = memo(function FactoryNodeView({
       initial={{ opacity: 0, y: 14, scale: 0.94 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.35 }}
-      className={`factory-node kind-${data.kind} ${selected ? "is-selected" : ""}`}
+      className={`factory-node kind-${data.kind} ${data.zone === 0 || data.zone === 3 ? "is-tree" : ""} ${selected ? "is-selected" : ""}`}
       style={{ "--zone-color": ZONES[data.zone].color } as React.CSSProperties}
     >
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+      <Handle id="in" type="target" position={Position.Left} />
+      <Handle id="out" type="source" position={Position.Right} />
       <div className="node-illustration">
         {data.kind === "group" ? (
           <Layers3 size={27} />

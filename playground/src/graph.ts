@@ -114,6 +114,8 @@ export function buildGraph(detail: Detail | null, expanded: Set<string>) {
       id: edgeId,
       source,
       target,
+      sourceHandle: "out",
+      targetHandle: "in",
       label,
       type: "smoothstep",
       className: `edge-${kind}`,
@@ -337,8 +339,8 @@ export function buildGraph(detail: Detail | null, expanded: Set<string>) {
         link("trigger:" + id, "api:" + action.api, "call", "CALL");
     }
   }
-  // Pack each visible subtree into a grid. Expanded branches reserve their actual
-  // bounds so sibling branches and neighbouring factory zones never overlap.
+  // Keep requirement/UI hierarchies in left-to-right trees. Flat registries use
+  // a compact grid; both layouts reserve the full bounds of expanded branches.
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const childNodes = new Map<string, FactoryNode[]>();
   const parented = new Set<string>();
@@ -392,13 +394,45 @@ export function buildGraph(detail: Detail | null, expanded: Set<string>) {
       height: y - 28,
     };
   }
+  function layoutTree(roots: FactoryNode[]): { width: number; height: number } {
+    const heights = new Map<string, number>();
+    const siblingGap = 24;
+    const levelWidth = 256;
+    function measure(node: FactoryNode): number {
+      const children = childNodes.get(node.id) || [];
+      let childrenHeight = 0;
+      for (const child of children) childrenHeight += measure(child);
+      childrenHeight += Math.max(0, children.length - 1) * siblingGap;
+      const height = Math.max(68, childrenHeight);
+      heights.set(node.id, height);
+      return height;
+    }
+    let width = 0;
+    function place(node: FactoryNode, depth: number, top: number) {
+      const height = heights.get(node.id)!;
+      node.position = { x: depth * levelWidth, y: top + (height - 68) / 2 };
+      width = Math.max(width, node.position.x + 176);
+      let childTop = top;
+      for (const child of childNodes.get(node.id) || []) {
+        place(child, depth + 1, childTop);
+        childTop += heights.get(child.id)! + siblingGap;
+      }
+    }
+    let top = 0;
+    for (const root of roots) {
+      const height = measure(root);
+      place(root, 0, top);
+      top += height + siblingGap;
+    }
+    return { width, height: Math.max(0, top - siblingGap) };
+  }
   let zoneX = 0;
   for (let zone = 0; zone < 4; zone++) {
     const members = nodes.filter(
       (node) => node.data.zone === zone && node.data.kind !== "zone",
     );
     const roots = members.filter((node) => !parented.has(node.id));
-    const bounds = pack(roots);
+    const bounds = zone === 0 || zone === 3 ? layoutTree(roots) : pack(roots);
     const width = Math.max(360, bounds.width + 32);
     const heading = nodes.find((node) => node.id === "zone:" + zone)!;
     heading.position = { x: zoneX, y: 0 };

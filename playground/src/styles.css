@@ -908,6 +908,11 @@ select {
   color: #4f70c5;
   border-color: #829bcd;
 }
+.is-tree .node-expand {
+  top: calc(50% - 11px);
+  bottom: auto;
+  right: -11px;
+}
 .kind-entity {
   background: #f7fcf9;
 }
