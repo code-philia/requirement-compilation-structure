@@ -1,4 +1,4 @@
-"""Step 08: implement the saved UI/data design through UI existence TDD."""
+"""Step 08: incrementally implement each leaf requirement's saved UI/data design."""
 
 from pathlib import Path
 
@@ -15,13 +15,13 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
         raise ValueError("--max-turns must be positive")
     if not (arc_dir / "ui_design.json").is_file():
         raise ValueError("Run main.py --stage 07 first to create .arc/ui_design.json")
-    report = {"status": "VALIDATING", "pages": {}}
+    report = {"status": "VALIDATING", "pages": {}, "requirements": {}}
     save_json(arc_dir / "ui_checks.json", report)
     try:
         tree, images, contexts = load_ui_context(arc_dir, input_dir)
         design = load_ui_design(arc_dir, tree)
         console = DemoConsole(pause)
-        console.show("Step 08 | Saved UI/data design", f"Loaded {arc_dir / 'ui_design.json'}\nPages: {', '.join(design['pages']) or '(none)'}\nGenerate existence tests and implement this design without rerunning synthesis.")
+        console.show("Step 08 | Saved UI/data design", f"Loaded {arc_dir / 'ui_design.json'}\nPages: {', '.join(design['pages']) or '(none)'}\nTraverse leaf requirements, implement their related UI incrementally, and regress accepted requirements without rerunning synthesis.")
         if not design["pages"]:
             report["status"] = "NO_UI"
             save_json(arc_dir / "ui_checks.json", report)
@@ -33,6 +33,9 @@ def implement_frontend_ui(input_dir: Path, arc_dir: Path, pause: bool = False,
         return result
     except BaseException as error:
         report.update({"status": "FAILED", "error": str(error)})
+        for requirement in report["requirements"].values():
+            if requirement["status"] not in {"GREEN", "NO_UI", "NO_DIRECT_UI"}:
+                requirement["status"] = "FAILED"
         for page in report["pages"].values():
             if page["status"] != "GREEN":
                 page["status"] = "FAILED"

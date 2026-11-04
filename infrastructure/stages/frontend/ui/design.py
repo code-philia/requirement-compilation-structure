@@ -96,6 +96,30 @@ def page_context(design: dict, pid: str) -> dict:
     return {"id": pid, **deepcopy(design["pages"][pid]), "elements": page_elements(design, pid)}
 
 
+def requirement_ui(design: dict, requirement_ids: list[str]) -> dict:
+    """Select directly owned UI nodes and their ancestor structure, never future siblings."""
+    selected = set()
+    for rid in requirement_ids:
+        for uid in design["requirements"].get(rid, []):
+            current = uid
+            ancestors = set()
+            while current is not None and current not in selected:
+                if current in ancestors:
+                    raise ValueError(f"UI parent cycle for {rid}: {current}")
+                if current not in design["elements"]:
+                    raise ValueError(f"Unknown UI element for {rid}: {current}")
+                ancestors.add(current)
+                current = design["elements"][current].get("parent")
+            selected.update(ancestors)
+    return {
+        **design,
+        "pages": {pid: deepcopy(page) for pid, page in design["pages"].items()
+            if page["root"] in selected},
+        "elements": {uid: deepcopy(node) for uid, node in design["elements"].items()
+            if uid in selected},
+    }
+
+
 def owners(design: dict, pid: str) -> list[str]:
     """Return requirements that directly reference elements on this page."""
     ids = set(page_elements(design, pid))

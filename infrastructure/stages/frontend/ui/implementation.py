@@ -1,8 +1,8 @@
-"""Step 08 orchestration: UI existence tests -> component repair -> regression.
+"""Step 08: incrementally implement leaf requirements and regress accepted UI.
 
-Tests are rendered deterministically from the complete step 07 design. A shared
-file agent implements one page at a time, with previously accepted page tests
-included in its checks. Application integration is model-owned; shared test tools remain read-only."""
+Each requirement owns its related UI slice. Shared pages accumulate accepted
+requirements; their presence suites never demand future requirements' controls.
+"""
 
 import json
 from pathlib import Path
@@ -12,14 +12,20 @@ from infrastructure.shared.agent.discovery import project_index
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.shared.project.entrypoints import selected_path
-from infrastructure.stages.frontend.ui.design import owners, page_context
+from infrastructure.stages.frontend.ui.design import owners, page_context, page_elements, requirement_ui
+from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.frontend.ui.runtime import APPLICATION_ENTRYPOINTS, prepare_frontend
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_suite, require_green, test_path
 from infrastructure.shared.project.dependencies import install_dependencies
-from infrastructure.utils.files import save_json, save_text
+from infrastructure.utils.files import read_artifact, save_json, save_text
 from infrastructure.shared.project.git import checkpoint
 
-INSTRUCTIONS = """Implement the current page from its UI/data reference design and requirements.
+INSTRUCTIONS = """Implement the current requirement's UI on task.page.
+The supplied page is a requirement-scoped slice: owned elements plus structural ancestors,
+not the complete final page. Add only this requirement's presentation, editing and navigation.
+Do not implement future requirements just because they share this page or appear in an image.
+Read the existing related components before editing. Extend shared pages incrementally and
+preserve accepted_element_ids and every previously accepted requirement's UI and data bindings.
 Read the supplied package/configuration and actual source to use the project's technology
 stack. Create task.file_target or repair implementation_path, using exports, props and
 state appropriate to the actual components. The design is a
@@ -65,7 +71,8 @@ It supplies display-test overrides and exposes actual data keys; it does not own
 Do not copy display-test records into production initial values. If representative records
 are needed, arrange them only in the writable presence suite's __ARC_UI_TEST_DATA__ setup.
 
-The compiler compiles, runs current/accepted presence tests and builds; it never regenerates
+The compiler updates presence suites for the current and previously accepted requirements,
+then compiles, runs regression checks and builds; it never regenerates
 App, routes, handlers or stores. Repair relevant writable sources without removing previous
 behavior. Diagnose incorrect tests against original requirements and preserve meaningful
 control/data-key assertions. Shared test/build infrastructure remains read-only.
@@ -74,97 +81,158 @@ control/data-key assertions. Shared test/build infrastructure remains read-only.
 
 def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_turns: int = 10,
         images: dict | None = None, requirement_contexts: dict | None = None) -> dict:
-    """Implement the complete saved UI/data design through component-existence TDD.
-
-    Prepare the project and browser, generate initial presence tests, then
-    repair model-selected page components until checks pass. Update the caller's
-    report; application integration remains model-owned."""
+    """Traverse leaf requirements; implement only their UI slices on each affected page."""
     output = arc_dir.parent.resolve()
+    tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
+    report["requirements"] = {
+        rid: {"status": "PENDING" if not tree.children[rid] else "NO_DIRECT_UI",
+            "requirement": rid, "requirements": [rid], "pages": []}
+        for rid in tree.requirements
+    }
+    report["pages"] = {
+        pid: {"status": "PENDING", "requirements": owners(design, pid),
+            "test_path": test_path(pid)}
+        for pid in design["pages"]
+    }
+    report["status"] = "IMPLEMENTING"
+    save_json(arc_dir / "ui_checks.json", report)
     prepare_frontend(output)
     console.show("UI TDD preparation | Dependencies", "Install workspace dependencies and Playwright Chromium. No backend is started.")
     install_dependencies(output)
     checks = FrontendChecks(output)
     checks.install_browser()
-    checkpoint(output, stage="08", task="runtime", action="Prepare presentation adapter and browser tests",
-        details={"pages": list(design["pages"])})
+    checkpoint(output, stage="08", task="runtime", action="Prepare requirement-driven UI implementation",
+        details={"requirements": tree.leaves, "pages": list(design["pages"])})
     accepted = []
+    accepted_pages = []
     selection = SourceFiles(output, design)
     context_index = project_index(output,
         kinds=("page", "ui_element", "ui_data", "requirement", "test_requirement", "file"),
         file_roots=("frontend/src", "frontend/tests"))
-    report["status"] = "IMPLEMENTING"
-    save_json(arc_dir / "ui_checks.json", report)
-    for number, pid in enumerate(design["pages"], 1):
-        uses = owners(design, pid)
-        relative = test_path(pid)
-        suite = existence_suite(design, pid)
-        if not (output / relative).is_file():
-            save_text(output / relative, suite)
-        report["pages"][pid] = {"status": "TESTS_READY", "requirements": uses, "test_path": relative}
-        save_json(arc_dir / "ui_checks.json", report)
-        label = f"UI {number}/{len(design['pages'])} {pid}"
-        checkpoint(output, stage="08", task=pid, action="Publish UI existence suite before implementation",
-            status="TESTS_READY", details={"test_path": relative, "requirements": uses})
-        console.show(label + " | Existence tests before implementation", (output / relative).read_text(encoding="utf-8"))
-        files = [test_path(key) for key in [*accepted, pid]]
+    for number, rid in enumerate(tree.leaves, 1):
+        entry = report["requirements"][rid]
+        requirement = (requirement_contexts or {}).get(rid, {
+            **tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]]})
+        label = f"UI requirement {number}/{len(tree.leaves)} {rid}"
+        console.show(label + " | Requirement and related UI", json.dumps(requirement, ensure_ascii=False, indent=2))
+        entry["status"] = "PREPARING"
+        entry["page_results"] = {}
+        # A requirement is the rollback boundary, including all pages it touches.
+        with implementation_task(output, entry, console, "08 / " + rid):
+            current_design = requirement_ui(design, [rid])
+            accepted_design = requirement_ui(design, accepted)
+            cumulative_design = requirement_ui(design, [*accepted, rid])
+            entry["pages"] = list(current_design["pages"])
+            entry["test_paths"] = [test_path(pid) for pid in entry["pages"]]
+            if not entry["pages"]:
+                entry["status"] = "NO_UI"
+                console.show(label + " | No direct UI", "No UI nodes are associated with this leaf requirement.")
+            completed_pages = list(accepted_pages)
+            for pid in entry["pages"]:
+                entry["current_page"] = pid
+                relative = test_path(pid)
+                # Refresh only the current page's cumulative contract. Other accepted
+                # pages keep their suites; future requirements are excluded.
+                save_text(output / relative, existence_suite(cumulative_design, pid))
+                files = [test_path(key) for key in dict.fromkeys([*completed_pages, pid])]
+                entry["status"] = "TESTS_READY"
+                save_json(arc_dir / "ui_checks.json", report)
+                console.show(label + " / " + pid + " | Scoped existence tests", (output / relative).read_text(encoding="utf-8"))
+                checkpoint(output, stage="08", task=rid, action="Publish cumulative UI presence suite",
+                    status="TESTS_READY", details={"page": pid, "requirements": [*accepted, rid], "test_path": relative})
 
-        def implementation_checks():
-            """Check model-owned application sources and selected page tests."""
-            compiled = checks.typecheck(files)
-            if compiled["returncode"]:
-                return {"typecheck": compiled, "tests": None}
-            tested = checks.tests(files)
-            return {"typecheck": compiled, "tests": tested}
+                def implementation_checks():
+                    compiled = checks.typecheck(files)
+                    if compiled["returncode"]:
+                        return {"typecheck": compiled, "tests": None}
+                    return {"typecheck": compiled, "tests": checks.tests(files)}
 
-        def implementation_gate():
-            """Accept the current page only after compilation and presence tests pass."""
-            result = implementation_checks()
-            for kind in ("typecheck",):
-                if result[kind] and result[kind]["returncode"]:
-                    raise ValueError(f"{kind} failed: {result[kind]['output']}")
-            require_green(result["tests"])
-            return result
+                def implementation_gate():
+                    result = implementation_checks()
+                    if result["typecheck"]["returncode"]:
+                        raise ValueError(f"TypeScript failed: {result['typecheck']['output']}")
+                    require_green(result["tests"])
+                    return result
 
-        with implementation_task(output, report["pages"][pid], console, "10 / " + pid):
-            # Compile tests separately before deciding whether browser failure is RED.
-            try:
-                current = implementation_checks()
-            except (ValueError, RuntimeError) as error:
-                current = {"error": str(error), "typecheck": None, "tests": None}
-            if current["tests"] is not None:
-                report["pages"][pid]["status"] = "GREEN" if not current["tests"]["returncode"] else "REPAIR_REQUIRED"
-                console.show(label + " | " + report["pages"][pid]["status"], current["tests"]["output"])
-            save_json(arc_dir / "ui_checks.json", report)
-            if current["tests"] and current["tests"]["returncode"] == 0:
-                agent = {"turns": 0, "checks": current}
+                try:
+                    current = implementation_checks()
+                except (ValueError, RuntimeError) as error:
+                    current = {"error": str(error), "typecheck": None, "tests": None}
+                if (current["tests"] and current["tests"]["returncode"] == 0
+                        and current["tests"].get("passed") and not current["tests"].get("errors")
+                        and not current["tests"].get("failed")):
+                    agent = {"turns": 0, "checks": current}
+                else:
+                    entry["status"] = "IMPLEMENTING"
+                    save_json(arc_dir / "ui_checks.json", report)
+                    context = {
+                        "requirement": {key: value for key, value in requirement.items() if key != "images"},
+                        "page": page_context(current_design, pid),
+                        "accepted_requirements": list(accepted),
+                        "accepted_element_ids": list(page_elements(accepted_design, pid))
+                            if pid in accepted_design["pages"] else [],
+                        "application_entrypoints": list(APPLICATION_ENTRYPOINTS),
+                        "visual_references": {iid: (images or {}).get(iid, image)
+                            for iid, image in requirement.get("images", {}).items()},
+                        "implementation_path": selected_path(output, "page", pid),
+                    }
+                    workspace = selection.workspace(target=("page", pid),
+                        references=["frontend/src/ui-runtime.ts", *files, "frontend/package.json",
+                            "frontend/tsconfig.json", "frontend/playwright.ui.config.ts", *APPLICATION_ENTRYPOINTS])
+                    agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
+                        max_turns, console, label + " / " + pid + " / Implementation", feedback=current,
+                        feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
+                entry["page_results"][pid] = {
+                    "status": "GREEN", "turns": agent["turns"],
+                    "implementation_path": selected_path(output, "page", pid),
+                    "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"},
+                }
+                if pid not in completed_pages:
+                    completed_pages.append(pid)
+                console.show(label + " / " + pid + " | GREEN", agent["checks"]["tests"]["output"])
+            if entry["pages"]:
+                entry["status"] = "GREEN"
+                entry.pop("current_page", None)
+        if entry["status"] == "GREEN":
+            accepted.append(rid)
+            accepted_pages = completed_pages
+        elif entry["status"] == "FAILED":
+            for result in entry["page_results"].values():
+                result["status"] = "ROLLED_BACK"
+        for pid, page in report["pages"].items():
+            statuses = [report["requirements"][owner]["status"] for owner in page["requirements"]]
+            page["implementation_path"] = selected_path(output, "page", pid)
+            results = [report["requirements"][owner]["page_results"][pid]
+                for owner in page["requirements"]
+                if pid in report["requirements"][owner].get("page_results", {})
+                and report["requirements"][owner]["status"] == "GREEN"]
+            page["turns"] = sum(result["turns"] for result in results)
+            if results:
+                page["checks"] = results[-1]["checks"]
+            if not statuses:
+                page["status"] = "NO_DIRECT_UI"
+            elif "FAILED" in statuses:
+                page["status"] = "FAILED"
+            elif all(status == "GREEN" for status in statuses):
+                page["status"] = "GREEN"
             else:
-                context = {"page": page_context(design, pid), "application_entrypoints": list(APPLICATION_ENTRYPOINTS),
-                    "requirements": [{key: value for key, value in (requirement_contexts or {}).get(rid, {"id": rid}).items() if key != "images"}
-                        for rid in uses],
-                    "visual_references": {iid: (images or {})[iid] for iid in design["pages"][pid]["images"]},
-                    "implementation_path": selected_path(output, "page", pid)}
-                workspace = selection.workspace(target=("page", pid),
-                    references=["frontend/src/ui-runtime.ts", relative, "frontend/package.json",
-                        "frontend/tsconfig.json", "frontend/playwright.ui.config.ts", *APPLICATION_ENTRYPOINTS])
-                report["pages"][pid]["status"] = "IMPLEMENTING"
-                agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
-                    max_turns, console, label + " / Implementation", feedback=current,
-                    feedback_filter=lambda value: selection.feedback(workspace, value), context_index=context_index)
-            accepted.append(pid)
-            report["pages"][pid].update({"status": "GREEN", "turns": agent["turns"],
-                "implementation_path": selected_path(output, "page", pid),
-                "checks": {key: value for key, value in agent["checks"]["tests"].items() if key != "output"}})
-            save_json(arc_dir / "ui_checks.json", report)
-            console.show(label + " | GREEN", agent["checks"]["tests"]["output"])
+                page["status"] = "PENDING"
         save_json(arc_dir / "ui_checks.json", report)
-    console.show("UI final verification", "All page tasks were attempted. Run display regression and build, retaining any failures.")
-    files = [test_path(pid) for pid in design["pages"]]
-    verification = final_checks(console,
-        typecheck=(lambda: checks.typecheck(files), None),
-        tests=(lambda: checks.tests(files), require_green),
-        build=(checks.build, None))
-    final = verification["tests"].get("result") or {}
-    report["summary"] = {"pages": len(accepted), "tests": final.get("passed", 0), "failed": final.get("failed", 0)}
-    complete_report(report, report["pages"].values(), verification)
+
+    console.show("UI final verification", "All leaf requirements were attempted. Regress accepted UI and build, retaining requirement failures.")
+    files = [test_path(pid) for pid in accepted_pages]
+    final_commands = {"typecheck": (lambda: checks.typecheck(files), None)}
+    if files:
+        final_commands["tests"] = (lambda: checks.tests(files), require_green)
+    final_commands["build"] = (checks.build, None)
+    verification = final_checks(console, **final_commands)
+    final = verification.get("tests", {}).get("result") or {}
+    report["summary"] = {
+        "requirements": len(tree.leaves), "accepted_requirements": len(accepted),
+        "failed_requirements": sum(entry["status"] == "FAILED" for entry in report["requirements"].values()),
+        "pages": sum(page["status"] == "GREEN" for page in report["pages"].values()),
+        "tests": final.get("passed", 0), "failed": final.get("failed", 0),
+    }
+    complete_report(report, report["requirements"].values(), verification)
     save_json(arc_dir / "ui_checks.json", report)
     return report
