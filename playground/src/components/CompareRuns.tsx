@@ -464,74 +464,82 @@ function Chart({
   }, [hasLabels]);
   useEffect(() => {
     if (!instance.current) return;
-    instance.current.setOption({
-      animationDuration: 350,
-      color: series.map((item) => item.color),
-      textStyle: { fontFamily: "Inter, system-ui, sans-serif" },
-      grid: { left: 55, right: 24, top: 45, bottom: 70 },
-      tooltip: { trigger: "axis", confine: true },
-      legend: {
-        top: 0,
-        type: "scroll",
-        textStyle: { fontSize: 11, color: "#768196" },
+    instance.current.setOption(
+      {
+        animationDuration: 350,
+        color: series.map((item) => item.color),
+        textStyle: { fontFamily: "Inter, system-ui, sans-serif" },
+        grid: { left: 55, right: 24, top: 45, bottom: 70 },
+        tooltip: { trigger: "axis", confine: true },
+        legend: {
+          data: series.map((item) => item.name),
+          top: 0,
+          type: "scroll",
+          textStyle: { fontSize: 11, color: "#768196" },
+        },
+        xAxis: {
+          type: "category",
+          data: labels,
+          axisLine: { lineStyle: { color: "#dce3ec" } },
+          axisLabel: {
+            color: "#8993a3",
+            fontSize: 10,
+            width: 95,
+            overflow: "truncate",
+            interval: 0,
+            rotate: labels.length > 8 ? 20 : 0,
+          },
+          axisTick: { show: false },
+        },
+        yAxis: {
+          type: "value",
+          minInterval: metric === "calls" ? 1 : 0,
+          splitLine: { lineStyle: { color: "#edf0f4" } },
+          axisLabel: {
+            color: "#8993a3",
+            fontSize: 10,
+            formatter: (value: number) =>
+              metric === "cost" ? "¥" + value.toFixed(3) : compact(value),
+          },
+        },
+        dataZoom: [
+          {
+            type: "inside",
+            start: 0,
+            end:
+              labels.length > 20
+                ? Math.min(100, (20 / labels.length) * 100)
+                : 100,
+          },
+          {
+            type: "slider",
+            height: 13,
+            bottom: 8,
+            borderColor: "transparent",
+            backgroundColor: "#f1f4f8",
+            fillerColor: "#dce3f5",
+            handleSize: "80%",
+            showDetail: false,
+          },
+        ],
+        series: series.map((item) => ({
+          id: item.id,
+          name: item.name,
+          type: line ? "line" : "bar",
+          data: item.values,
+          smooth: false,
+          connectNulls: false,
+          symbolSize: 6,
+          barMaxWidth: 24,
+          itemStyle: {
+            color: item.color,
+            borderRadius: line ? 0 : [4, 4, 0, 0],
+          },
+          lineStyle: { width: 2.2 },
+        })),
       },
-      xAxis: {
-        type: "category",
-        data: labels,
-        axisLine: { lineStyle: { color: "#dce3ec" } },
-        axisLabel: {
-          color: "#8993a3",
-          fontSize: 10,
-          width: 95,
-          overflow: "truncate",
-          interval: 0,
-          rotate: labels.length > 8 ? 20 : 0,
-        },
-        axisTick: { show: false },
-      },
-      yAxis: {
-        type: "value",
-        minInterval: metric === "calls" ? 1 : 0,
-        splitLine: { lineStyle: { color: "#edf0f4" } },
-        axisLabel: {
-          color: "#8993a3",
-          fontSize: 10,
-          formatter: (value: number) =>
-            metric === "cost" ? "¥" + value.toFixed(3) : compact(value),
-        },
-      },
-      dataZoom: [
-        {
-          type: "inside",
-          start: 0,
-          end:
-            labels.length > 20
-              ? Math.min(100, (20 / labels.length) * 100)
-              : 100,
-        },
-        {
-          type: "slider",
-          height: 13,
-          bottom: 8,
-          borderColor: "transparent",
-          backgroundColor: "#f1f4f8",
-          fillerColor: "#dce3f5",
-          handleSize: "80%",
-          showDetail: false,
-        },
-      ],
-      series: series.map((item) => ({
-        name: item.name,
-        type: line ? "line" : "bar",
-        data: item.values,
-        smooth: false,
-        connectNulls: false,
-        symbolSize: 6,
-        barMaxWidth: 24,
-        itemStyle: { borderRadius: line ? 0 : [4, 4, 0, 0] },
-        lineStyle: { width: 2.2 },
-      })),
-    });
+      { replaceMerge: ["series"] },
+    );
   }, [labels, series, line, metric]);
   return (
     <section className="chart-panel">
