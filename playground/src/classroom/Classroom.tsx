@@ -45,12 +45,13 @@ import {
   statusText,
 } from "./api";
 import Tasks from "./Tasks";
+import BrowserTesting from "./BrowserTesting";
 import { compact, duration } from "../types";
 import "./classroom.css";
 const Comparison = lazy(() => import("./Comparison"));
 type Draft = { prompt: string };
 type Connection = Profile & { api_key: string };
-type Screen = "workbench" | "compare" | "tasks";
+type Screen = "workbench" | "compare" | "tasks" | "browser";
 type OutputTab = "reasoning" | "answer" | "rendered" | "preview" | "request";
 function initialDraft(): Draft {
   try {
@@ -80,7 +81,14 @@ export default function Classroom() {
   );
   const [detail, setDetail] = useState<Detail | null>(null);
   const [compared, setCompared] = useState<string[]>([]);
-  const [screen, setScreen] = useState<Screen>("tasks");
+  const [screen, setScreen] = useState<Screen>(() =>
+    new URLSearchParams(location.search).get("screen") === "browser"
+      ? "browser"
+      : "tasks",
+  );
+  const [browserInspector, setBrowserInspector] = useState<HTMLElement | null>(
+    null,
+  );
   const [outputTab, setOutputTab] = useState<OutputTab>("rendered");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -348,6 +356,7 @@ export default function Classroom() {
               ["tasks", "任务"],
               ["workbench", "实验工作台"],
               ["compare", "对比看板"],
+              ["browser", "浏览器测试"],
             ] as const
           ).map(([id, title]) => (
             <button
@@ -570,6 +579,15 @@ export default function Classroom() {
               }}
               onCopy={copy}
               onError={setError}
+            />
+          ) : screen === "browser" ? (
+            <BrowserTesting
+              modelId={modelId}
+              thinking={thinking}
+              effort={effort}
+              inspector={browserInspector}
+              saveConnection={saveConnection}
+              onCallsChanged={refreshRuns}
             />
           ) : screen === "compare" ? (
             <Suspense
@@ -865,208 +883,216 @@ export default function Classroom() {
             </>
           )}
         </main>
-        <aside className="cr-inspector">
-          <section className="cr-bill">
-            <div className="cr-bill-heading">
-              <h2>调用统计</h2>
-              {detail?.status === "RUNNING" && (
-                <button onClick={() => cancel(detail)}>
-                  <Square size={11} />
-                  取消
-                </button>
-              )}
-            </div>
-            <div className="cr-stat-grid">
-              <div>
-                <span>
-                  <Clock3 size={12} />
-                  耗时
-                </span>
-                <b title={seconds(elapsed)}>{duration(elapsed)}</b>
+        {screen === "browser" ? (
+          <aside className="cr-inspector" ref={setBrowserInspector} />
+        ) : (
+          <aside className="cr-inspector">
+            <section className="cr-bill">
+              <div className="cr-bill-heading">
+                <h2>调用统计</h2>
+                {detail?.status === "RUNNING" && (
+                  <button onClick={() => cancel(detail)}>
+                    <Square size={11} />
+                    取消
+                  </button>
+                )}
               </div>
-              <div>
-                <span>
-                  <MessageSquareText size={12} />
-                  Token
-                </span>
-                <b title={number(detail?.usage.total)}>
-                  {compact(detail?.usage.total)}
-                </b>
-                <small>
-                  入 {compact(detail?.usage.input)} / 出{" "}
-                  {compact(detail?.usage.output)}
-                </small>
+              <div className="cr-stat-grid">
+                <div>
+                  <span>
+                    <Clock3 size={12} />
+                    耗时
+                  </span>
+                  <b title={seconds(elapsed)}>{duration(elapsed)}</b>
+                </div>
+                <div>
+                  <span>
+                    <MessageSquareText size={12} />
+                    Token
+                  </span>
+                  <b title={number(detail?.usage.total)}>
+                    {compact(detail?.usage.total)}
+                  </b>
+                  <small>
+                    入 {compact(detail?.usage.input)} / 出{" "}
+                    {compact(detail?.usage.output)}
+                  </small>
+                </div>
+                <div>
+                  <span>
+                    <Coins size={12} />
+                    估算 CNY
+                  </span>
+                  <b
+                    className="cr-stat-price"
+                    title={detail ? money(detail.cost) : ""}
+                  >
+                    {detail ? money(detail.cost) : "—"}
+                  </b>
+                </div>
               </div>
-              <div>
-                <span>
-                  <Coins size={12} />
-                  估算 CNY
-                </span>
-                <b
-                  className="cr-stat-price"
-                  title={detail ? money(detail.cost) : ""}
-                >
-                  {detail ? money(detail.cost) : "—"}
-                </b>
-              </div>
-            </div>
-          </section>
-          {detail && (
-            <details className="cr-bill-details">
-              <summary>
-                时延与计费明细
-                <ChevronDown size={13} />
-              </summary>
-              <dl>
-                <dt>缓存输入 / 思考 Token</dt>
-                <dd>
-                  {number(detail.usage.cached)} /{" "}
-                  {number(detail.usage.reasoning)}
-                </dd>
-                <dt>首个可见内容</dt>
-                <dd>{seconds(detail.first_token)}</dd>
-                <dt>首个正式回复</dt>
-                <dd>{seconds(detail.first_answer)}</dd>
-                <dt>输入 / 输出单价</dt>
-                <dd>
-                  ¥{detail.price.input} / ¥{detail.price.output}
-                </dd>
-                <dt>缓存输入单价</dt>
-                <dd>
-                  {detail.price.cached == null
-                    ? "按普通输入"
-                    : `¥${detail.price.cached}`}
-                </dd>
-                <dt>口径</dt>
-                <dd>
-                  {detail.price.period === "off_peak"
-                    ? "闲时教学估算价"
-                    : "北京标准价"}
-                </dd>
-              </dl>
-              <p>
-                单价单位：元 / 百万
-                Token。网络和排队包含在往返时延中；未返回的缓存或思考用量不猜测为零。
-              </p>
-            </details>
-          )}
-          <section className="cr-history">
-            <div className="cr-history-heading">
-              <div>
-                <h2>调用记录</h2>
-              </div>
-              <span>{runs.length}</span>
-            </div>
-            <input
-              className="cr-search"
-              placeholder="筛选模型、思考设置…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <div className="cr-history-actions">
-              <button
-                className="cr-text-button"
-                onClick={() => setCompared(visibleRuns.map((run) => run.id))}
-              >
-                全选可见
-              </button>
-              <button
-                className="cr-text-button"
-                onClick={() => setCompared([])}
-              >
-                清空选择
-              </button>
-              <button
-                className="cr-text-button"
-                onClick={() => setScreen("compare")}
-              >
-                对比 {compared.length} 次<ArrowRight size={12} />
-              </button>
-            </div>
-            {visibleRuns.length === 0 && (
-              <p className="cr-history-empty">
-                还没有记录。
-                <br />
-                发送后自动保存记录。
-              </p>
+            </section>
+            {detail && (
+              <details className="cr-bill-details">
+                <summary>
+                  时延与计费明细
+                  <ChevronDown size={13} />
+                </summary>
+                <dl>
+                  <dt>缓存输入 / 思考 Token</dt>
+                  <dd>
+                    {number(detail.usage.cached)} /{" "}
+                    {number(detail.usage.reasoning)}
+                  </dd>
+                  <dt>首个可见内容</dt>
+                  <dd>{seconds(detail.first_token)}</dd>
+                  <dt>首个正式回复</dt>
+                  <dd>{seconds(detail.first_answer)}</dd>
+                  <dt>输入 / 输出单价</dt>
+                  <dd>
+                    ¥{detail.price.input} / ¥{detail.price.output}
+                  </dd>
+                  <dt>缓存输入单价</dt>
+                  <dd>
+                    {detail.price.cached == null
+                      ? "按普通输入"
+                      : `¥${detail.price.cached}`}
+                  </dd>
+                  <dt>口径</dt>
+                  <dd>
+                    {detail.price.period === "off_peak"
+                      ? "闲时教学估算价"
+                      : "北京标准价"}
+                  </dd>
+                </dl>
+                <p>
+                  单价单位：元 / 百万
+                  Token。网络和排队包含在往返时延中；未返回的缓存或思考用量不猜测为零。
+                </p>
+              </details>
             )}
-            <div className="cr-run-list">
-              {visibleRuns.map((run) => (
-                <article
-                  key={run.id}
-                  className={`cr-history-run ${run.id === selectedId ? "selected" : ""}`}
+            <section className="cr-history">
+              <div className="cr-history-heading">
+                <div>
+                  <h2>调用记录</h2>
+                </div>
+                <span>{runs.length}</span>
+              </div>
+              <input
+                className="cr-search"
+                placeholder="筛选模型、思考设置…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <div className="cr-history-actions">
+                <button
+                  className="cr-text-button"
+                  onClick={() => setCompared(visibleRuns.map((run) => run.id))}
                 >
-                  <input
-                    aria-label={`对比 ${run.model_name} ${run.id.slice(0, 6)}`}
-                    type="checkbox"
-                    checked={compared.includes(run.id)}
-                    onChange={(e) =>
-                      setCompared((current) =>
-                        e.target.checked
-                          ? [...current, run.id]
-                          : current.filter((id) => id !== run.id),
-                      )
-                    }
-                  />
-                  <button
-                    className="cr-run-select"
-                    onClick={() => {
-                      setSelectedId(run.id);
-                      setScreen("workbench");
-                    }}
+                  全选可见
+                </button>
+                <button
+                  className="cr-text-button"
+                  onClick={() => setCompared([])}
+                >
+                  清空选择
+                </button>
+                <button
+                  className="cr-text-button"
+                  onClick={() => setScreen("compare")}
+                >
+                  对比 {compared.length} 次<ArrowRight size={12} />
+                </button>
+              </div>
+              {visibleRuns.length === 0 && (
+                <p className="cr-history-empty">
+                  还没有记录。
+                  <br />
+                  发送后自动保存记录。
+                </p>
+              )}
+              <div className="cr-run-list">
+                {visibleRuns.map((run) => (
+                  <article
+                    key={run.id}
+                    className={`cr-history-run ${run.id === selectedId ? "selected" : ""}`}
                   >
-                    <div>
-                      <strong>{run.model_name}</strong>
-                      <span
-                        className={`cr-call-status state-${run.status.toLowerCase()}`}
-                        title={statusText[run.status]}
-                      >
-                        {run.status === "RUNNING"
-                          ? "进行中"
-                          : run.status === "COMPLETED"
-                            ? "已完成"
-                            : "失败"}
-                      </span>
-                    </div>
-                    <p>{mode(run)}</p>
-                    <div className="cr-run-numbers">
-                      <span title="估算金额">
-                        <Coins size={10} />
-                        {money(run.cost)}
-                      </span>
-                      <span title={`Token：${number(run.usage.total)}`}>
-                        <MessageSquareText size={10} />
-                        {compact(run.usage.total)}
-                      </span>
-                      <span title="耗时">
-                        <Clock3 size={10} />
-                        {duration(run.duration)}
-                      </span>
-                    </div>
-                  </button>
-                  <button
-                    className="cr-run-delete"
-                    aria-label={
-                      run.status === "RUNNING" ? "取消此次尝试" : "删除此次尝试"
-                    }
-                    title={
-                      run.status === "RUNNING" ? "取消此次尝试" : "删除此次尝试"
-                    }
-                    onClick={() =>
-                      run.status === "RUNNING" ? cancel(run) : remove(run)
-                    }
-                  >
-                    {run.status === "RUNNING" ? (
-                      <Square size={12} />
-                    ) : (
-                      <Trash2 size={13} />
-                    )}
-                  </button>
-                </article>
-              ))}
-            </div>
-          </section>
-        </aside>
+                    <input
+                      aria-label={`对比 ${run.model_name} ${run.id.slice(0, 6)}`}
+                      type="checkbox"
+                      checked={compared.includes(run.id)}
+                      onChange={(e) =>
+                        setCompared((current) =>
+                          e.target.checked
+                            ? [...current, run.id]
+                            : current.filter((id) => id !== run.id),
+                        )
+                      }
+                    />
+                    <button
+                      className="cr-run-select"
+                      onClick={() => {
+                        setSelectedId(run.id);
+                        setScreen("workbench");
+                      }}
+                    >
+                      <div>
+                        <strong>{run.model_name}</strong>
+                        <span
+                          className={`cr-call-status state-${run.status.toLowerCase()}`}
+                          title={statusText[run.status]}
+                        >
+                          {run.status === "RUNNING"
+                            ? "进行中"
+                            : run.status === "COMPLETED"
+                              ? "已完成"
+                              : "失败"}
+                        </span>
+                      </div>
+                      <p>{mode(run)}</p>
+                      <div className="cr-run-numbers">
+                        <span title="估算金额">
+                          <Coins size={10} />
+                          {money(run.cost)}
+                        </span>
+                        <span title={`Token：${number(run.usage.total)}`}>
+                          <MessageSquareText size={10} />
+                          {compact(run.usage.total)}
+                        </span>
+                        <span title="耗时">
+                          <Clock3 size={10} />
+                          {duration(run.duration)}
+                        </span>
+                      </div>
+                    </button>
+                    <button
+                      className="cr-run-delete"
+                      aria-label={
+                        run.status === "RUNNING"
+                          ? "取消此次尝试"
+                          : "删除此次尝试"
+                      }
+                      title={
+                        run.status === "RUNNING"
+                          ? "取消此次尝试"
+                          : "删除此次尝试"
+                      }
+                      onClick={() =>
+                        run.status === "RUNNING" ? cancel(run) : remove(run)
+                      }
+                    >
+                      {run.status === "RUNNING" ? (
+                        <Square size={12} />
+                      ) : (
+                        <Trash2 size={13} />
+                      )}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </aside>
+        )}
       </div>
 
       {!config && !error && (

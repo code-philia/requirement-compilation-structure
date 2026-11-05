@@ -32,6 +32,7 @@ from repository import ROOT, Repository, STAGES
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from course_exercises import api as course_api
+from course_exercises.browser_testing import api as browser_api
 
 repository = Repository()
 repository.prices = MODEL_PRICES
@@ -138,6 +139,7 @@ async def lifespan(app):
                         stage["status"] = "INTERRUPTED"
                 write_json(entry["archive"] / "run.json", manifest)
     yield
+    await browser_api.shutdown()
     await course_api.shutdown()
     for process in list(processes.values()):
         await asyncio.to_thread(stop_process, process)
@@ -145,6 +147,7 @@ async def lifespan(app):
 
 app = FastAPI(title="Requirement Factory", lifespan=lifespan)
 app.include_router(course_api.router)
+app.include_router(browser_api.router)
 
 
 @app.exception_handler(ValueError)

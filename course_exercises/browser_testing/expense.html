@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>报销清单</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: white; color: #27334a; font: 16px system-ui, sans-serif; }
+  main { max-width: 720px; padding: 36px 24px; margin: auto; }
+  h1 { font-size: 28px; font-weight: 600; }
+  form { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin: 28px 0 12px; }
+  label { display: grid; gap: 8px; flex: 1; }
+  input, button { font: inherit; padding: 11px; border: 1px solid #cdd5e2; border-radius: 4px; }
+  button { background: #345db0; color: white; cursor: pointer; }
+  [role=alert] { color: #b5263c; min-height: 24px; }
+  ul { padding: 0; list-style: none; }
+  li { display: flex; gap: 16px; align-items: center; padding: 15px 0; border-bottom: 1px solid #e0e5ee; }
+  li span:first-child { flex: 1; }
+  li button { background: white; color: #345db0; padding: 5px 12px; }
+  footer { display: flex; justify-content: space-between; margin-top: 28px; font-size: 22px; }
+</style>
+<main>
+  <h1>报销清单</h1>
+  <form novalidate>
+    <label>费用名称<input id="expense-name" autocomplete="off"></label>
+    <label>金额<input id="expense-amount" type="number" step="0.01"></label>
+    <button type="submit">添加费用</button>
+  </form>
+  <div role="alert" aria-live="polite"></div>
+  <ul aria-label="费用列表" data-testid="expense-list"></ul>
+  <footer><span>合计</span><strong data-testid="total" aria-live="polite">¥0.00</strong></footer>
+</main>
+<script>
+  const expenses = [];
+  const form = document.querySelector('form');
+  const nameInput = document.querySelector('#expense-name');
+  const amountInput = document.querySelector('#expense-amount');
+  const list = document.querySelector('ul');
+  const alert = document.querySelector('[role=alert]');
+  function render() {
+    list.replaceChildren();
+    for (const expense of expenses) {
+      const row = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = expense.name;
+      const amount = document.createElement('span');
+      amount.textContent = '¥' + expense.amount.toFixed(2);
+      const remove = document.createElement('button');
+      remove.textContent = '删除';
+      remove.setAttribute('aria-label', '删除' + expense.name);
+      remove.onclick = () => {
+        expenses.splice(expenses.indexOf(expense), 1);
+        render();
+      };
+      row.append(name, amount, remove);
+      list.append(row);
+    }
+    // 课堂初始缺陷：合计只取最后一项，供测试发现与模型修复。
+    const total = expenses.length ? expenses[expenses.length - 1].amount : 0;
+    document.querySelector('[data-testid=total]').textContent = '¥' + total.toFixed(2);
+  }
+  form.onsubmit = event => {
+    event.preventDefault();
+    alert.textContent = '';
+    if (!nameInput.value.trim()) {
+      alert.textContent = '请输入费用名称';
+      return;
+    }
+    const amount = Number(amountInput.value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      alert.textContent = '金额必须大于零';
+      return;
+    }
+    expenses.push({ name: nameInput.value.trim(), amount });
+    form.reset();
+    render();
+  };
+</script>
+</html>
