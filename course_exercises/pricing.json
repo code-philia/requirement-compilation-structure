@@ -1,0 +1,39 @@
+{
+  "currency": "CNY",
+  "unit_tokens": 1000000,
+  "models": [
+    {
+      "id": "deepseek-flash",
+      "name": "DeepSeek Flash",
+      "provider": "deepseek",
+      "description": "轻快的日常任务选手",
+      "period": "off_peak",
+      "input": 1.0,
+      "cached": 0.02,
+      "output": 4.0,
+      "thinking_output": 4.0
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "provider": "deepseek",
+      "description": "观察复杂任务的完成质量",
+      "period": "off_peak",
+      "input": 4.5,
+      "cached": 0.15,
+      "output": 13.5,
+      "thinking_output": 13.5
+    },
+    {
+      "id": "qwen3.7-flash",
+      "name": "Qwen3.7 Flash",
+      "provider": "qwen",
+      "description": "千问 Flash 模型",
+      "period": "beijing_standard",
+      "input": 0.2,
+      "cached": 0.04,
+      "output": 0.8,
+      "thinking_output": 0.8
+    }
+  ]
+}

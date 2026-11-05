@@ -1,0 +1,17 @@
+order_id,city,status,quantity,unit_price,order_date,email,remark
+O001,北京,paid,2,39.90,2026-11-01,lin@example.com,"加急,请电话确认"
+ O002 ,上海, PAID ,1,120,2026/11/02,chen@example.com,需要发票
+O003,北京,paid,3,20.00,2026-11-02,zhou@example.com,
+O004,广州,cancelled,1,80.00,2026-11-02,wu@example.com,已取消
+O005,深圳,paid,0,25.00,2026-11-02,zheng@example.com,数量异常
+O006,杭州,paid,2,-15.00,2026-11-02,wang@example.com,价格异常
+O007,成都,paid,1,50.00,2026-02-30,feng@example.com,日期待核对
+O008,武汉,paid,1,88.00,2026-11-03,wuhan.example.com,邮箱待核对
+O009,南京,pending,2,30.00,2026-11-03,he@example.com,待支付
+O002,上海,paid,1,120.00,2026-11-02,chen@example.com,重复导入
+O010,,paid,1,99.00,2026-11-03,lv@example.com,缺少城市
+O011,西安,refunded,1,10.00,2026-11-03,shi@example.com,状态待核对
+O012,苏州,paid,two,40.00,2026-11-03,tang@example.com,数量待核对
+O013,天津,paid,2,"1,200.50",2026/11/03,xu@example.com,合法千位分隔符
+O014,北京,paid,1,0.00,2026-11-04,sun@example.com,赠品
+O015,上海,paid,1.5,abc,2026-11-04,gao@example.com,两列同时异常

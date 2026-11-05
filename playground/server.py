@@ -30,6 +30,9 @@ from metrics import read_json, write_json, MODEL_PRICES, PRICE_TABLE
 from repository import ROOT, Repository, STAGES
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from course_exercises import api as course_api
+
 repository = Repository()
 repository.prices = MODEL_PRICES
 processes = {}
@@ -121,6 +124,7 @@ def stop_process(process):
 
 @asynccontextmanager
 async def lifespan(app):
+    course_api.initialize()
     # An archive left RUNNING after a service crash is interrupted, not successful.
     for entry in repository.scan(force=True):
         if entry["archive"]:
@@ -134,11 +138,13 @@ async def lifespan(app):
                         stage["status"] = "INTERRUPTED"
                 write_json(entry["archive"] / "run.json", manifest)
     yield
+    await course_api.shutdown()
     for process in list(processes.values()):
         await asyncio.to_thread(stop_process, process)
 
 
 app = FastAPI(title="Requirement Factory", lifespan=lifespan)
+app.include_router(course_api.router)
 
 
 @app.exception_handler(ValueError)
@@ -151,8 +157,15 @@ async def value_error(request, error):
 @app.middleware("http")
 async def local_origin(request: Request, call_next):
     origin = request.headers.get("origin")
+    # Sandboxed previews have an opaque origin; only the public runtime is allowed.
+    classroom_runtime = (
+        request.method == "GET"
+        and request.url.path == "/api/course/vendor/three.js"
+        and origin == "null"
+    )
     if (
         origin
+        and not classroom_runtime
         and origin != str(request.base_url).rstrip("/")
         and origin not in {"http://127.0.0.1:5173", "http://localhost:5173"}
     ):

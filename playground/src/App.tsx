@@ -15,6 +15,7 @@ import {
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import {
   Boxes,
+  GraduationCap,
   LoaderCircle,
   PanelLeftClose,
   PanelRightClose,
@@ -188,6 +189,10 @@ export default function App() {
             )}
           </div>
           <div className="header-actions">
+            <a className="classroom-entry" href="/classroom">
+              <GraduationCap size={16} />
+              课堂练习室
+            </a>
             <span className="local-indicator">
               <i />
               本地运行

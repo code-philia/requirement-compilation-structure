@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>两个任务，比较模型效果与开销</title>
+  <style>
+    :root { color-scheme: light; --ink: #202a38; --blue: #234f88; --muted: #748091; --line: #d9dfe7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: #eef0f3; font-family: "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .slide { display: none; width: min(1200px, calc(100vw - 40px), calc((100dvh - 100px) * 16 / 9)); aspect-ratio: 16 / 9; margin: 24px auto 75px; padding: clamp(26px, 3.2vw, 44px) clamp(30px, 4.2vw, 64px); background: white; }
+    .slide.active { display: flex; flex-direction: column; }
+    .section-label { color: var(--muted); font-size: clamp(10px, .9vw, 13px); letter-spacing: .08em; margin: 0 0 14px; }
+    h1, h2 { color: var(--blue); font-weight: 500; line-height: 1.35; }
+    h1 { font-size: clamp(28px, 3.3vw, 46px); margin: 34px 0 24px; }
+    h2 { font-size: clamp(22px, 2.35vw, 33px); margin: 0 0 23px; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+    h3 { color: var(--blue); font-size: clamp(17px, 1.55vw, 22px); font-weight: 550; margin: 5px 0 17px; }
+    p, li { font-size: clamp(15px, 1.55vw, 22px); line-height: 1.75; }
+    p { margin: 8px 0 18px; }
+    ul, ol { margin: 0; padding-left: 26px; }
+    li { padding-left: 4px; margin: 8px 0; }
+    strong { color: var(--blue); font-weight: 650; }
+    .lead { font-size: clamp(19px, 2vw, 28px); }
+    .muted { color: var(--muted); }
+    .footnote { font-size: clamp(10px, 1vw, 14px); line-height: 1.6; color: var(--muted); margin-top: auto; padding-top: 15px; }
+    .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 35px; }
+    table { width: 100%; border-collapse: collapse; font-size: clamp(13px, 1.3vw, 18px); line-height: 1.65; margin: 5px 0 20px; }
+    th { color: var(--blue); font-weight: 550; border-top: 2px solid var(--blue); border-bottom: 1px solid var(--line); }
+    th, td { text-align: left; padding: 11px 9px; }
+    tbody tr:last-child td { border-bottom: 2px solid var(--blue); }
+    .number { text-align: right; font-variant-numeric: tabular-nums; }
+    .nav { position: fixed; bottom: 0; inset-inline: 0; display: flex; align-items: center; gap: 12px; min-height: 54px; background: white; border-top: 1px solid var(--line); padding: 9px 22px; }
+    button, select { font: inherit; font-size: 13px; line-height: 1.5; color: var(--blue); background: white; border: 1px solid var(--line); border-radius: 0; padding: 5px 11px; cursor: pointer; }
+    button:hover { background: #f2f5fa; }
+    button:disabled { opacity: .35; cursor: default; }
+    button:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+    .page { color: var(--muted); min-width: 48px; text-align: center; font-size: 12px; }
+    .spacer { flex: 1; }
+    .status { font-size: 12px; color: var(--muted); }
+    #contents { max-width: 330px; }
+    @media (max-width: 760px) {
+      .slide { width: calc(100% - 20px); aspect-ratio: auto; min-height: calc(100dvh - 130px); padding: 28px 22px; margin-top: 10px; margin-bottom: 125px; }
+      .columns { grid-template-columns: 1fr; gap: 22px; }
+      h1 { margin-top: 25px; }
+      p, li { font-size: 17px; }
+      table { font-size: 13px; }
+      td, th { padding: 8px 5px; }
+      .nav { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+      #contents { max-width: 190px; }
+      .status { display: none; }
+    }
+    @media print {
+      @page { size: 320mm 180mm; margin: 0; }
+      body { background: white; }
+      .slide, .slide.active { display: flex; width: 320mm; height: 180mm; aspect-ratio: auto; margin: 0; padding: 18mm 23mm; break-after: page; }
+      .slide:last-child { break-after: auto; }
+      h1 { font-size: 38pt; } h2 { font-size: 27pt; } h3 { font-size: 20pt; }
+      p, li { font-size: 18pt; } table { font-size: 15pt; }
+      .section-label, .footnote { font-size: 11pt; }
+      .nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <section class="slide" data-title="两个任务，比较模型效果与开销">
+    <p class="section-label">模型调用实践</p>
+    <h1>两个任务，<br>比较模型效果与开销</h1>
+    <p class="lead">任务一：整理订单 CSV<br>任务二：生成建筑日照分析应用</p>
+    <p>同一份提示词，尝试不同模型和思考设置，<br>同时观察<strong>结果质量、Token、金额与等待时间</strong>。</p>
+    <p class="footnote">实验模型：DeepSeek Flash / DeepSeek V4 Pro / Qwen3.7 Flash</p>
+  </section>
+
+  <section class="slide" data-title="任务一：整理订单 CSV">
+    <p class="section-label">任务一 · 数据整理</p>
+    <h2>把一张有异常的订单表，整理成统计报告</h2>
+    <p>输入：<strong>16 条虚构订单</strong>，CSV 原文已包含在任务提示词中。</p>
+    <ul>
+      <li><strong>清洗格式：</strong>空白、状态大小写、日期格式、价格千位逗号。</li>
+      <li><strong>校验数据：</strong>重复订单、空城市、异常数量、负价格、错误日期和邮箱。</li>
+      <li><strong>输出结果：</strong>有效订单统计、城市销售额，以及逐行错误明细。</li>
+    </ul>
+    <p class="footnote">重点：先判断哪些数据有效，再统计；无法确认的错误不猜测修复。</p>
+  </section>
+
+  <section class="slide" data-title="任务一：操作步骤">
+    <p class="section-label">任务一 · 操作</p>
+    <h2>相同数据，依次交给三个模型</h2>
+    <ol>
+      <li>进入「任务」页，展开「订单数据整理」，点击<strong>填入工作台</strong>。</li>
+      <li>选择模型，先<strong>关闭思考</strong>，点击「发送」。</li>
+      <li>核对统计与错误报告，查看右侧的耗时、Token 和金额。</li>
+      <li>保持提示词不变，更换模型；再开启思考，观察结果是否改变。</li>
+    </ol>
+    <p class="footnote">标准答案在任务页直接展示。每次发送是独立请求，不携带之前的对话。</p>
+  </section>
+
+  <section class="slide" data-title="任务一：标准结果与可能表现">
+    <p class="section-label">任务一 · 结果观察</p>
+    <h2>先核对答案，再比较开销</h2>
+    <div class="columns">
+      <div>
+        <h3>标准结果</h3>
+        <p>16 条原始订单<br>= <strong>7 条有效</strong> + 1 条重复 + 8 条错误</p>
+        <p>有效已支付：<strong>5 单、9 件</strong><br>销售额：<strong>¥2660.80</strong></p>
+        <p>错误行共 8 条，错误项共 <strong>9 项</strong>。</p>
+      </div>
+      <div>
+        <h3>可能观察到</h3>
+        <ul>
+          <li>不同模型都能答对，但时间和金额不同。</li>
+          <li>漏报一行中的多个错误，或把重复订单算进销售额。</li>
+          <li>开启思考增加用量，却未改善正确率。</li>
+        </ul>
+      </div>
+    </div>
+    <p class="footnote">注意：0 元赠品合法；待支付与已取消订单不计销售额。右侧“已完成”仅表示调用结束。</p>
+  </section>
+
+  <section class="slide" data-title="任务二：建筑日照分析模拟器">
+    <p class="section-label">任务二 · 3D 应用生成</p>
+    <h2>从提示词生成一个可交互的三维应用</h2>
+    <ul>
+      <li><strong>三维场景：</strong>明亮白色背景，建筑群、太阳、实时阴影。</li>
+      <li><strong>基础分析：</strong>调节时间、季节与建筑高度，查看阴影和地面日照率。</li>
+      <li><strong>场景编辑：</strong>新增、选择、移动建筑，观察遮挡与统计联动。</li>
+      <li><strong>自主发挥：</strong>建筑细节、材质光影、场地景观与编辑辅助。</li>
+    </ul>
+    <p class="footnote">交付一份完整 HTML，在工作台的「应用预览」中直接操作。Three.js 由平台本地提供。</p>
+  </section>
+
+  <section class="slide" data-title="任务二：操作步骤">
+    <p class="section-label">任务二 · 操作</p>
+    <h2>生成之后，亲自操作应用</h2>
+    <ol>
+      <li>在「任务」页将建筑日照任务<strong>填入工作台</strong>，选模型并发送。</li>
+      <li>等待回复完成，打开<strong>应用预览</strong>，拖动与缩放观察场景。</li>
+      <li>把 A 楼从 24 米改为 48 米，再切换时间和季节，检查阴影与指标。</li>
+      <li>新增并移动建筑，操作暂停、继续和重置，检查功能是否真实联动。</li>
+      <li>更换模型或思考设置，重复同样操作，比较完成度与开销。</li>
+    </ol>
+    <p class="footnote">基础核对：春秋正午太阳高度 55°；A 楼理论影长应由约 16.8 米变为约 33.6 米。</p>
+  </section>
+
+  <section class="slide" data-title="任务二：可能结果与观察重点">
+    <p class="section-label">任务二 · 结果观察</p>
+    <h2>画面相似，实际完成度可能不同</h2>
+    <table>
+      <thead><tr><th>观察维度</th><th>完成度较高的表现</th><th>可能出现的问题</th></tr></thead>
+      <tbody>
+        <tr><td>渲染效果</td><td>白色场景有层次，建筑细节和阴影清楚</td><td>只有简单盒子，过曝或阴影难辨</td></tr>
+        <tr><td>基础正确性</td><td>太阳、阴影、理论影长与日照率一致</td><td>画面变化，数字却没有正确更新</td></tr>
+        <tr><td>新增与移动</td><td>建筑可独立编辑，遮挡与采样随之更新</td><td>只移动外观，仍用旧位置计算</td></tr>
+        <tr><td>连续操作</td><td>暂停、继续、选择和重置相互配合</td><td>选错对象、重复动画、重置有残留</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote">以上是观察方向，不是预设胜负。以实际操作为准，源码更长或思考更多不代表结果更好。</p>
+  </section>
+
+  <section class="slide" data-title="如何比较与讨论">
+    <p class="section-label">模型对比</p>
+    <h2>哪个配置，适合这项工作？</h2>
+    <ol>
+      <li><strong>先看质量：</strong>数据是否正确？应用是否可用？</li>
+      <li><strong>再看账单：</strong>Token、金额、完整往返时延。</li>
+      <li><strong>改变一个条件：</strong>先比较模型，再比较思考设置。</li>
+    </ol>
+    <p class="lead">如果多个配置都合格，<br>你会如何权衡效果、速度和价格？</p>
+    <p class="footnote">在右侧勾选记录进入对比看板；相同模型与思考配置只显示最新的选中结果。一次尝试不代表稳定表现。</p>
+  </section>
+</main>
+
+<nav class="nav" aria-label="幻灯片导航">
+  <button id="previous" type="button" aria-label="上一页">←</button>
+  <span class="page" id="page" aria-live="polite"></span>
+  <button id="next" type="button" aria-label="下一页">→</button>
+  <select id="contents" aria-label="跳转页面"></select>
+  <span class="spacer"></span>
+  <span class="status" id="status" role="status"></span>
+  <button id="copy" type="button">复制本页文字</button>
+  <button id="fullscreen" type="button">全屏</button>
+</nav>
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const contents = document.getElementById('contents');
+  const previous = document.getElementById('previous');
+  const next = document.getElementById('next');
+  let current = 0;
+
+  slides.forEach((slide, index) => {
+    const option = document.createElement('option');
+    option.value = index;
+    option.textContent = `${index + 1}. ${slide.dataset.title}`;
+    contents.append(option);
+  });
+
+  function show(index) {
+    current = Math.max(0, Math.min(slides.length - 1, index));
+    slides.forEach((slide, i) => slide.classList.toggle('active', i === current));
+    contents.value = String(current);
+    previous.disabled = current === 0;
+    next.disabled = current === slides.length - 1;
+    document.getElementById('page').textContent = `${current + 1} / ${slides.length}`;
+    document.getElementById('status').textContent = '';
+    document.title = `${slides[current].dataset.title} · 课堂演示`;
+    history.replaceState(null, '', `#${current + 1}`);
+    window.scrollTo(0, 0);
+  }
+  function readHash() {
+    const page = Number(location.hash.slice(1));
+    show(Number.isInteger(page) && page > 0 ? page - 1 : 0);
+  }
+  previous.onclick = () => show(current - 1);
+  next.onclick = () => show(current + 1);
+  contents.onchange = () => show(Number(contents.value));
+  window.addEventListener('hashchange', readHash);
+
+  document.getElementById('copy').onclick = async () => {
+    const status = document.getElementById('status');
+    try {
+      await navigator.clipboard.writeText(slides[current].innerText.trim());
+      status.textContent = '本页文字已复制';
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(slides[current]);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      status.textContent = '已选中，请按 Ctrl+C / ⌘C';
+    }
+  };
+  document.getElementById('fullscreen').onclick = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      document.getElementById('status').textContent = '请使用浏览器全屏';
+    }
+  };
+  document.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('button, select, input, textarea, a')) return;
+    if (['ArrowRight', 'PageDown', ' '].includes(event.key)) { event.preventDefault(); show(current + 1); }
+    else if (['ArrowLeft', 'PageUp'].includes(event.key)) { event.preventDefault(); show(current - 1); }
+    else if (event.key === 'Home') { event.preventDefault(); show(0); }
+    else if (event.key === 'End') { event.preventDefault(); show(slides.length - 1); }
+    else if (event.key.toLowerCase() === 'f') document.getElementById('fullscreen').click();
+  });
+  readHash();
+</script>
+</body>
+</html>
