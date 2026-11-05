@@ -19,6 +19,7 @@ import {
   Clock3,
   Coins,
   MessageSquareText,
+  Maximize2,
   Download,
   FlaskConical,
   LoaderCircle,
@@ -86,7 +87,7 @@ export default function Classroom() {
       ? "browser"
       : "tasks",
   );
-  const [browserInspector, setBrowserInspector] = useState<HTMLElement | null>(
+  const [browserControls, setBrowserControls] = useState<HTMLElement | null>(
     null,
   );
   const [outputTab, setOutputTab] = useState<OutputTab>("rendered");
@@ -393,8 +394,26 @@ export default function Classroom() {
           {notice}
         </div>
       )}
-      <div className="cr-layout">
+      <div
+        className={`cr-layout ${screen === "browser" ? "cr-browser-layout" : ""}`}
+      >
         <aside className="cr-controls">
+          {screen === "browser" && <div ref={setBrowserControls} />}
+          {screen === "workbench" && (
+            <div className="cr-sidebar-action">
+              <button
+                className="cr-button primary"
+                onClick={() => {
+                  setSelectedId(null);
+                  history.replaceState(null, "", "/classroom");
+                  input.current?.focus();
+                }}
+              >
+                <Plus size={18} />
+                新建
+              </button>
+            </div>
+          )}
           <div className="cr-sidebar-title">
             <h2>模型</h2>
           </div>
@@ -567,7 +586,7 @@ export default function Classroom() {
           </section>
         </aside>
         <main
-          className={`cr-main ${screen === "workbench" ? "cr-chat-main" : ""} ${screen === "workbench" && outputTab === "preview" ? "cr-preview-mode" : ""}`}
+          className={`cr-main ${screen === "browser" ? "cr-browser-main" : ""} ${screen === "workbench" ? "cr-chat-main" : ""} ${screen === "workbench" && outputTab === "preview" ? "cr-preview-mode" : ""}`}
         >
           {screen === "tasks" && config ? (
             <Tasks
@@ -585,7 +604,7 @@ export default function Classroom() {
               modelId={modelId}
               thinking={thinking}
               effort={effort}
-              inspector={browserInspector}
+              controls={browserControls}
               saveConnection={saveConnection}
               onCallsChanged={refreshRuns}
             />
@@ -609,19 +628,6 @@ export default function Classroom() {
             </Suspense>
           ) : (
             <>
-              <div className="cr-chat-heading">
-                <button
-                  className="cr-button secondary"
-                  onClick={() => {
-                    setSelectedId(null);
-                    history.replaceState(null, "", "/classroom");
-                    input.current?.focus();
-                  }}
-                >
-                  <Plus size={14} />
-                  新建
-                </button>
-              </div>
               <section className="cr-chat-composer">
                 <label htmlFor="cr-free-prompt">提示词</label>
                 <textarea
@@ -829,6 +835,25 @@ export default function Classroom() {
                           <div>
                             <button
                               className="cr-text-button"
+                              onClick={async (event) => {
+                                const preview =
+                                  event.currentTarget.closest<HTMLElement>(
+                                    ".cr-preview",
+                                  );
+                                try {
+                                  if (document.fullscreenElement)
+                                    await document.exitFullscreen();
+                                  else await preview?.requestFullscreen();
+                                } catch (error) {
+                                  setError((error as Error).message);
+                                }
+                              }}
+                            >
+                              <Maximize2 size={13} />
+                              全屏预览
+                            </button>
+                            <button
+                              className="cr-text-button"
                               onClick={() => setPhonePreview((value) => !value)}
                             >
                               <MonitorPlay size={13} />
@@ -883,9 +908,7 @@ export default function Classroom() {
             </>
           )}
         </main>
-        {screen === "browser" ? (
-          <aside className="cr-inspector" ref={setBrowserInspector} />
-        ) : (
+        {screen !== "browser" && (
           <aside className="cr-inspector">
             <section className="cr-bill">
               <div className="cr-bill-heading">

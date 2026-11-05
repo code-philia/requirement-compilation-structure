@@ -21,6 +21,8 @@
     li { padding-left: 4px; margin: 8px 0; }
     strong { color: var(--blue); font-weight: 650; }
     .lead { font-size: clamp(19px, 2vw, 28px); }
+    .prompt-text { white-space: pre-wrap; font: inherit; font-size: clamp(14px, 1.35vw, 19px); line-height: 1.7; margin: 5px 0 16px; }
+    .code-example { white-space: pre-wrap; overflow-wrap: anywhere; font: clamp(12px, 1.15vw, 16px)/1.7 ui-monospace, Consolas, monospace; margin: 8px 0 18px; }
     .muted { color: var(--muted); }
     .footnote { font-size: clamp(10px, 1vw, 14px); line-height: 1.6; color: var(--muted); margin-top: auto; padding-top: 15px; }
     .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 35px; }
@@ -329,6 +331,211 @@
     </ul>
     <p class="lead">结合<strong>产物、验收、调用记录与账单</strong>，<br>解释一次真实的模型差异。</p>
     <p class="footnote">以上均为可能结果。一次实验不代表稳定表现；后续重复实验时，继续保持输入与比较条件一致。</p>
+  </section>
+  <section class="slide" data-title="第三节：浏览器自动化与 GUI 测试">
+    <p class="section-label">第三节 · 浏览器测试实践</p>
+    <h1>让模型编写测试，<br>用浏览器验证结果</h1>
+    <p class="lead">描述测试步骤 → 生成脚本 → 执行并发现失败<br>→ 提出修复 → Apply → 用同一份测试再次验证</p>
+    <p>实践应用：<strong>费用报销工作台</strong><br>操作入口：课堂练习室 → 浏览器测试</p>
+    <p class="footnote">人定义正确结果，模型编写代码，浏览器执行验证。本节重点是功能与验证过程。</p>
+  </section>
+
+  <section class="slide" data-title="浏览器自动化：操作与检查">
+    <p class="section-label">第三节 · 基本概念</p>
+    <h2>会点击按钮，还不等于会测试</h2>
+    <div class="columns">
+      <div>
+        <h3>浏览器自动化</h3>
+        <p>让程序代替人：</p>
+        <ul><li>打开页面。</li><li>填写名称和金额。</li><li>点击添加、删除、提交。</li></ul>
+      </div>
+      <div>
+        <h3>GUI 测试</h3>
+        <p>操作后，检查是否符合要求：</p>
+        <ul><li>记录是否出现在列表中？</li><li>合计金额是否正确？</li><li>错误输入是否被阻止？</li></ul>
+      </div>
+    </div>
+    <p class="footnote">GUI 是图形用户界面；“断言”就是写进测试中的预期结果。Playwright 可执行操作，并等待界面满足断言。<a href="https://playwright.dev/python/docs/test-assertions">Playwright 断言文档</a></p>
+  </section>
+
+  <section class="slide" data-title="GUI 测试的三种手段">
+    <p class="section-label">第三节 · 测试手段</p>
+    <h2>功能、画面与视觉判断</h2>
+    <table>
+      <thead><tr><th>手段</th><th>检查方式</th><th>报销应用中的例子</th></tr></thead>
+      <tbody>
+        <tr><td>Playwright 功能测试</td><td>定位元素，执行操作，检查文字与状态</td><td>添加两笔费用，合计必须为 ¥20.00</td></tr>
+        <tr><td>截图对比</td><td>与确认过的基准截图比较</td><td>更新样式后，表单与按钮布局是否变化</td></tr>
+        <tr><td>视觉模型检查</td><td>把截图和检查要求交给视觉模型</td><td>文字是否被遮挡，按钮是否容易辨认</td></tr>
+      </tbody>
+    </table>
+    <p><strong>本节实践使用 Playwright 功能测试。</strong><br>明确的金额与业务规则用断言检查；视觉判断需要明确标准并复核。</p>
+    <p class="footnote">截图对比本身不需要大模型，且应保持渲染环境一致。课堂实时画面用于观察，不代表已执行视觉模型检查。<a href="https://playwright.dev/docs/test-snapshots">Playwright 截图对比文档</a></p>
+  </section>
+
+  <section class="slide" data-title="实践目标：费用报销工作台">
+    <p class="section-label">第三节 · 实践应用</p>
+    <h2>用一个有明确规则的小应用练习</h2>
+    <table>
+      <thead><tr><th>功能</th><th>正确行为</th></tr></thead>
+      <tbody>
+        <tr><td>添加费用</td><td>名称必填；金额大于零，最多两位小数；日期必填</td></tr>
+        <tr><td>统计与筛选</td><td>全部费用合计不受筛选影响；筛选结果合计只统计可见记录</td></tr>
+        <tr><td>编辑与删除</td><td>待提交费用可编辑、删除；已提交费用受限制，可撤回</td></tr>
+        <tr><td>批量提交</td><td>选中费用中有一笔缺少发票，整批不能提交</td></tr>
+      </tbody>
+    </table>
+    <p>先聚焦一个问题：<strong>添加两笔费用后，合计是否正确？</strong></p>
+    <p class="footnote">课堂初始版本预置了合计错误。日期默认今天，分类默认交通，默认勾选有发票；数据刷新后清空。</p>
+  </section>
+
+  <section class="slide" data-title="准备：打开练习与认识操作区域">
+    <p class="section-label">第三节 · 操作准备</p>
+    <h2>新建练习，先手动操作一次</h2>
+    <ol>
+      <li>进入「浏览器测试」，点击<strong>新建练习 / 重置</strong>。</li>
+      <li>在左侧选择模型，确认连接设置可用。</li>
+      <li>在右下方手动添加交通费 12.50 元、午餐费 7.50 元。</li>
+      <li>核对全部费用合计，再点击<strong>刷新应用预览</strong>，清空手动数据。</li>
+    </ol>
+    <p>主区与模型对话；右上方执行脚本或提交修复反馈；<br>右下方查看应用与自动化过程。</p>
+    <p class="footnote">旧练习可能已经修复，请新建练习复现初始缺陷。每个自动化用例使用独立空白页面，不复用手动预览的数据。</p>
+  </section>
+
+  <section class="slide" data-title="操作一：用自然语言描述测试">
+    <p class="section-label">第三节 · 生成测试</p>
+    <h2>把操作和预期结果一起告诉模型</h2>
+    <pre class="prompt-text">请为当前费用报销工作台生成三个独立的 Playwright 测试用例：
+1. 添加交通费 12.50 元、午餐费 7.50 元，检查两条记录存在，全部费用合计为 ¥20.00。
+2. 独立添加上述两条费用，删除交通费，检查只剩午餐费，全部费用合计为 ¥7.50。
+3. 不填写费用名称，输入金额 10 并添加，检查提示“请输入费用名称”，列表仍为空。
+每个用例从空白清单开始，自行录入数据，不使用“填入示例”。保留默认日期和发票设置。只生成测试，暂时不修改应用。</pre>
+    <p>在主对话框粘贴以上文字，点击<strong>发送</strong>。</p>
+    <p class="footnote">“测试一下这个应用”过于笼统。写清操作对象、输入数据，以及可以核对的结果。</p>
+  </section>
+
+  <section class="slide" data-title="操作二：填入脚本并执行">
+    <p class="section-label">第三节 · 执行测试</p>
+    <h2>观察浏览器如何执行你的要求</h2>
+    <ol>
+      <li>等待模型回复，核对是否包含三个用例和对应的结果检查。</li>
+      <li>点击回复下方<strong>填入测试区</strong>，或复制脚本到右上方「Playwright 测试」。</li>
+      <li>点击<strong>执行测试</strong>，观察右下方的自动化画面。</li>
+      <li>执行结束，在主对话中打开<strong>查看测试反馈</strong>。</li>
+    </ol>
+    <p><strong>观察：</strong>输入框如何填写？何时点击添加？<br>测试停在哪个检查步骤？其他用例是否继续执行？</p>
+    <p class="footnote">自动化画面只读；点击「手动操作」可操作预览。刷新手动预览不会重启或改变正在执行的测试。</p>
+  </section>
+
+  <section class="slide" data-title="预期结果：第一次测试为什么失败">
+    <p class="section-label">第三节 · 第一次执行</p>
+    <h2>正确的测试，应该能发现错误</h2>
+    <table>
+      <thead><tr><th>检查项</th><th>正确预期</th><th>初始应用的表现</th></tr></thead>
+      <tbody>
+        <tr><td>添加两笔费用</td><td>全部费用合计 ¥20.00</td><td>显示最后一笔的 ¥7.50，合计断言失败</td></tr>
+        <tr><td>删除交通费</td><td>剩一笔，合计 ¥7.50</td><td>这个结果可能恰好正确</td></tr>
+        <tr><td>提交空名称</td><td>提示错误，不新增记录</td><td>初始实现已有校验，应检查其实际结果</td></tr>
+      </tbody>
+    </table>
+    <pre class="code-example">await expect(page.get_by_test_id("total")).to_have_text("¥20.00")
+预期值：¥20.00    实际值：¥7.50</pre>
+    <p class="footnote">至少应发现合计问题。模型可能加入额外断言，因此失败用例数量以实际为准；不要把预期值改成 ¥7.50 来“通过”。</p>
+  </section>
+
+  <section class="slide" data-title="指导：先判断失败发生在哪里">
+    <p class="section-label">第三节 · 阅读反馈</p>
+    <h2>失败原因不同，下一步也不同</h2>
+    <table>
+      <thead><tr><th>看到的反馈</th><th>先检查</th><th>下一步</th></tr></thead>
+      <tbody>
+        <tr><td>预期 ¥20.00，实际 ¥7.50</td><td>输入数据和业务规则是否明确</td><td>保持正确测试，修复应用的合计逻辑</td></tr>
+        <tr><td>找不到按钮或输入框</td><td>名称、定位方式、操作顺序</td><td>让模型核对测试与页面；不直接认定业务逻辑有错</td></tr>
+        <tr><td>脚本语法或不支持的操作</td><td>生成脚本是否符合课堂执行器要求</td><td>反馈具体错误，让模型调整脚本</td></tr>
+        <tr><td>浏览器无法启动</td><td>执行环境</td><td>交由教师处理，再执行原测试</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote">可在主对话追问：“请解释失败步骤、预期值与实际值，判断是应用错误还是测试问题，先不要修改代码。”</p>
+  </section>
+
+  <section class="slide" data-title="操作三：把测试反馈交给模型">
+    <p class="section-label">第三节 · 修复应用</p>
+    <h2>用具体反馈提出修复要求</h2>
+    <ol>
+      <li>在失败的测试结果下，点击<strong>填入修复反馈</strong>。</li>
+      <li>在右上方「修复反馈」中，核对失败步骤、预期值与实际值。</li>
+      <li>保留原测试，点击<strong>启动应用修复</strong>。</li>
+      <li>等待主对话显示修改说明与局部代码修改建议。</li>
+    </ol>
+    <p>也可以手动粘贴反馈，并补充：<br><strong>“修复全部费用合计，保留筛选、编辑、删除与提交功能，不修改测试。”</strong></p>
+    <p class="footnote">反馈应描述发生了什么，而不是只说“测试失败了”。模型返回修改建议后，还需要人工应用。</p>
+  </section>
+
+  <section class="slide" data-title="操作四：审阅修改并点击 Apply">
+    <p class="section-label">第三节 · 应用修改</p>
+    <h2>模型提出建议，人决定是否应用</h2>
+    <ol>
+      <li>阅读修改说明，展开<strong>替换前 / 替换后</strong>。</li>
+      <li>确认修改针对合计计算，未删掉原有功能，也未修改测试。</li>
+      <li>点击<strong>Apply · 应用修改</strong>，确认出现“已应用”与新的修订号。</li>
+    </ol>
+    <pre class="code-example">修改前：只取最后一笔费用金额。
+修改后：把所有费用金额累加，再按两位小数展示。</pre>
+    <p><strong>预期：</strong>应用源码发生局部变化，测试脚本保持不变。</p>
+    <p class="footnote">只收到回复而未点击 Apply，应用不会改变。若提示代码不匹配，应让模型基于当前源码重新提出修改。</p>
+  </section>
+
+  <section class="slide" data-title="操作五：用同一份测试再次验证">
+    <p class="section-label">第三节 · 再次执行</p>
+    <h2>从失败到通过，要有验证证据</h2>
+    <ol>
+      <li>回到右上方「Playwright 测试」，确认仍为原来的三个用例。</li>
+      <li>再次点击<strong>执行测试</strong>，观察自动化过程。</li>
+      <li>核对本轮结果：合计、删除、空名称校验三个基础用例均应通过。</li>
+      <li>切换「手动操作」，亲自添加两笔费用，再核对合计。</li>
+    </ol>
+    <p><strong>预期：</strong>两笔合计 ¥20.00；删除交通费后为 ¥7.50；<br>空名称提交被阻止，原有功能仍可使用。</p>
+    <p class="footnote">若仍失败，继续反馈、审阅、Apply、复测。刷新后清单为空是当前应用的设计；“模型说修好了”不能替代测试结果。</p>
+  </section>
+
+  <section class="slide" data-title="拓展练习：筛选与发票提交">
+    <p class="section-label">第三节 · 增加覆盖范围</p>
+    <h2>一个合计用例，无法覆盖全部业务</h2>
+    <table>
+      <thead><tr><th>增加的测试</th><th>操作要点</th><th>正确结果</th></tr></thead>
+      <tbody>
+        <tr><td>分类筛选</td><td>交通费 12.50 元、餐饮费 7.50 元；只筛选交通</td><td>显示一笔；全部合计 ¥20.00，筛选合计 ¥12.50</td></tr>
+        <tr><td>缺发票批量提交</td><td>两笔费用中一笔无发票，选中两笔提交</td><td>整批被阻止，不应只提交有发票的一笔</td></tr>
+        <tr><td>提交后状态</td><td>补全发票后提交，再撤回</td><td>提交后不可编辑、删除；撤回后恢复可操作</td></tr>
+      </tbody>
+    </table>
+    <p>让模型<strong>保留原有用例，增加上述测试</strong>，再执行全部用例。</p>
+    <p class="footnote">这些功能在初始应用中已有实现，新增测试可能直接通过。不要预设每条测试一定失败；以实际行为为准。</p>
+  </section>
+
+  <section class="slide" data-title="测试驱动实践：先写新规则的测试">
+    <p class="section-label">第三节 · 测试驱动开发</p>
+    <h2>新增一个规则：单笔费用最多 1000 元</h2>
+    <pre class="prompt-text">新增验收规则：单笔费用金额不得超过 1000 元。
+请保留原有测试，新增两个独立用例：
+1. 金额 1000.00 元可以添加成功。
+2. 金额 1000.01 元不能添加，提示“单笔金额不能超过1000元”，费用列表仍为空。
+使用有效名称、默认日期与发票设置。先只生成测试，不修改应用。</pre>
+    <p><strong>先执行：</strong>当前应用尚无该上限，超额用例预期失败。<br><strong>再修复：</strong>提交反馈 → 审阅修改 → Apply → 执行全部用例。</p>
+    <p class="footnote">前半节修复已有缺陷；这里先为新规则写测试，再补实现，完整经历“失败 → 通过 → 回归检查”的测试驱动流程。</p>
+  </section>
+
+  <section class="slide" data-title="第三节：结果核对与操作速查">
+    <p class="section-label">第三节 · 课堂核对</p>
+    <h2>用结果说明应用为什么可以交付</h2>
+    <ul>
+      <li><strong>测试依据：</strong>操作、输入和预期结果，是否来自明确的业务要求？</li>
+      <li><strong>失败证据：</strong>能否指出具体失败步骤，以及预期值与实际值？</li>
+      <li><strong>修改证据：</strong>是否查看并 Apply 了应用修改，保持正确测试不变？</li>
+      <li><strong>验证结果：</strong>新规则通过后，原有用例是否也全部通过？</li>
+    </ul>
+    <p class="lead">发送 → 填入测试区 → 执行测试 → 填入修复反馈<br>→ 启动应用修复 → 审阅并 Apply → 再次执行</p>
+    <p class="footnote">测试通过只说明已检查的场景符合预期。未覆盖的业务、视觉效果和其他环境，仍需相应检查。</p>
   </section>
 </main>
 

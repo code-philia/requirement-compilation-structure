@@ -1,79 +1,300 @@
 <!doctype html>
 <html lang="zh-CN">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>报销清单</title>
+<title>费用报销工作台</title>
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; background: white; color: #27334a; font: 16px system-ui, sans-serif; }
-  main { max-width: 720px; padding: 36px 24px; margin: auto; }
-  h1 { font-size: 28px; font-weight: 600; }
-  form { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin: 28px 0 12px; }
-  label { display: grid; gap: 8px; flex: 1; }
-  input, button { font: inherit; padding: 11px; border: 1px solid #cdd5e2; border-radius: 4px; }
-  button { background: #345db0; color: white; cursor: pointer; }
-  [role=alert] { color: #b5263c; min-height: 24px; }
-  ul { padding: 0; list-style: none; }
-  li { display: flex; gap: 16px; align-items: center; padding: 15px 0; border-bottom: 1px solid #e0e5ee; }
-  li span:first-child { flex: 1; }
-  li button { background: white; color: #345db0; padding: 5px 12px; }
-  footer { display: flex; justify-content: space-between; margin-top: 28px; font-size: 22px; }
+  body { margin: 0; background: #fff; color: #27364e; font: 14px/1.6 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: auto; padding: 25px; }
+  h1 { font-size: 24px; margin: 0; font-weight: 650; }
+  h2 { font-size: 15px; margin: 0 0 15px; }
+  p { margin: 5px 0; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
+  .muted { color: #8390a4; font-size: 12px; }
+  button, input, select { font: inherit; border: 1px solid #dce3ed; border-radius: 4px; padding: 8px 10px; background: white; color: inherit; }
+  button { cursor: pointer; color: #3b5c9d; white-space: nowrap; }
+  button:hover { background: #f0f5ff; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #3860ab; border-color: #3860ab; color: white; }
+  button.danger { color: #b44e64; }
+  input:focus, select:focus { outline: 2px solid #d6e3ff; border-color: #809ac7; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 23px 0; }
+  .stat { border-block: 1px solid #e2e8f1; padding: 13px 0; }
+  .stat strong { display: block; color: #31578e; font-size: 23px; font-weight: 550; }
+  .stat span { font-size: 12px; color: #8390a4; }
+  form { padding: 18px; border: 1px solid #e2e8f1; background: #fafcff; }
+  .fields { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.2fr; gap: 12px; }
+  label.field { display: grid; gap: 6px; font-size: 12px; color: #697b97; }
+  input, select { min-width: 0; width: 100%; color: #27364e; }
+  input[type=checkbox] { width: 15px; height: 15px; accent-color: #3c65aa; }
+  .form-actions, .toolbar, .filters, .row-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .form-actions { justify-content: space-between; margin-top: 16px; }
+  .form-actions label { display: inline-flex; align-items: center; gap: 6px; }
+  [role=alert] { color: #b23f56; min-height: 24px; padding-top: 8px; }
+  [role=status] { color: #34775c; font-size: 12px; min-height: 20px; }
+  .filters { margin: 22px 0 12px; }
+  .filters label { flex: 1; min-width: 110px; }
+  .toolbar { justify-content: space-between; border-bottom: 1px solid #e2e8f1; padding-bottom: 12px; }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; }
+  ul { padding: 0; margin: 0; list-style: none; }
+  li { display: flex; align-items: center; gap: 12px; padding: 16px 0; border-bottom: 1px solid #e9edf4; }
+  .row-info { flex: 1; min-width: 0; }
+  .row-info strong { display: block; overflow-wrap: anywhere; }
+  .row-info small { display: block; color: #8692a6; margin-top: 3px; }
+  .row-info .missing { color: #c2763f; }
+  .row-money { color: #31578e; font-variant-numeric: tabular-nums; }
+  .badge { font-size: 10px; padding: 3px 6px; border-radius: 3px; background: #f0f3f9; color: #7d8ba4; }
+  .badge.sent { color: #35765a; background: #edf7f1; }
+  .row-actions { gap: 5px; }
+  .row-actions button { padding: 5px 8px; font-size: 11px; }
+  .empty { text-align: center; color: #9aa6b8; padding: 35px 0; }
+  footer { display: flex; justify-content: space-between; gap: 10px; padding-top: 14px; color: #8593a7; font-size: 12px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 700px) {
+    main { padding: 18px; }
+    .fields { grid-template-columns: 1fr 1fr; }
+    header { align-items: flex-start; }
+    header button { font-size: 11px; }
+    li { flex-wrap: wrap; }
+    .row-actions { padding-left: 27px; width: 100%; }
+    footer { flex-direction: column; }
+  }
 </style>
+</head>
+<body>
 <main>
-  <h1>报销清单</h1>
-  <form novalidate>
-    <label>费用名称<input id="expense-name" autocomplete="off"></label>
-    <label>金额<input id="expense-amount" type="number" step="0.01"></label>
-    <button type="submit">添加费用</button>
+  <header>
+    <div><h1>费用报销工作台</h1><p class="muted">录入费用 · 核对发票 · 提交报销</p></div>
+    <button id="sample" type="button">填入示例</button>
+  </header>
+  <section class="stats" aria-label="报销统计">
+    <div class="stat"><span>全部费用合计</span><strong data-testid="total" aria-live="polite">¥0.00</strong></div>
+    <div class="stat"><span>已提交金额</span><strong data-testid="submitted-total">¥0.00</strong></div>
+    <div class="stat"><span>待提交笔数</span><strong data-testid="draft-count">0 笔</strong></div>
+  </section>
+  <form id="expense-form" novalidate>
+    <h2 id="form-heading">添加费用</h2>
+    <div class="fields">
+      <label class="field">费用名称<input id="expense-name" autocomplete="off" placeholder="例如：机场交通费"></label>
+      <label class="field">金额<input id="expense-amount" type="number" step="0.01" placeholder="0.00"></label>
+      <label class="field">费用分类<select id="expense-category"><option>交通</option><option>餐饮</option><option>住宿</option><option>其他</option></select></label>
+      <label class="field">报销日期<input id="expense-date" type="date"></label>
+    </div>
+    <div class="form-actions">
+      <label><input id="expense-invoice" type="checkbox" checked>有发票</label>
+      <div><button id="cancel-edit" type="button" hidden>取消编辑</button> <button id="save-expense" class="primary" type="submit">添加费用</button></div>
+    </div>
+    <div role="alert" aria-live="polite"></div>
   </form>
-  <div role="alert" aria-live="polite"></div>
+  <div class="filters">
+    <label class="field">搜索费用<input id="search" type="search" placeholder="按名称查找"></label>
+    <label class="field">分类筛选<select id="category-filter"><option>全部分类</option><option>交通</option><option>餐饮</option><option>住宿</option><option>其他</option></select></label>
+    <label class="field">状态筛选<select id="status-filter"><option>全部状态</option><option>待提交</option><option>已提交</option></select></label>
+  </div>
+  <div class="toolbar">
+    <label><input id="select-all" type="checkbox">全选费用</label>
+    <div class="row-actions"><span id="selection-count" class="muted">已选 0 笔</span><button id="submit-selected" class="primary" type="button" disabled>提交选中费用</button></div>
+  </div>
+  <div role="status" aria-live="polite"></div>
   <ul aria-label="费用列表" data-testid="expense-list"></ul>
-  <footer><span>合计</span><strong data-testid="total" aria-live="polite">¥0.00</strong></footer>
+  <p id="empty" class="empty">暂无费用，添加第一笔或填入示例。</p>
+  <footer><span data-testid="visible-count">显示 0 / 0 笔</span><span>筛选结果合计 <strong data-testid="visible-total">¥0.00</strong></span></footer>
 </main>
 <script>
+(() => {
   const expenses = [];
-  const form = document.querySelector('form');
+  const selected = new Set();
+  let nextId = 1;
+  let editingId = null;
+  const form = document.querySelector('#expense-form');
   const nameInput = document.querySelector('#expense-name');
   const amountInput = document.querySelector('#expense-amount');
-  const list = document.querySelector('ul');
-  const alert = document.querySelector('[role=alert]');
+  const categoryInput = document.querySelector('#expense-category');
+  const dateInput = document.querySelector('#expense-date');
+  const invoiceInput = document.querySelector('#expense-invoice');
+  const list = document.querySelector('[data-testid=expense-list]');
+  const errorMessage = document.querySelector('[role=alert]');
+  const statusMessage = document.querySelector('[role=status]');
+  const search = document.querySelector('#search');
+  const categoryFilter = document.querySelector('#category-filter');
+  const statusFilter = document.querySelector('#status-filter');
+  const selectAll = document.querySelector('#select-all');
+  const submitSelected = document.querySelector('#submit-selected');
+  const formatMoney = cents => '¥' + (cents / 100).toFixed(2);
+  const now = new Date();
+  const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+
+  function resetForm() {
+    editingId = null;
+    form.reset();
+    dateInput.value = today;
+    document.querySelector('#form-heading').textContent = '添加费用';
+    document.querySelector('#save-expense').textContent = '添加费用';
+    document.querySelector('#cancel-edit').hidden = true;
+    errorMessage.textContent = '';
+  }
+
+  function rowButton(label, action, disabled = false) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.disabled = disabled;
+    button.addEventListener('click', action);
+    return button;
+  }
+
+  function editExpense(expense) {
+    editingId = expense.id;
+    nameInput.value = expense.name;
+    amountInput.value = (expense.cents / 100).toFixed(2);
+    categoryInput.value = expense.category;
+    dateInput.value = expense.date;
+    invoiceInput.checked = expense.invoice;
+    document.querySelector('#form-heading').textContent = '编辑费用';
+    document.querySelector('#save-expense').textContent = '保存修改';
+    document.querySelector('#cancel-edit').hidden = false;
+    errorMessage.textContent = '';
+    nameInput.focus();
+  }
+
   function render() {
+    const visible = expenses.filter(expense => {
+      return expense.name.includes(search.value.trim())
+        && (categoryFilter.value === '全部分类' || expense.category === categoryFilter.value)
+        && (statusFilter.value === '全部状态' || expense.status === statusFilter.value);
+    });
     list.replaceChildren();
-    for (const expense of expenses) {
+    for (const expense of visible) {
       const row = document.createElement('li');
-      const name = document.createElement('span');
-      name.textContent = expense.name;
-      const amount = document.createElement('span');
-      amount.textContent = '¥' + expense.amount.toFixed(2);
-      const remove = document.createElement('button');
-      remove.textContent = '删除';
-      remove.setAttribute('aria-label', '删除' + expense.name);
-      remove.onclick = () => {
-        expenses.splice(expenses.indexOf(expense), 1);
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = selected.has(expense.id);
+      checkbox.disabled = expense.status === '已提交';
+      checkbox.setAttribute('aria-label', '选择' + expense.name);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selected.add(expense.id);
+        else selected.delete(expense.id);
         render();
-      };
-      row.append(name, amount, remove);
+      });
+      const info = document.createElement('div');
+      info.className = 'row-info';
+      const title = document.createElement('strong');
+      title.textContent = expense.name;
+      const detail = document.createElement('small');
+      detail.textContent = expense.category + ' · ' + expense.date + ' · ' + (expense.invoice ? '发票齐全' : '缺少发票');
+      if (!expense.invoice) detail.className = 'missing';
+      info.append(title, detail);
+      const amount = document.createElement('strong');
+      amount.className = 'row-money';
+      amount.textContent = formatMoney(expense.cents);
+      const badge = document.createElement('span');
+      badge.className = 'badge' + (expense.status === '已提交' ? ' sent' : '');
+      badge.textContent = expense.status;
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+      const edit = rowButton('编辑', () => editExpense(expense), expense.status === '已提交');
+      edit.setAttribute('aria-label', '编辑' + expense.name);
+      const remove = rowButton('删除', () => {
+        expenses.splice(expenses.indexOf(expense), 1);
+        selected.delete(expense.id);
+        if (editingId === expense.id) resetForm();
+        render();
+      }, expense.status === '已提交');
+      remove.className = 'danger';
+      remove.setAttribute('aria-label', '删除' + expense.name);
+      actions.append(edit, remove);
+      if (expense.status === '已提交') {
+        const withdraw = rowButton('撤回', () => {
+          expense.status = '待提交';
+          statusMessage.textContent = '已撤回 ' + expense.name;
+          render();
+        });
+        withdraw.setAttribute('aria-label', '撤回' + expense.name);
+        actions.append(withdraw);
+      }
+      row.append(checkbox, info, amount, badge, actions);
       list.append(row);
     }
-    // 课堂初始缺陷：合计只取最后一项，供测试发现与模型修复。
-    const total = expenses.length ? expenses[expenses.length - 1].amount : 0;
-    document.querySelector('[data-testid=total]').textContent = '¥' + total.toFixed(2);
+    // 课堂初始缺陷：合计只取最后一笔，用固定测试发现后再修复。
+    const total = expenses.length ? expenses[expenses.length - 1].cents : 0;
+    document.querySelector('[data-testid=total]').textContent = formatMoney(total);
+    const submitted = expenses.filter(expense => expense.status === '已提交');
+    document.querySelector('[data-testid=submitted-total]').textContent = formatMoney(submitted.reduce((sum, expense) => sum + expense.cents, 0));
+    document.querySelector('[data-testid=draft-count]').textContent = (expenses.length - submitted.length) + ' 笔';
+    document.querySelector('[data-testid=visible-total]').textContent = formatMoney(visible.reduce((sum, expense) => sum + expense.cents, 0));
+    document.querySelector('[data-testid=visible-count]').textContent = '显示 ' + visible.length + ' / ' + expenses.length + ' 笔';
+    document.querySelector('#selection-count').textContent = '已选 ' + selected.size + ' 笔';
+    document.querySelector('#empty').hidden = visible.length > 0;
+    const selectable = visible.filter(expense => expense.status === '待提交');
+    selectAll.checked = selectable.length > 0 && selectable.every(expense => selected.has(expense.id));
+    selectAll.indeterminate = !selectAll.checked && selectable.some(expense => selected.has(expense.id));
+    submitSelected.disabled = selected.size === 0;
   }
-  form.onsubmit = event => {
+
+  form.addEventListener('submit', event => {
     event.preventDefault();
-    alert.textContent = '';
-    if (!nameInput.value.trim()) {
-      alert.textContent = '请输入费用名称';
-      return;
-    }
+    errorMessage.textContent = '';
+    statusMessage.textContent = '';
+    const name = nameInput.value.trim();
     const amount = Number(amountInput.value);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      alert.textContent = '金额必须大于零';
+    if (!name) { errorMessage.textContent = '请输入费用名称'; return; }
+    if (!Number.isFinite(amount) || amount <= 0) { errorMessage.textContent = '金额必须大于零'; return; }
+    if (!/^\d+(\.\d{1,2})?$/.test(amountInput.value)) { errorMessage.textContent = '金额最多保留两位小数'; return; }
+    if (!dateInput.value) { errorMessage.textContent = '请选择报销日期'; return; }
+    const values = { name, cents: Math.round(amount * 100), category: categoryInput.value, date: dateInput.value, invoice: invoiceInput.checked };
+    if (editingId !== null) {
+      const expense = expenses.find(item => item.id === editingId);
+      if (!expense || expense.status === '已提交') { errorMessage.textContent = '已提交费用不能修改'; return; }
+      Object.assign(expense, values);
+    } else {
+      expenses.push({ id: nextId++, ...values, status: '待提交' });
+    }
+    resetForm();
+    render();
+    statusMessage.textContent = '费用已保存';
+  });
+  document.querySelector('#cancel-edit').addEventListener('click', resetForm);
+  search.addEventListener('input', render);
+  categoryFilter.addEventListener('change', render);
+  statusFilter.addEventListener('change', render);
+  selectAll.addEventListener('change', () => {
+    for (const expense of expenses) {
+      const visible = expense.name.includes(search.value.trim())
+        && (categoryFilter.value === '全部分类' || expense.category === categoryFilter.value)
+        && (statusFilter.value === '全部状态' || expense.status === statusFilter.value);
+      if (!visible || expense.status !== '待提交') continue;
+      if (selectAll.checked) selected.add(expense.id);
+      else selected.delete(expense.id);
+    }
+    render();
+  });
+  submitSelected.addEventListener('click', () => {
+    errorMessage.textContent = '';
+    const chosen = expenses.filter(expense => selected.has(expense.id));
+    if (chosen.some(expense => !expense.invoice)) {
+      errorMessage.textContent = '请补充发票后再提交';
       return;
     }
-    expenses.push({ name: nameInput.value.trim(), amount });
-    form.reset();
+    for (const expense of chosen) expense.status = '已提交';
+    selected.clear();
+    if (chosen.some(expense => expense.id === editingId)) resetForm();
     render();
-  };
+    statusMessage.textContent = '已提交 ' + chosen.length + ' 笔费用';
+  });
+  document.querySelector('#sample').addEventListener('click', () => {
+    if (expenses.length) { statusMessage.textContent = '请在空清单中填入示例'; return; }
+    expenses.push(
+      { id: nextId++, name: '机场交通费', cents: 8600, category: '交通', date: today, invoice: true, status: '待提交' },
+      { id: nextId++, name: '客户午餐', cents: 15650, category: '餐饮', date: today, invoice: false, status: '待提交' },
+      { id: nextId++, name: '出差住宿', cents: 48000, category: '住宿', date: today, invoice: true, status: '待提交' }
+    );
+    render();
+  });
+  resetForm();
+  render();
+})();
 </script>
+</body>
 </html>

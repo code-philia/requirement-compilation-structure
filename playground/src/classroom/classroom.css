@@ -4,7 +4,7 @@
   --cr-blue: #5265ce;
   --cr-line: #e5e8f0;
   color: var(--cr-ink);
-  font-size: 13px;
+  font-size: 12px;
   background: #f6f7fb;
   height: 100dvh;
   display: flex;
@@ -36,7 +36,7 @@
   color: var(--cr-ink);
   border: 1px solid #dfe4ef;
   border-radius: 7px;
-  padding: 9px 10px;
+  padding: 6px 8px;
   font: inherit;
 }
 .classroom-shell input:focus,
@@ -59,12 +59,12 @@
   color: var(--cr-ink);
 }
 .cr-header {
-  height: 66px;
-  min-height: 66px;
+  height: 42px;
+  min-height: 42px;
   display: flex;
   align-items: center;
-  padding: 0 26px;
-  gap: 25px;
+  padding: 0 14px;
+  gap: 16px;
   background: white;
   border-bottom: 1px solid var(--cr-line);
 }
@@ -86,8 +86,8 @@
   gap: 10px;
 }
 .cr-brand > span {
-  width: 36px;
-  height: 39px;
+  width: 28px;
+  height: 30px;
   background: #eef0ff;
   color: var(--cr-blue);
   display: grid;
@@ -95,7 +95,7 @@
   border-radius: 10px;
 }
 .cr-brand strong {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 650;
   letter-spacing: 0.04em;
 }
@@ -110,7 +110,7 @@
   margin: 0 auto;
   display: flex;
   align-self: stretch;
-  gap: 26px;
+  gap: 16px;
 }
 .cr-top-tabs button {
   border-bottom: 2px solid transparent;
@@ -137,14 +137,14 @@
 }
 .cr-layout {
   display: grid;
-  grid-template-columns: 254px minmax(350px, 1fr) 326px;
+  grid-template-columns: 205px minmax(0, 1fr) 280px;
   flex: 1;
   min-height: 0;
 }
 .cr-controls {
   background: #fff;
   border-right: 1px solid var(--cr-line);
-  padding: 27px 20px 18px;
+  padding: 12px;
   overflow: auto;
   scrollbar-width: thin;
 }
@@ -155,9 +155,9 @@
   color: #969fb1;
 }
 .cr-sidebar-title h2 {
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 620;
-  margin: 10px 0 6px;
+  margin: 4px 0;
 }
 .cr-sidebar-title p {
   color: var(--cr-muted);
@@ -165,14 +165,14 @@
 }
 .cr-model-list {
   display: grid;
-  gap: 10px;
-  margin-top: 22px;
+  gap: 6px;
+  margin-top: 10px;
 }
 .cr-model {
   text-align: left;
   border: 1px solid #e8eaf1;
   border-radius: 10px;
-  padding: 13px;
+  padding: 8px;
   background: #fff;
   width: 100%;
 }
@@ -199,8 +199,8 @@
   color: var(--cr-blue);
 }
 .cr-model-symbol {
-  width: 27px;
-  height: 27px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
   border-radius: 7px;
@@ -220,7 +220,7 @@
 .cr-model p {
   font-size: 10px;
   color: #8a94a6;
-  margin: 9px 0 11px;
+  margin: 5px 0 6px;
 }
 .cr-price-pair {
   display: flex;
@@ -239,18 +239,18 @@
   color: #939cb0;
   font-size: 10px;
   line-height: 1.8;
-  margin: 10px 2px;
+  margin: 6px 2px;
 }
 .cr-model-footnote {
   font-size: 10px;
   line-height: 1.7;
   color: #7888b0;
-  margin: 8px 2px 18px;
+  margin: 5px 2px 8px;
 }
 .cr-setting-section {
   border-top: 1px solid var(--cr-line);
-  margin-top: 18px;
-  padding-top: 18px;
+  margin-top: 10px;
+  padding-top: 10px;
 }
 .cr-disclosure {
   display: flex;
@@ -285,7 +285,7 @@
 .cr-connection-form {
   padding-top: 13px;
   display: grid;
-  gap: 11px;
+  gap: 7px;
 }
 .cr-connection-form label {
   font-size: 10px;
@@ -383,7 +383,7 @@
   margin-top: 10px;
 }
 .cr-main {
-  padding: 30px clamp(20px, 2.5vw, 45px) 45px;
+  padding: 16px;
   overflow: auto;
   scrollbar-width: thin;
   min-width: 0;
@@ -392,9 +392,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  gap: 15px;
-  padding-top: 22px;
-  padding-bottom: 22px;
+  gap: 10px;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 .cr-chat-heading {
   display: flex;
@@ -442,7 +442,7 @@
   background: #fff;
   border: 1px solid #e5e8f0;
   border-radius: 9px;
-  padding: 18px 20px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -506,7 +506,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font:
-    12px/1.9 ui-monospace,
+    11px/1.6 ui-monospace,
     "PingFang SC",
     "Microsoft YaHei",
     monospace;
@@ -516,7 +516,7 @@
   background: white;
   border: 1px solid #dce2f0;
   border-radius: 9px;
-  padding: 14px 17px 11px;
+  padding: 8px 10px;
   flex-shrink: 0;
 }
 .cr-chat-composer > label {
@@ -526,23 +526,23 @@
 .classroom-shell .cr-chat-composer > textarea {
   display: block;
   width: 100%;
-  height: 105px;
-  min-height: 65px;
+  height: 72px;
+  min-height: 48px;
   max-height: 240px;
   resize: vertical;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  padding: 9px 0;
-  font-size: 13px;
-  line-height: 1.8;
+  padding: 5px 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .cr-chat-send-row {
   display: flex;
   align-items: center;
   gap: 12px;
   border-top: 1px solid #f0f2f7;
-  padding-top: 10px;
+  padding-top: 6px;
 }
 .cr-chat-send-row > span {
   margin-left: auto;
@@ -573,19 +573,19 @@
 }
 .cr-markdown {
   color: #4f5e79;
-  font-size: 13px;
-  line-height: 1.9;
+  font-size: 12px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
   padding: 0 3px 18px;
 }
 .cr-markdown p {
-  margin: 0 0 13px;
+  margin: 0 0 7px;
 }
 .cr-markdown h1,
 .cr-markdown h2,
 .cr-markdown h3,
 .cr-markdown h4 {
-  margin: 20px 0 11px;
+  margin: 12px 0 7px;
   font-weight: 600;
   color: #40516d;
   line-height: 1.5;
@@ -660,20 +660,20 @@
 }
 .cr-tasks-page > .cr-section-heading h2 {
   margin-top: 0;
-  font-size: 21px;
+  font-size: 18px;
 }
 .cr-task-document {
   border: 1px solid #e0e6f0;
   background: white;
   border-radius: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 .cr-task-document > summary {
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 20px;
+  gap: 10px;
+  padding: 12px;
   list-style: none;
 }
 .cr-task-document > summary::before {
@@ -699,7 +699,7 @@
   font-size: 10px;
 }
 .cr-task-document-body {
-  padding: 0 24px 25px;
+  padding: 0 14px 14px;
 }
 .cr-task-document-body > h3 {
   margin: 12px 0;
@@ -709,17 +709,17 @@
 .cr-task-document-body p,
 .cr-task-document-body li {
   font-size: 12px;
-  line-height: 1.9;
+  line-height: 1.6;
   color: #8594af;
 }
 .cr-task-actions {
   display: flex;
   gap: 9px;
   flex-wrap: wrap;
-  margin: 18px 0 22px;
+  margin: 10px 0 12px;
 }
 .cr-task-document-body > details {
-  padding: 14px 0;
+  padding: 9px 0;
   border-top: 1px solid #e9edf4;
 }
 .cr-task-document-body > details > summary {
@@ -784,14 +784,14 @@
 }
 @media (max-width: 1000px) {
   .cr-chat-main {
-    min-height: 800px;
+    min-height: 70dvh;
   }
   .cr-chat-output {
-    min-height: 400px;
+    min-height: 200px;
     max-height: 850px;
   }
   .cr-chat-content {
-    min-height: 260px;
+    min-height: 160px;
   }
 }
 @media (max-width: 680px) {
@@ -839,7 +839,7 @@
   justify-content: center;
   gap: 7px;
   border-radius: 7px;
-  padding: 9px 14px;
+  padding: 6px 10px;
   font-size: 11px;
   white-space: nowrap;
 }
@@ -856,7 +856,7 @@
   color: white;
   background: #5265ce;
   border: 1px solid #5265ce;
-  padding: 11px 17px;
+  padding: 7px 11px;
   box-shadow: 0 3px 7px #5265ce20;
 }
 .cr-button.primary:hover {
@@ -1006,7 +1006,7 @@
 }
 .cr-inspector {
   border-left: 1px solid var(--cr-line);
-  padding: 22px 16px 16px;
+  padding: 12px;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -1021,7 +1021,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 .cr-bill h2 {
   font-size: 12px;
@@ -1042,7 +1042,7 @@
   border: 1px solid #dce4f0;
   border-radius: 7px;
   background: #fafbfe;
-  padding: 14px 0;
+  padding: 9px 0;
 }
 .cr-stat-grid > div {
   min-width: 0;
@@ -1338,10 +1338,10 @@
   justify-content: space-between;
   align-items: center;
   gap: 15px;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 .cr-section-heading h2 {
-  font-size: 21px;
+  font-size: 18px;
   font-weight: 600;
   margin-top: 10px;
 }
@@ -1363,8 +1363,8 @@
   background: white;
   border: 1px solid var(--cr-line);
   border-radius: 9px;
-  padding: 20px 18px 13px;
-  margin-top: 19px;
+  padding: 12px;
+  margin-top: 12px;
 }
 .cr-chart-block h3 {
   font-size: 13px;
@@ -1536,19 +1536,19 @@
 }
 @media (max-width: 1250px) {
   .cr-layout {
-    grid-template-columns: 225px minmax(330px, 1fr) 290px;
+    grid-template-columns: 185px minmax(0, 1fr) 250px;
   }
   .cr-controls {
-    padding-inline: 15px;
+    padding-inline: 10px;
   }
   .cr-main {
-    padding-inline: 18px;
+    padding-inline: 12px;
   }
   .cr-inspector {
-    padding-inline: 13px;
+    padding-inline: 10px;
   }
 }
-@media (max-width: 1000px) {
+@media (max-width: 780px) {
   .classroom-shell {
     height: auto;
     min-height: 100dvh;
@@ -1604,8 +1604,8 @@
 }
 @media (max-width: 680px) {
   .cr-header {
-    height: 60px;
-    min-height: 60px;
+    height: 50px;
+    min-height: 50px;
     gap: 13px;
   }
   .cr-brand strong {
@@ -1730,7 +1730,7 @@
   }
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 780px) {
   .cr-inspector {
     height: min(680px, 80dvh);
     min-height: 400px;
@@ -1762,4 +1762,30 @@
 }
 .cr-preview iframe {
   display: block;
+}
+.cr-sidebar-action {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.cr-sidebar-action .cr-button {
+  width: 100%;
+  min-height: 34px;
+  font-size: 12px;
+}
+.cr-preview:fullscreen {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100dvh;
+  padding: 12px;
+  background: white;
+  overflow: hidden;
+}
+.cr-preview:fullscreen iframe {
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  height: 0 !important;
+  min-height: 0;
 }

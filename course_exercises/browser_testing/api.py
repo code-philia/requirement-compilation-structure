@@ -8,24 +8,33 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .runner import execute_suite, parse_script
+from .edits import EDIT_RULES, apply_edits, parse_proposal
 
 HERE = Path(__file__).resolve().parent
 SESSIONS = HERE / "sessions"
 router = APIRouter(prefix="/api/course/browser", tags=["browser-classroom"])
 sessions = {}
 pending = {}
-DEFAULT_INTENT = """添加交通费 12.50 元，再添加午餐费 7.50 元。检查两条记录都存在，合计为 ¥20.00。
+live = {}
+DEFAULT_INTENT = """为费用报销工作台编写独立的 Playwright 测试用例：
+添加交通费 12.50 元，再添加午餐费 7.50 元。检查两条记录都存在，全部费用合计为 ¥20.00。
 删除交通费后，只剩午餐费，合计为 ¥7.50。
 不填写费用名称，输入金额 10 并添加：应提示“请输入费用名称”，不能新增记录。
-请将以上要求写成三个独立用例，每个用例从空白清单开始。"""
-REQUIREMENTS = """报销清单：添加名称非空、金额大于零的费用；以两位小数展示金额；
-合计为所有费用金额之和；删除指定费用后更新列表与合计；无效输入提示错误且不新增费用。
-页面使用中文；保留费用名称、金额标签，添加费用按钮，以及现有 data-testid 和删除按钮 accessible name。
+增加分类筛选测试：只显示选定分类，筛选不影响全部费用合计。
+增加提交测试：无发票的费用不能提交；补全发票后可提交，已提交费用不能编辑或删除，但可撤回。
+每个用例从空白清单开始，自行录入所需数据，不使用示例按钮。"""
+REQUIREMENTS = """费用报销工作台：费用包含名称、金额、分类（交通/餐饮/住宿/其他）、日期、发票状态。
+名称不能为空，金额大于零且最多两位小数，日期必填。默认今天、交通分类、有发票。
+金额按分保存，显示两位小数。全部费用合计为所有记录金额之和，不受筛选影响。
+搜索、分类与状态筛选可以组合，筛选结果合计仅统计可见记录。
+待提交费用可以编辑、删除；勾选费用可批量提交。任何选中费用缺发票时，整批不能提交。
+已提交费用不能编辑或删除，可以撤回；已提交金额、待提交笔数和选择状态要同步更新。
+保留现有中文标签、data-testid、按钮名称。添加费用后清空表单，恢复默认分类、日期、有发票。
 数据只保存在页面内存，刷新清空。不使用外部依赖、网络、存储或额外文件。"""
 SCRIPT_RULES = """只输出 Python 代码，不作解释。运行环境提供 page、expect、APP_URL。
 可选导入 from playwright.async_api import expect, Page。
@@ -98,10 +107,25 @@ def public_session(session):
         snapshot.pop("html")
         result["executions"].append(snapshot)
     result["calls"] = []
+    result["messages"] = []
     for call in session["calls"]:
         record = course.records.get(call["id"])
         if record:
             result["calls"].append(dict(course.summary(record), action=call["action"]))
+            result["messages"].append({
+                "id": call["id"],
+                "action": call["action"],
+                "created_at": record["started_at"],
+                "user": call.get("user_text", "生成测试" if call["action"] == "generate" else "修复应用"),
+                "answer": record["answer"],
+                "reasoning": record["reasoning"],
+                "status": record["status"],
+                "error": record["error"],
+                "model": record["model_name"],
+                "proposal": call.get("proposal"),
+                "proposal_error": call.get("proposal_error", ""),
+                "applied_revision": call.get("applied_revision"),
+            })
     return result
 
 
@@ -112,6 +136,8 @@ class Action(BaseModel):
     effort: str = "low"
     intent: str = Field(default="", max_length=20000)
     script: str = Field(default="", max_length=60000)
+    message: str = Field(default="", max_length=20000)
+    feedback: str = Field(default="", max_length=50000)
 
 
 @router.get("/sessions")
@@ -153,6 +179,53 @@ async def detail(identity: str):
     return public_session(get_session(identity))
 
 
+@router.post("/sessions/{identity}/replies/{reply_id}/apply")
+async def apply_reply(identity: str, reply_id: str):
+    session = get_session(identity)
+    if identity in pending:
+        raise HTTPException(409, "请等待当前操作完成")
+    call = next((item for item in session["calls"] if item["id"] == reply_id), None)
+    if call is None or not call.get("proposal"):
+        raise ValueError("这条回复没有可应用的修改列表")
+    if call.get("applied_revision") is not None:
+        raise ValueError("这批修改已应用，请勿重复应用")
+    if call["base_revision"] != session["revision"]:
+        raise HTTPException(409, "应用代码已变化，请模型基于当前代码重新提出修改")
+    proposal = parse_proposal(json.dumps(call["proposal"], ensure_ascii=False))
+    html = apply_edits(session["html"], proposal["edits"])
+    session["html"] = html
+    session["revision"] += 1
+    session["error"] = ""
+    call["applied_revision"] = session["revision"]
+    save(session)
+    return public_session(session)
+
+
+@router.get("/sessions/{identity}/live")
+async def live_preview(identity: str, request: Request):
+    get_session(identity)
+
+    async def frames():
+        previous = None
+        keepalive = 0
+        while not await request.is_disconnected():
+            state = live.get(identity, {"execution_id": "", "sequence": 0, "frame": "", "status": "IDLE", "step": "", "case": ""})
+            revision = (state["execution_id"], state["sequence"])
+            if revision != previous:
+                yield "data: " + json.dumps(state, ensure_ascii=False) + "\n\n"
+                previous = revision
+            keepalive += 1
+            if keepalive >= 60:
+                yield ": keepalive\n\n"
+                keepalive = 0
+            await asyncio.sleep(0.15)
+
+    return StreamingResponse(
+        frames(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/sessions/{identity}/files/{filename}")
 async def artifact(identity: str, filename: str):
     session = get_session(identity)
@@ -174,23 +247,20 @@ async def start_action(identity: str, body: Action):
     session = get_session(identity)
     if identity in pending:
         raise HTTPException(409, "请等待当前操作完成")
-    if body.action not in {"generate", "execute", "repair"}:
+    if body.action not in {"chat", "generate", "execute", "repair"}:
         raise ValueError("未知操作")
     if len(pending) >= 3:
         raise ValueError("最多同时进行三个浏览器练习操作")
     if body.action == "generate" and not body.intent.strip():
         raise ValueError("请填写测试意图")
+    if body.action == "chat" and not body.message.strip():
+        raise ValueError("请填写消息")
     if body.action == "execute":
         parse_script(body.script)
     if body.action == "repair":
-        if not session["executions"] or session["executions"][-1]["status"] != "FAILED":
-            raise ValueError("请先执行测试，获得失败反馈")
-        execution = session["executions"][-1]
-        if not any(case["status"] == "FAILED" for case in execution["cases"]):
-            raise ValueError("浏览器启动或执行环境错误不能用于修复应用")
-        if execution["revision"] != session["revision"] or execution["script"] != body.script:
-            raise ValueError("应用或脚本已变化，请先重新执行测试")
-    if body.action in {"generate", "repair"}:
+        if not body.feedback.strip():
+            raise ValueError("请粘贴测试反馈，或填入最近一次执行结果")
+    if body.action in {"chat", "generate", "repair"}:
         from .. import api as course
 
         if (
@@ -199,6 +269,7 @@ async def start_action(identity: str, body: Action):
         ):
             raise ValueError("请先设置模型连接和 API Key")
     statuses = {
+        "chat": "CHATTING",
         "generate": "GENERATING",
         "execute": "EXECUTING",
         "repair": "REPAIRING",
@@ -245,28 +316,72 @@ async def perform(session, body):
             }
             session["executions"].append(execution)
             save(session)
+            state = {
+                "execution_id": execution["id"], "sequence": 0,
+                "frame": "", "step": "正在启动浏览器", "case": "",
+                "status": "RUNNING",
+            }
+            live[session["id"]] = state
+
+            def publish(frame=None, step=None, case=None):
+                if frame is not None:
+                    state["frame"] = frame
+                if step is not None:
+                    state["step"] = step
+                if case is not None:
+                    state["case"] = case
+                state["sequence"] += 1
+
             await execute_suite(
-                session, execution, SESSIONS / session["id"], save,
+                session, execution, SESSIONS / session["id"], save, publish,
             )
             execution["finished_at"] = now()
             return
-        if body.action == "generate":
+        if body.action == "chat":
+            conversation = []
+            for call in session["calls"][-6:]:
+                record = course.records.get(call["id"])
+                if record is None:
+                    continue
+                conversation.append("用户：\n" + call.get("user_text", call["action"]))
+                conversation.append("助手：\n" + record["answer"])
+            feedback = body.feedback.strip()
+            if not feedback and session["executions"]:
+                latest = session["executions"][-1]
+                feedback = json.dumps({"cases": latest["cases"], "error": latest["error"]}, ensure_ascii=False)
+            prompt = (
+                "你是浏览器自动化课堂助手，与学员对话，按要求解释或编写测试。"
+                "解释使用中文 Markdown。测试代码使用 python 代码块。"
+                "用户要求修改应用时，按照下方 edit_file 协议返回修改列表，由用户点击 Apply。"
+                "测试验证业务要求，不迎合应用中的缺陷。\n" + EDIT_RULES
+                + SCRIPT_RULES.replace("只输出 Python 代码，不作解释。", "编写测试时遵循以下语法：")
+                + "\n业务要求：\n" + REQUIREMENTS
+                + "\n当前应用源码（用于定位元素）：\n" + session["html"]
+                + "\n当前测试脚本：\n" + (body.script.strip() or session["script"])
+                + "\n测试反馈：\n" + feedback
+                + "\n最近对话：\n" + "\n\n".join(conversation)
+                + "\n用户本次消息：\n" + body.message.strip()
+            )
+            user_text = body.message.strip()
+        elif body.action == "generate":
             prompt = (
                 "你是浏览器功能测试工程师。根据用户验收意图生成测试，验证正确业务行为，不能迎合源码中的缺陷。\n"
                 + SCRIPT_RULES + "\n业务要求：\n" + REQUIREMENTS
                 + "\n测试意图：\n" + session["intent"] + "\n页面源码（仅用于定位元素）：\n" + session["html"]
             )
+            user_text = session["intent"]
         else:
-            failed = session["executions"][-1]
-            feedback = {"cases": failed["cases"], "error": failed["error"]}
+            fixed_script = body.script.strip() or session["script"]
             prompt = (
-                "修复以下单文件 HTML 应用，使固定的测试通过。只输出完整 HTML，不解释。"
+                "修复以下单文件 HTML 应用，使固定的测试通过。只返回 edit_file 修改列表 JSON。"
                 "不得修改、绕过测试或检测测试环境；修复真实业务逻辑，保留原有功能、标签和定位契约。"
-                "所有 CSS、JavaScript 内联，不使用外部资源。\n业务要求：\n" + REQUIREMENTS
-                + "\n用户测试意图：\n" + failed["intent"] + "\n固定测试：\n" + failed["script"]
-                + "\n失败反馈：\n" + json.dumps(feedback, ensure_ascii=False)
+                "所有 CSS、JavaScript 内联，不使用外部资源。\n" + EDIT_RULES
+                + "\n业务要求：\n" + REQUIREMENTS
+                + "\n固定测试：\n" + fixed_script
+                + "\n失败反馈：\n" + body.feedback.strip()
                 + "\n当前源码：\n" + session["html"]
             )
+            user_text = "请根据以下测试反馈修复应用，保持测试不变：\n\n" + body.feedback.strip()
         started = await course.start(course.Attempt(
             model_id=body.model_id,
             prompt=prompt,
@@ -275,7 +390,13 @@ async def perform(session, body):
         ))
         identity = started["id"]
         model_task = course.running[identity]
-        session["calls"].append({"id": identity, "action": body.action})
+        call = {
+            "id": identity,
+            "action": body.action,
+            "user_text": user_text,
+            "base_revision": session["revision"],
+        }
+        session["calls"].append(call)
         save(session)
         await model_task
         record = course.records[identity]
@@ -285,12 +406,13 @@ async def perform(session, body):
             script = code_block(record["answer"], "python")
             parse_script(script)
             session["script"] = script
-        else:
-            html = code_block(record["answer"], "html")
-            if "<html" not in html.lower() or "</html>" not in html.lower():
-                raise ValueError("模型未返回完整 HTML；原应用保持不变")
-            session["html"] = html
-            session["revision"] += 1
+        elif body.action == "repair" or '"edits"' in record["answer"]:
+            try:
+                proposal = parse_proposal(record["answer"])
+                apply_edits(session["html"], proposal["edits"])
+                call["proposal"] = proposal
+            except ValueError as error:
+                call["proposal_error"] = str(error)
     except asyncio.CancelledError:
         if model_task is not None and not model_task.done():
             model_task.cancel()
@@ -304,6 +426,11 @@ async def perform(session, body):
             execution.update(status="FAILED", error=session["error"], finished_at=now())
             interrupt_cases(execution, session["error"])
     finally:
+        if execution is not None:
+            state = live.get(session["id"])
+            if state and state["execution_id"] == execution["id"]:
+                state["status"] = execution["status"]
+                state["sequence"] += 1
         session["status"] = "IDLE"
         pending.pop(session["id"], None)
         save(session)

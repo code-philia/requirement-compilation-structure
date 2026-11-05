@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import base64
 import time
 
 from playwright.async_api import async_playwright, expect
@@ -145,14 +146,25 @@ def resolve(operation, page):
     return getattr(parent, operation["method"])(*operation["args"], **operation["kwargs"])
 
 
-async def execute_suite(session, execution, folder, save):
+async def stream_page(page, publish):
+    while True:
+        try:
+            frame = await page.screenshot(type="jpeg", quality=70, timeout=1500)
+            publish(frame="data:image/jpeg;base64," + base64.b64encode(frame).decode("ascii"))
+        except Exception:
+            if page.is_closed():
+                return
+        await asyncio.sleep(0.2)
+
+
+async def execute_suite(session, execution, folder, save, publish):
     cases = parse_script(execution["script"])
     started = time.perf_counter()
     browser = None
     try:
         async with async_playwright() as playwright:
             try:
-                browser = await playwright.chromium.launch()
+                browser = await playwright.chromium.launch(slow_mo=250)
                 async with asyncio.timeout(180):
                     for case_index, case in enumerate(cases):
                         result = {
@@ -168,6 +180,7 @@ async def execute_suite(session, execution, folder, save):
                             service_workers="block",
                             accept_downloads=False,
                         )
+                        capture = None
                         try:
                             async def route_request(route):
                                 if (
@@ -191,9 +204,12 @@ async def execute_suite(session, execution, folder, save):
                                 screenshots=True, snapshots=True, sources=False,
                             )
                             page = await context.new_page()
+                            capture = asyncio.create_task(stream_page(page, publish))
+                            publish(case=case["name"], step="正在打开页面")
                             page.set_default_timeout(4000)
                             expect.set_options(timeout=4000)
                             for index, step in enumerate(case["steps"]):
+                                publish(step=step["code"])
                                 entry = {
                                     "code": step["code"],
                                     "status": "RUNNING",
@@ -210,6 +226,7 @@ async def execute_suite(session, execution, folder, save):
                                 except Exception as error:
                                     entry.update(status="FAILED", error=str(error)[:5000])
                                 entry["duration"] = time.perf_counter() - tick
+                                await asyncio.sleep(0.4)
                                 filename = f"{execution['id']}-{case_index}-{index}.png"
                                 try:
                                     await page.screenshot(
@@ -231,6 +248,9 @@ async def execute_suite(session, execution, folder, save):
                             await context.tracing.stop(path=folder / trace)
                             result["trace"] = trace
                         finally:
+                            if capture is not None:
+                                capture.cancel()
+                                await asyncio.gather(capture, return_exceptions=True)
                             await context.close()
                         save(session)
                 execution["status"] = "PASSED"
