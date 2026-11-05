@@ -209,7 +209,7 @@ export default function BrowserTesting(props: Props) {
     setPreviewMode("app");
   }, [identity]);
   useEffect(() => {
-    setDraft(session?.intent || "");
+    setDraft("");
   }, [session?.id]);
   useEffect(() => {
     setScript(session?.script || "");
@@ -385,6 +385,7 @@ export default function BrowserTesting(props: Props) {
               <button
                 className="cr-button primary"
                 disabled={working}
+                title="从基础模板创建独立练习，保留历史练习"
                 onClick={create}
               >
                 <Plus size={18} />
@@ -805,7 +806,7 @@ export default function BrowserTesting(props: Props) {
                 <iframe
                   key={`${session.id}-${session.revision}-${preview}`}
                   title="报销清单应用"
-                  sandbox="allow-scripts"
+                  sandbox="allow-scripts allow-forms"
                   referrerPolicy="no-referrer"
                   srcDoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="${previewPolicy}">${session.html.replace(/<!doctype[^>]*>/i, "")}`}
                 />
