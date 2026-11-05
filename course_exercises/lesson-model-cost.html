@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>两个任务，比较模型效果与开销</title>
+  <title>模型与需求编译开销 · 课堂演示</title>
   <style>
     :root { color-scheme: light; --ink: #202a38; --blue: #234f88; --muted: #748091; --line: #d9dfe7; }
     * { box-sizing: border-box; }
@@ -167,6 +167,168 @@
     </ol>
     <p class="lead">如果多个配置都合格，<br>你会如何权衡效果、速度和价格？</p>
     <p class="footnote">在右侧勾选记录进入对比看板；相同模型与思考配置只显示最新的选中结果。一次尝试不代表稳定表现。</p>
+  </section>
+  <section class="slide" data-title="第二节：需求编译的过程与开销">
+    <p class="section-label">第二节 · 需求编译实践</p>
+    <h1>同一份需求，<br>两轮需求编译</h1>
+    <p class="lead">第一轮：DeepSeek Flash<br>第二轮：DeepSeek V4 Pro</p>
+    <p>分别在<strong>数据库实现、后端实现、前端实现</strong>后停下来，<br>观察生成了什么，以及花了多少时间和金额。</p>
+    <p class="footnote">本节使用「需求编译工厂」。输入统一为当前项目的 input 目录。</p>
+  </section>
+
+  <section class="slide" data-title="共同输入：用户认证模块">
+    <p class="section-label">第二节 · 输入</p>
+    <h2>这次要生成什么应用？</h2>
+    <table>
+      <thead><tr><th>需求点</th><th>用户操作</th><th>需要正确处理的情况</th></tr></thead>
+      <tbody>
+        <tr><td>REQ-1 · 首页</td><td>查看登录状态与用户名</td><td>未登录、已登录、会话失效</td></tr>
+        <tr><td>REQ-2 · 注册</td><td>填写资料，创建账号并自动登录</td><td>重复用户名、密码保存、会话创建</td></tr>
+        <tr><td>REQ-3 · 登录与退出</td><td>登录账号，再退出登录</td><td>密码错误、退出后会话失效</td></tr>
+      </tbody>
+    </table>
+    <p>输入包括<strong>需求说明、页面参考图和验收用例</strong>。<br>两轮均使用相对路径 <strong>input</strong>，保持文件不变。</p>
+    <p class="footnote">同一个注册操作，会同时涉及账号数据、注册接口、页面表单和点击事件。</p>
+  </section>
+
+  <section class="slide" data-title="实验设置：只改变模型">
+    <p class="section-label">第二节 · 操作准备</p>
+    <h2>建立两个独立的输出目录</h2>
+    <table>
+      <thead><tr><th>设置</th><th>第一轮</th><th>第二轮</th></tr></thead>
+      <tbody>
+        <tr><td>文本模型</td><td>deepseek-flash</td><td>deepseek-v4-pro</td></tr>
+        <tr><td>输入目录</td><td>input</td><td>input</td></tr>
+        <tr><td>输出目录（示例）</td><td>outputs/lesson2-flash-g01</td><td>outputs/lesson2-pro-g01</td></tr>
+        <tr><td>生成应用端口</td><td>3101</td><td>3102</td></tr>
+      </tbody>
+    </table>
+    <p>两轮使用相同的<strong>思考强度（如 low）、服务地址、视觉模型配置与计价口径</strong>。</p>
+    <p class="footnote">目录中的 g01 替换为组号，并使用尚未运行过的目录。每轮内部始终沿用该轮输出目录；密钥无需展示。</p>
+  </section>
+
+  <section class="slide" data-title="执行路线：三个观察节点">
+    <p class="section-label">第二节 · 阶段路线</p>
+    <h2>逐阶段执行，在三个节点观察</h2>
+    <table>
+      <thead><tr><th>执行顺序</th><th>阶段范围</th><th>停下来观察</th></tr></thead>
+      <tbody>
+        <tr><td>第一段</td><td>00 初始化 → 01 读取需求 → 02 数据库设计<br>→ 03 读写义务分析 → 04 实现数据库</td><td>数据如何保存？</td></tr>
+        <tr><td>第二段</td><td>05 API 契约设计 → 06 后端实现与验收</td><td>操作如何执行？</td></tr>
+        <tr><td>第三段</td><td>07 界面设计 → 08 界面实现<br>→ 09 交互设计 → 10 逐需求实现与验收</td><td>页面如何与后端联动？</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote">「执行范围」选择的是单个阶段。每次选择下一阶段并开始运行，等待结束后再继续；08 完成后还需执行 09、10。</p>
+  </section>
+
+  <section class="slide" data-title="第一轮：数据库实现">
+    <p class="section-label">第二节 · Flash · 观察节点一</p>
+    <h2>数据库：把需求变成可保存的数据</h2>
+    <ol>
+      <li>选择 Flash、输入 input，填写第一轮输出目录。</li>
+      <li>在「执行范围」中依次选择 <strong>00、01、02、03、04</strong>，逐个运行。</li>
+      <li>浏览需求树；点击数据库实体，查看字段与关系。</li>
+      <li>打开 04 的记录，查看实现产物、验收结果和阶段开销。</li>
+    </ol>
+    <p><strong>观察问题：</strong>账号资料和登录会话分别保存在哪里？<br>密码如何保存？退出登录会改变哪些数据？</p>
+    <p class="footnote">实体名称以实际产物为准。将数据设计与原始需求对应起来；数据库成功生成，还不等于整个应用已经完成。</p>
+  </section>
+
+  <section class="slide" data-title="第一轮：后端实现">
+    <p class="section-label">第二节 · Flash · 观察节点二</p>
+    <h2>后端：把用户操作变成接口行为</h2>
+    <ol>
+      <li>保持模型、输入和输出目录不变，依次运行 <strong>05、06</strong>。</li>
+      <li>在 API 工坊查看注册、登录、退出和查询当前用户的接口。</li>
+      <li>点击接口，追踪关联需求与数据库实体。</li>
+      <li>打开 06 的记录，查看各需求点的模型调用与验收结果。</li>
+    </ol>
+    <p><strong>观察问题：</strong>重复用户名、错误密码、退出后查询，<br>分别应该返回什么？哪些需求点发生了多次模型调用？</p>
+    <p class="footnote">记录实现、验收及修复过程产生的用量。调用结束不代表验收通过；有失败时先查看具体需求点与错误。</p>
+  </section>
+
+  <section class="slide" data-title="第一轮：前端实现">
+    <p class="section-label">第二节 · Flash · 观察节点三</p>
+    <h2>前端：让页面与接口真正联动</h2>
+    <ol>
+      <li>沿用第一轮目录，依次运行 <strong>07、08、09、10</strong>。</li>
+      <li>查看 UI 树、页面组件与 trigger，追踪按钮关联的接口。</li>
+      <li>打开 10 的记录，检查逐需求实现与验收结果。</li>
+      <li>打开生成的应用，尝试注册、退出、错误密码登录和正确登录。</li>
+    </ol>
+    <p><strong>观察问题：</strong>注册完成后，首页是否显示用户名？<br>退出后刷新，是否仍然显示为未登录？</p>
+    <p class="footnote">对照参考图观察页面，同时检查操作结果。若应用未成功生成或启动，保留失败记录并定位原因。</p>
+  </section>
+
+  <section class="slide" data-title="第二轮：更换模型，重复同一路线">
+    <p class="section-label">第二节 · Pro</p>
+    <h2>换成 Pro，从初始化重新开始</h2>
+    <ol>
+      <li>选择 <strong>deepseek-v4-pro</strong>，输入仍为 input。</li>
+      <li>改用第二轮独立输出目录和端口，其余实验设置保持一致。</li>
+      <li>按相同顺序运行 00 → 10，在 <strong>04、06、10</strong> 后观察。</li>
+      <li>核对相同需求的实现结果，记录失败、修复与额外尝试。</li>
+    </ol>
+    <p>两轮都从原始输入生成产物，<strong>不复用另一模型生成的输出</strong>。</p>
+    <p class="footnote">每轮包含多次阶段运行。执行过程中不要混用输出目录，也不要在同一轮中途切换模型。</p>
+  </section>
+
+  <section class="slide" data-title="阅读账单：阶段与需求点">
+    <p class="section-label">第二节 · 运行观察</p>
+    <h2>从阶段账单，找到具体的模型调用</h2>
+    <table>
+      <thead><tr><th>指标</th><th>查看什么</th><th>解释什么</th></tr></thead>
+      <tbody>
+        <tr><td>阶段耗时</td><td>该阶段从开始到结束的时间</td><td>还包含工具执行、验收等等待</td></tr>
+        <tr><td>Token</td><td>输入、输出，以及服务返回的缓存用量</td><td>模型读了多少、生成了多少</td></tr>
+        <tr><td>金额</td><td>平台按用量与配置单价计算的金额</td><td>单价、缓存与调用量共同影响开销</td></tr>
+        <tr><td>调用次数</td><td>阶段及需求点的模型调用数量</td><td>是否存在拆解、多次实现或修复</td></tr>
+      </tbody>
+    </table>
+    <p>阶段卡片直接看统计；展开调用，查看<strong>输入、回复与错误</strong>。</p>
+    <p class="footnote">缺失数据不等于零开销；平台金额是按配置计价的统计值。服务账单的最终扣费以服务商为准。</p>
+  </section>
+
+  <section class="slide" data-title="对比视图：配对相同阶段">
+    <p class="section-label">第二节 · 模型对比</p>
+    <h2>先比较相同阶段，再下钻到需求点</h2>
+    <ol>
+      <li>在历史记录中找到两轮对应记录，打开<strong>运行对比</strong>。</li>
+      <li>先选择 Flash 与 Pro 的 <strong>04</strong> 记录，比较数据库实现。</li>
+      <li>再分别配对 <strong>06</strong> 和 <strong>10</strong> 记录，比较后端与前端。</li>
+      <li>切换金额、耗时、Token 与调用次数；点击阶段，下钻查看需求点。</li>
+    </ol>
+    <p>折线图观察分布，柱状图比较数值；先关闭<strong>累计值</strong>，看单阶段开销。</p>
+    <p class="footnote">使用需求编译工厂的对比视图。按输出目录、模型与执行阶段核对记录；只比较完成范围相同的结果。</p>
+  </section>
+
+  <section class="slide" data-title="记录结果：单阶段与整轮开销">
+    <p class="section-label">第二节 · 结果记录</p>
+    <h2>三个观察节点，不等于整轮总账单</h2>
+    <table>
+      <thead><tr><th>比较范围</th><th>Flash</th><th>Pro</th></tr></thead>
+      <tbody>
+        <tr><td>04 · 数据库实现</td><td>金额 / 耗时 / Token / 次数</td><td>金额 / 耗时 / Token / 次数</td></tr>
+        <tr><td>06 · 后端实现与验收</td><td>金额 / 耗时 / Token / 次数</td><td>金额 / 耗时 / Token / 次数</td></tr>
+        <tr><td>10 · 逐需求实现与验收</td><td>金额 / 耗时 / Token / 次数</td><td>金额 / 耗时 / Token / 次数</td></tr>
+        <tr><td>整轮 · 00～10</td><td>汇总本轮各次阶段运行</td><td>汇总本轮各次阶段运行</td></tr>
+      </tbody>
+    </table>
+    <p>当前每次单阶段执行生成独立记录；<strong>最后一条记录不是整轮累计</strong>。<br>整轮金额包含所有阶段，以及实际发生的重试开销。</p>
+    <p class="footnote">整轮汇总需另行加总；累计图中的累计值只针对选中记录。不要重复相加阶段总数与其内部调用数；人工停顿与讲解时间另计。</p>
+  </section>
+
+  <section class="slide" data-title="结果讨论：用完成情况解释开销">
+    <p class="section-label">第二节 · 结果讨论</p>
+    <h2>哪个阶段更贵？为什么？</h2>
+    <ul>
+      <li><strong>可能一：</strong>单价更低，但多次修复使总金额或耗时增加。</li>
+      <li><strong>可能二：</strong>单价更高，但调用更少，结果更完整。</li>
+      <li><strong>可能三：</strong>前面的设计不同，影响后面实现与验收的难度。</li>
+      <li><strong>可能四：</strong>某轮费用更低，是因为失败后没有完成相同工作。</li>
+    </ul>
+    <p class="lead">结合<strong>产物、验收、调用记录与账单</strong>，<br>解释一次真实的模型差异。</p>
+    <p class="footnote">以上均为可能结果。一次实验不代表稳定表现；后续重复实验时，继续保持输入与比较条件一致。</p>
   </section>
 </main>
 
