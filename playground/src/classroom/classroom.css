@@ -1773,6 +1773,36 @@
   min-height: 34px;
   font-size: 12px;
 }
+.cr-controls .bt-heading,
+.cr-controls .rs-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0 0 12px;
+  margin-bottom: 10px;
+  gap: 9px;
+  border-bottom: 1px solid var(--cr-line);
+}
+.cr-controls .bt-heading > div,
+.cr-controls .rs-heading > div {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cr-controls .rs-heading span {
+  flex-basis: 100%;
+  max-width: 100%;
+}
+.cr-controls .bt-heading select,
+.cr-controls .rs-heading select,
+.classroom-shell .cr-model-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 11px;
+}
+.classroom-shell .cr-model-select {
+  margin-top: 6px;
+}
 .cr-preview:fullscreen {
   display: flex;
   flex-direction: column;

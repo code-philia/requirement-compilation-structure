@@ -47,12 +47,13 @@ import {
 } from "./api";
 import Tasks from "./Tasks";
 import BrowserTesting from "./BrowserTesting";
+import RequirementsStudio from "./RequirementsStudio";
 import { compact, duration } from "../types";
 import "./classroom.css";
 const Comparison = lazy(() => import("./Comparison"));
 type Draft = { prompt: string };
 type Connection = Profile & { api_key: string };
-type Screen = "workbench" | "compare" | "tasks" | "browser";
+type Screen = "workbench" | "compare" | "tasks" | "browser" | "requirements";
 type OutputTab = "reasoning" | "answer" | "rendered" | "preview" | "request";
 function initialDraft(): Draft {
   try {
@@ -82,11 +83,12 @@ export default function Classroom() {
   );
   const [detail, setDetail] = useState<Detail | null>(null);
   const [compared, setCompared] = useState<string[]>([]);
-  const [screen, setScreen] = useState<Screen>(() =>
-    new URLSearchParams(location.search).get("screen") === "browser"
-      ? "browser"
-      : "tasks",
-  );
+  const [screen, setScreen] = useState<Screen>(() => {
+    const requested = new URLSearchParams(location.search).get("screen");
+    if (requested === "browser" || requested === "requirements")
+      return requested;
+    return "tasks";
+  });
   const [browserControls, setBrowserControls] = useState<HTMLElement | null>(
     null,
   );
@@ -108,6 +110,7 @@ export default function Classroom() {
   const input = useRef<HTMLTextAreaElement>(null);
   const model = config?.models.find((item) => item.id === modelId);
   const connection = connections[modelId];
+  const compactModel = screen === "browser" || screen === "requirements";
   const activeCount = runs.filter((run) => run.status === "RUNNING").length;
   const refreshRuns = useCallback(async () => {
     try {
@@ -357,7 +360,8 @@ export default function Classroom() {
               ["tasks", "任务"],
               ["workbench", "实验工作台"],
               ["compare", "对比看板"],
-              ["browser", "浏览器测试"],
+              ["browser", "GUI 测试"],
+              ["requirements", "需求沉淀"],
             ] as const
           ).map(([id, title]) => (
             <button
@@ -395,10 +399,12 @@ export default function Classroom() {
         </div>
       )}
       <div
-        className={`cr-layout ${screen === "browser" ? "cr-browser-layout" : ""}`}
+        className={`cr-layout ${screen === "browser" ? "cr-browser-layout" : ""} ${screen === "requirements" ? "cr-requirements-layout" : ""}`}
       >
         <aside className="cr-controls">
-          {screen === "browser" && <div ref={setBrowserControls} />}
+          {(screen === "browser" || screen === "requirements") && (
+            <div ref={setBrowserControls} />
+          )}
           {screen === "workbench" && (
             <div className="cr-sidebar-action">
               <button
@@ -417,56 +423,74 @@ export default function Classroom() {
           <div className="cr-sidebar-title">
             <h2>模型</h2>
           </div>
-          <div className="cr-model-list">
-            {config?.models.map((item, index) => (
-              <button
-                key={item.id}
-                className={`cr-model ${modelId === item.id ? "selected" : ""}`}
-                onClick={() => setModelId(item.id)}
-                aria-pressed={modelId === item.id}
-              >
-                <div className="cr-model-name">
-                  <span className={`cr-model-symbol model-${index}`}>
-                    <Orbit size={20} />
-                  </span>
-                  <strong>{item.name}</strong>
-                  {modelId === item.id && <Check size={15} />}
-                </div>
+          {compactModel ? (
+            <select
+              className="cr-model-select"
+              aria-label="选择模型"
+              value={modelId}
+              onChange={(event) => setModelId(event.target.value)}
+            >
+              {config?.models.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <div className="cr-model-list">
+                {config?.models.map((item, index) => (
+                  <button
+                    key={item.id}
+                    className={`cr-model ${modelId === item.id ? "selected" : ""}`}
+                    onClick={() => setModelId(item.id)}
+                    aria-pressed={modelId === item.id}
+                  >
+                    <div className="cr-model-name">
+                      <span className={`cr-model-symbol model-${index}`}>
+                        <Orbit size={20} />
+                      </span>
+                      <strong>{item.name}</strong>
+                      {modelId === item.id && <Check size={15} />}
+                    </div>
 
-                <div className="cr-price-pair">
-                  <span>
-                    输入 <b>¥{item.input.toFixed(2)}</b>
-                  </span>
-                  <span>
-                    输出{" "}
-                    <b>
-                      ¥
-                      {(thinking ? item.thinking_output : item.output).toFixed(
-                        2,
-                      )}
-                    </b>
-                  </span>
+                    <div className="cr-price-pair">
+                      <span>
+                        输入 <b>¥{item.input.toFixed(2)}</b>
+                      </span>
+                      <span>
+                        输出{" "}
+                        <b>
+                          ¥
+                          {(thinking
+                            ? item.thinking_output
+                            : item.output
+                          ).toFixed(2)}
+                        </b>
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="cr-price-note">
+                元 / 百万 Token · 输入按未缓存
+                <br />
+                DeepSeek 闲时；千问北京标准价
+              </p>
+              {model && (
+                <div className="cr-model-footnote">
+                  {model.cached == null
+                    ? "缓存输入按普通输入计费"
+                    : `缓存输入 ¥${model.cached.toFixed(2)} / 百万`}
+                  {model.output !== model.thinking_output && (
+                    <>
+                      <br />
+                      千问思考输出 ¥{model.thinking_output.toFixed(2)} / 百万
+                    </>
+                  )}
                 </div>
-              </button>
-            ))}
-          </div>
-          <p className="cr-price-note">
-            元 / 百万 Token · 输入按未缓存
-            <br />
-            DeepSeek 闲时；千问北京标准价
-          </p>
-          {model && (
-            <div className="cr-model-footnote">
-              {model.cached == null
-                ? "缓存输入按普通输入计费"
-                : `缓存输入 ¥${model.cached.toFixed(2)} / 百万`}
-              {model.output !== model.thinking_output && (
-                <>
-                  <br />
-                  千问思考输出 ¥{model.thinking_output.toFixed(2)} / 百万
-                </>
               )}
-            </div>
+            </>
           )}
 
           <section className="cr-setting-section">
@@ -586,7 +610,7 @@ export default function Classroom() {
           </section>
         </aside>
         <main
-          className={`cr-main ${screen === "browser" ? "cr-browser-main" : ""} ${screen === "workbench" ? "cr-chat-main" : ""} ${screen === "workbench" && outputTab === "preview" ? "cr-preview-mode" : ""}`}
+          className={`cr-main ${screen === "browser" ? "cr-browser-main" : ""} ${screen === "requirements" ? "cr-requirements-main" : ""} ${screen === "workbench" ? "cr-chat-main" : ""} ${screen === "workbench" && outputTab === "preview" ? "cr-preview-mode" : ""}`}
         >
           {screen === "tasks" && config ? (
             <Tasks
@@ -598,6 +622,14 @@ export default function Classroom() {
               }}
               onCopy={copy}
               onError={setError}
+            />
+          ) : screen === "requirements" ? (
+            <RequirementsStudio
+              modelId={modelId}
+              thinking={thinking}
+              effort={effort}
+              controls={browserControls}
+              saveConnection={saveConnection}
             />
           ) : screen === "browser" ? (
             <BrowserTesting
@@ -908,7 +940,7 @@ export default function Classroom() {
             </>
           )}
         </main>
-        {screen !== "browser" && (
+        {screen !== "browser" && screen !== "requirements" && (
           <aside className="cr-inspector">
             <section className="cr-bill">
               <div className="cr-bill-heading">

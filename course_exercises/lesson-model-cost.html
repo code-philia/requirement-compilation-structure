@@ -537,6 +537,212 @@
     <p class="lead">发送 → 填入测试区 → 执行测试 → 填入修复反馈<br>→ 启动应用修复 → 审阅并 Apply → 再次执行</p>
     <p class="footnote">测试通过只说明已检查的场景符合预期。未覆盖的业务、视觉效果和其他环境，仍需相应检查。</p>
   </section>
+  <section class="slide" data-title="第四节：需求沉淀">
+    <p class="section-label">第四节 · 从自己的想法出发</p>
+    <h1>把自己的需求，<br>变成可以实现与验收的文档</h1>
+    <p class="lead">讲清目标 → 拆解大纲 → 完善节点 → 补充验收<br>→ 审阅文档 → 交给需求编译系统</p>
+    <p>实践入口：课堂练习室 → <strong>需求沉淀</strong><br>课堂产出：一棵需求树、一份需求文档、一个独立编译输入目录。</p>
+    <p class="footnote">选一个你熟悉的小业务，先完成可用的最小范围，再逐步扩展。</p>
+  </section>
+
+  <section class="slide" data-title="好的需求：明确、有限、可验收">
+    <p class="section-label">第四节 · 什么是好的需求</p>
+    <h2>把“想要什么”说到可以核对</h2>
+    <table>
+      <thead><tr><th>含糊的描述</th><th>可以继续完善的描述</th></tr></thead>
+      <tbody>
+        <tr><td>做一个好用的费用管理系统</td><td>单人登记费用，按日期和分类查询，并查看金额合计</td></tr>
+        <tr><td>金额要合理</td><td>金额大于零，最多两位小数；超过 1000 元时拒绝保存并提示原因</td></tr>
+        <tr><td>筛选之后显示统计</td><td>筛选合计只统计可见记录；全部费用合计保持不变</td></tr>
+        <tr><td>删除后处理好数据</td><td>删除该记录并更新合计；刷新后该记录不再出现</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote">好需求应当清楚、一致、有边界、可以验收。数字和规则由业务确认；模型建议不等于已经确认。</p>
+  </section>
+
+  <section class="slide" data-title="描述需求：六个问题">
+    <p class="section-label">第四节 · 如何描述</p>
+    <h2>先回答六个问题，再让模型写文档</h2>
+    <ul>
+      <li><strong>谁使用：</strong>什么角色，在什么场景下使用？</li>
+      <li><strong>做什么：</strong>从哪里进入，输入什么，执行什么操作？</li>
+      <li><strong>按什么规则：</strong>金额、日期、权限、重复与状态如何判断？</li>
+      <li><strong>得到什么：</strong>页面显示什么，数据怎样变化，刷新后怎样？</li>
+      <li><strong>失败怎么办：</strong>输入错误、条件不满足时，提示什么，保留什么？</li>
+      <li><strong>这次不做什么：</strong>明确排除的功能，以及仍需确认的问题。</li>
+    </ul>
+    <p class="footnote">不清楚的地方可以先标记“待确认”，继续追问。不要用没有依据的默认规则填满文档。</p>
+  </section>
+
+  <section class="slide" data-title="拆解需求：从项目到可验收行为">
+    <p class="section-label">第四节 · 如何拆解</p>
+    <h2>按业务拆解，直到可以独立验收</h2>
+    <div class="columns">
+      <div>
+        <h3>个人费用登记</h3>
+        <p>费用记录<br>　新增费用<br>　编辑费用<br>　删除费用</p>
+        <p>查询统计<br>　按条件筛选<br>　查看金额汇总</p>
+      </div>
+      <div>
+        <h3>拆解时检查</h3>
+        <ul>
+          <li>父节点组织范围，叶子描述具体行为。</li>
+          <li>同一规则归属明确，避免多个节点各写一套。</li>
+          <li>一个叶子尽量能单独说明、实现和验收。</li>
+          <li>共享规则应说明关联和适用范围。</li>
+        </ul>
+      </div>
+    </div>
+    <p class="footnote">当前编译器按叶子分析业务，具体场景放在对应叶子。数据库、接口与页面结构会在后续阶段设计。</p>
+  </section>
+
+  <section class="slide" data-title="验收场景：前置、操作、结果">
+    <p class="section-label">第四节 · 场景描述</p>
+    <h2>用 Given / When / Then 写清验收</h2>
+    <table>
+      <thead><tr><th>场景</th><th>前置条件 Given</th><th>用户操作 When</th><th>预期结果 Then</th></tr></thead>
+      <tbody>
+        <tr><td>正常</td><td>清单为空，名称、分类、日期均有效</td><td>新增交通费 12.50 元</td><td>保存一条记录，合计 ¥12.50，刷新后仍存在</td></tr>
+        <tr><td>异常</td><td>名称未填写，其余输入有效</td><td>点击保存</td><td>提示名称必填；不新增记录，合计不变</td></tr>
+        <tr><td>边界</td><td>约定单笔上限为 1000 元</td><td>分别保存 1000 和 1000.01 元</td><td>前者允许，后者拒绝；两个用例独立执行</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote">场景覆盖正常、异常和适用的边界或权限。Then 应能从界面、记录或状态核对，而不只是“处理成功”。</p>
+  </section>
+
+  <section class="slide" data-title="文档格式：节点与场景">
+    <p class="section-label">第四节 · 编译输入</p>
+    <h2>业务文字与固定格式，各有作用</h2>
+    <pre class="code-example">id: REQ-1
+name: 录入费用
+description:
+  text: 名称必填，金额大于零，保存后刷新仍可查看。
+scenarios:
+  - id: SCN-REQ-1-01
+    name: 保存有效费用
+    steps:
+      - id: STEP-REQ-1-01-01
+        Given: 清单为空，其余必填项有效。
+        When: 保存交通费，金额 12.50 元。
+        Then: 新增一条记录，合计为 ¥12.50，刷新后仍存在。
+        references: []
+children: []</pre>
+    <p class="footnote">这是一个叶子节点的示例。整份文档还包含项目根节点；平台负责格式校验与导出，你负责业务规则是否准确。</p>
+  </section>
+
+  <section class="slide" data-title="操作一：创建自己的需求项目">
+    <p class="section-label">第四节 · 实践准备</p>
+    <h2>新建项目，或从已有文档开始</h2>
+    <ol>
+      <li>打开课堂练习室，进入<strong>需求沉淀</strong>，确认模型连接可用。</li>
+      <li>选择<strong>空白项目</strong>，或<strong>从当前 input 开始</strong>查看现有格式。</li>
+      <li>已有文档可通过工具栏导入 YAML / JSON；导入替换当前树，可撤销。</li>
+      <li>认识三个视图：<strong>需求树、文档预览、YAML</strong>。</li>
+    </ol>
+    <p><strong>预期：</strong>项目进入历史列表，文档和会话保存在本地；<br>右侧显示需求树及待完善项。</p>
+    <p class="footnote">每位学员使用独立项目。空白项目缺少描述和场景属于正常的草稿状态。</p>
+  </section>
+
+  <section class="slide" data-title="操作二：先生成模块大纲">
+    <p class="section-label">第四节 · 起草</p>
+    <h2>第一轮，只确认目标与范围</h2>
+    <pre class="prompt-text">我想做一个单人使用的个人费用登记应用。
+需要登记费用名称、金额、分类和日期，支持编辑、删除、筛选与金额汇总，刷新后记录仍保留。
+第一版不做登录、支付、审批、发票识别或多人协作。
+请先问我影响需求范围的关键问题；确认后，通过工具生成项目与模块大纲，先不要展开全部场景。没有确认的信息标记待确认。</pre>
+    <p>也可点击对话区的<strong>先生成大纲</strong>，替换为你自己的业务。</p>
+    <p class="footnote">预期先澄清，再形成可讨论的大纲。此时缺少叶子验收场景是允许的；不要急着要求一次生成所有细节。</p>
+  </section>
+
+  <section class="slide" data-title="操作三：逐节点完善规则与验收">
+    <p class="section-label">第四节 · 深化需求</p>
+    <h2>选中一个节点，每轮解决一个问题</h2>
+    <pre class="prompt-text">请完善选中的“新增费用”节点，保留其他节点和已有 ID。
+名称、金额、分类、日期必填。金额大于零，最多两位小数，单笔不超过 1000 元。
+保存成功后清空录入表单，更新列表与合计，刷新后记录仍保留。
+请补充正常、空名称、零金额、超过上限和小数位错误的验收场景；错误时不新增记录，合计保持不变。
+还有会影响实现的歧义，请先问我。</pre>
+    <p><strong>预期：</strong>该节点描述与场景更新；其他节点保持原有内容。</p>
+    <p class="footnote">示例规则在本练习中由你明确提出。检查模型是否误加去重、自动审批等未要求的行为。</p>
+  </section>
+
+  <section class="slide" data-title="操作四：工具修改与图形编辑">
+    <p class="section-label">第四节 · 维护需求树</p>
+    <h2>对话和图形界面，维护同一份文档</h2>
+    <table>
+      <thead><tr><th>想做什么</th><th>对话示例</th><th>图形操作</th></tr></thead>
+      <tbody>
+        <tr><td>新增</td><td>在查询统计下新增按月份查询节点</td><td>点击父节点的 ＋，填写内容并保存</td></tr>
+        <tr><td>修改</td><td>只修改此节点的金额规则，保留其他内容</td><td>点击节点，编辑描述与场景</td></tr>
+        <tr><td>移动</td><td>将此节点移动到费用记录模块，保留 ID</td><td>编辑区选择父节点并移动</td></tr>
+        <tr><td>删除与恢复</td><td>删除指定节点及子树</td><td>删除子树；误改后点击撤销</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote">工具执行成功后自动保存并更新画布。ID 用来追踪关联，修改名称时保持 ID；增删移动后重新检查引用与职责归属。</p>
+  </section>
+
+  <section class="slide" data-title="操作五：审阅遗漏、矛盾与模糊表达">
+    <p class="section-label">第四节 · 需求审阅</p>
+    <h2>让模型挑问题，再由你做业务决定</h2>
+    <pre class="prompt-text">请审阅整棵需求树，先不要修改。
+检查：范围遗漏、重复职责、规则矛盾、含糊表达、无法验收的结果，以及待确认事项。
+特别核对：筛选是否影响全部合计、删除后刷新是否恢复、错误提交是否改变原数据。
+请按节点 ID 列出问题、影响和建议，需要我确认的地方单独提问。</pre>
+    <p>点击<strong>待完善项</strong>可定位结构问题；<br>切换<strong>文档预览</strong>，从使用者角度连贯阅读。</p>
+    <p class="footnote">结构检查发现字段、场景、引用与资源问题；业务是否正确、规则是否合理，仍需人工确认。</p>
+  </section>
+
+  <section class="slide" data-title="长会话：保留记录，压缩上下文">
+    <p class="section-label">第四节 · 持续维护</p>
+    <h2>重要规则写进文档，讨论过程留在会话</h2>
+    <ul>
+      <li><strong>原始对话：</strong>保存在项目中，可刷新后继续查看。</li>
+      <li><strong>自动压缩：</strong>旧上下文约超过 48,000 字符时，下次发送前生成摘要。</li>
+      <li><strong>摘要内容：</strong>已确认规则、排除范围、关键术语、未决问题和当前任务。</li>
+      <li><strong>需求树：</strong>独立保存，压缩不会替换或删减节点。</li>
+    </ul>
+    <p>展开<strong>会话上下文</strong>查看摘要，也可点击<strong>现在压缩历史</strong>。</p>
+    <p class="footnote">字符数是上下文规模的近似指标，并非精确 Token 数。摘要仍需核对；关键规则确认后应落实到对应节点。</p>
+  </section>
+
+  <section class="slide" data-title="操作六：预览文档并导出">
+    <p class="section-label">第四节 · 形成交付物</p>
+    <h2>从可讨论的树，到可使用的输入文档</h2>
+    <ol>
+      <li>在需求树中检查范围与层级，逐项处理待完善问题。</li>
+      <li>打开<strong>文档预览</strong>，核对业务规则和验收场景。</li>
+      <li>打开<strong>YAML</strong>，复制或下载 <strong>requirements.yaml</strong>。</li>
+      <li>工具栏可导出<strong>编译输入包</strong>；Markdown 可用于交流与评审。</li>
+    </ol>
+    <p><strong>预期：</strong>树、预览和导出内容一致，且能够追踪到稳定节点 ID。</p>
+    <p class="footnote">参考图使用相对路径。当前 input 示例会带入对应图片；自行导入的文档如缺少资源，应在编译前补齐图片文件。</p>
+  </section>
+
+  <section class="slide" data-title="操作七：交给需求编译系统">
+    <p class="section-label">第四节 · 实现自己的需求</p>
+    <h2>使用独立输入目录，运行自己的项目</h2>
+    <ol>
+      <li>复制页面底部的<strong>编译输入目录</strong>路径。</li>
+      <li>打开<strong>需求工厂</strong>，将路径粘贴到输入目录。</li>
+      <li>设置新的输出目录，例如 <strong>outputs/my-expenses-g01</strong>。</li>
+      <li>沿用第二节的顺序，从 <strong>00 → 10</strong> 分阶段运行，观察产物与验收。</li>
+    </ol>
+    <p>发现需求问题时，回到需求沉淀修改，再用独立输出目录验证。</p>
+    <p class="footnote">独立输入目录随文档保存自动更新。保留清楚的输入与输出对应关系；需求改动后需重新生成受影响产物，不能只运行最后阶段。</p>
+  </section>
+
+  <section class="slide" data-title="第四节：课堂交付与核对">
+    <p class="section-label">第四节 · 课堂交付</p>
+    <h2>带走一份属于自己的需求文档</h2>
+    <ul>
+      <li><strong>目标与范围：</strong>明确使用者、核心问题，以及第一版不做的功能。</li>
+      <li><strong>需求树：</strong>先选 3～6 个核心叶子，职责清楚，规则一致。</li>
+      <li><strong>验收场景：</strong>每个叶子补足正常与适用的异常、边界或权限场景。</li>
+      <li><strong>交付文件：</strong>导出 YAML，确认引用和图片可用，记录待确认问题。</li>
+    </ul>
+    <p class="lead">最后互相提问：<br>“只读这份文档，我能否知道该实现什么、怎样判断实现正确？”</p>
+    <p class="footnote">模型帮助整理、追问与检查；需求的业务取舍与最终确认，由你负责。</p>
+  </section>
 </main>
 
 <nav class="nav" aria-label="幻灯片导航">

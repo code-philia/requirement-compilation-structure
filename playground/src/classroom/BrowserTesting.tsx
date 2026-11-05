@@ -350,48 +350,51 @@ export default function BrowserTesting(props: Props) {
     <div className="bt-workspace">
       {props.controls &&
         createPortal(
-          <div className="cr-sidebar-action">
-            <button
-              className="cr-button primary"
-              disabled={working}
-              onClick={create}
-            >
-              <Plus size={18} />
-              {session ? "新建练习 / 重置" : "新建练习"}
-            </button>
-          </div>,
+          <>
+            <header className="bt-heading">
+              <div>
+                <h2>GUI 测试</h2>
+                <span className={`bt-status ${working ? "running" : ""}`}>
+                  {labels[session?.status || "IDLE"]}
+                </span>
+              </div>
+              <select
+                aria-label="历史练习"
+                value={identity}
+                disabled={working}
+                onChange={(event) => {
+                  setSession(null);
+                  setIdentity(event.target.value);
+                }}
+              >
+                <option value="" disabled>
+                  历史练习
+                </option>
+                {history.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {new Date(item.created_at).toLocaleString()} ·{" "}
+                    {item.id.slice(0, 6)}
+                  </option>
+                ))}
+                {identity && !history.some((item) => item.id === identity) && (
+                  <option value={identity}>当前练习</option>
+                )}
+              </select>
+            </header>
+            <div className="cr-sidebar-action">
+              <button
+                className="cr-button primary"
+                disabled={working}
+                onClick={create}
+              >
+                <Plus size={18} />
+                {session ? "新建练习 / 重置" : "新建练习"}
+              </button>
+            </div>
+          </>,
           props.controls,
         )}
-      <header className="bt-heading">
-        <div>
-          <h2>浏览器测试</h2>
-          <span className={`bt-status ${working ? "running" : ""}`}>
-            {labels[session?.status || "IDLE"]}
-          </span>
-        </div>
-        <select
-          aria-label="历史练习"
-          value={identity}
-          disabled={working}
-          onChange={(event) => {
-            setSession(null);
-            setIdentity(event.target.value);
-          }}
-        >
-          <option value="" disabled>
-            历史练习
-          </option>
-          {history.map((item) => (
-            <option key={item.id} value={item.id}>
-              {new Date(item.created_at).toLocaleString()} ·{" "}
-              {item.id.slice(0, 6)}
-            </option>
-          ))}
-          {identity && !history.some((item) => item.id === identity) && (
-            <option value={identity}>当前练习</option>
-          )}
-        </select>
-      </header>
+
       <div className="bt-layout">
         <section className="bt-chat">
           <div
