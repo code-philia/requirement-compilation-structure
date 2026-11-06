@@ -1,11 +1,4 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Panel,
   PanelGroup,
@@ -16,7 +9,6 @@ import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import {
   Boxes,
   GraduationCap,
-  LoaderCircle,
   PanelLeftClose,
   PanelRightClose,
   X,
@@ -32,7 +24,6 @@ import { RunControls } from "./components/RunControls";
 import { FactoryMap } from "./components/FactoryMap";
 import { RunInspector } from "./components/RunInspector";
 import { NodeDetails } from "./components/Details";
-const CompareRuns = lazy(() => import("./components/CompareRuns"));
 
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -53,7 +44,6 @@ export default function App() {
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [compare, setCompare] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const latest = useRef(0);
@@ -291,7 +281,12 @@ export default function App() {
                   setLimit(60);
                 }}
                 onMore={() => setLimit(limit + 40)}
-                onCompare={() => setCompare(true)}
+                onCompare={() =>
+                  window.location.assign(
+                    "/compare" +
+                      (identity ? "?run=" + encodeURIComponent(identity) : ""),
+                  )
+                }
                 connected={connected}
                 loading={loading}
                 onError={showError}
@@ -306,26 +301,6 @@ export default function App() {
           onClose={() => setDetailOpen(false)}
           onNavigate={setSelected}
         />
-        {compare && (
-          <Suspense
-            fallback={
-              <div className="loading-overlay">
-                <LoaderCircle className="spin" />
-                正在打开运行对比…
-              </div>
-            }
-          >
-            <CompareRuns
-              runs={runs}
-              currentId={identity || undefined}
-              onClose={() => setCompare(false)}
-              onInspect={(id) => {
-                setIdentity(id);
-                setCompare(false);
-              }}
-            />
-          </Suspense>
-        )}
         <AnimatePresence>
           {error && (
             <motion.div

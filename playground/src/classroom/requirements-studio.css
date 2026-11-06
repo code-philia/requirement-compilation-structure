@@ -312,6 +312,7 @@
 }
 .rs-tree-toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   padding: 0 10px 8px;
@@ -360,6 +361,21 @@
   font:
     10px ui-monospace,
     monospace;
+}
+.rs-node-label > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-node-label > button {
+  flex-shrink: 0;
+}
+.rs-tree-node button:disabled,
+.rs-tree-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .rs-tree-node button {
   display: inline-flex;
@@ -419,18 +435,45 @@
 .rs-search-results button:hover {
   background: #f2f6ff;
 }
-.rs-node-editor {
-  position: absolute;
-  top: 42px;
-  right: 10px;
-  bottom: 10px;
-  width: min(330px, 87%);
-  background: white;
+.rs-node-dialog {
+  width: min(800px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  margin: auto;
   border: 1px solid #d3dfef;
-  box-shadow: 0 5px 22px #365b8320;
-  z-index: 6;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 16px 64px #253b6533;
+  color: #405b81;
+}
+.rs-node-dialog::backdrop {
+  background: #20304b55;
+}
+.rs-node-editor {
+  height: min(740px, calc(100dvh - 34px));
+  background: white;
   display: flex;
   flex-direction: column;
+  font-size: 12px;
+}
+.rs-node-editor > header {
+  flex-shrink: 0;
+  padding: 14px 18px;
+}
+.rs-editor-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid #e1e8f2;
+  background: #fff;
+}
+.rs-editor-actions > span {
+  margin-right: auto;
+  color: #7d8ca4;
   font-size: 11px;
 }
 .rs-node-editor > header,
@@ -455,9 +498,11 @@
 }
 .rs-node-editor fieldset {
   border: 0;
-  padding: 10px;
+  padding: 14px 18px;
   margin: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   flex: 1;
   min-height: 0;
 }
@@ -472,7 +517,8 @@
 .rs-node-editor textarea {
   width: 100%;
   min-width: 0;
-  font-size: 11px;
+  font-size: 12px;
+  border-radius: 4px;
 }
 .rs-node-editor textarea {
   min-height: 70px;
@@ -480,7 +526,7 @@
   line-height: 1.6;
 }
 .rs-node-editor .rs-step-fields textarea {
-  min-height: 52px;
+  min-height: 86px;
 }
 .rs-editor-heading {
   display: flex;
@@ -496,8 +542,34 @@
   background: #fbfcff;
 }
 .rs-step-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
   border-bottom: 1px solid #e3eaf5;
   margin-bottom: 8px;
+}
+.rs-step-fields > button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-bottom: 8px;
+}
+.rs-node-structure summary {
+  cursor: pointer;
+  color: #7185a3;
+}
+.rs-node-structure[open] summary {
+  margin-bottom: 12px;
+}
+@media (max-width: 650px) {
+  .rs-step-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .rs-node-editor > header,
+  .rs-node-editor fieldset,
+  .rs-editor-actions {
+    padding: 10px 12px;
+  }
 }
 .rs-node-structure {
   border-top: 1px solid #e3eaf4;

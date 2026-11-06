@@ -27,7 +27,10 @@
   font-size: 11px;
   white-space: nowrap;
 }
-.classroom-entry:hover { background: #edf1ff; border-color: #b5c4e8; }
+.classroom-entry:hover {
+  background: #edf1ff;
+  border-color: #b5c4e8;
+}
 * {
   box-sizing: border-box;
 }
@@ -2210,6 +2213,43 @@ select {
   gap: 12px;
   color: #7f97bd;
 }
+.factory-compare-page {
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #f6f8fc;
+}
+.factory-compare-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-height: 50px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid #dfe5ee;
+}
+.factory-compare-header > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #607898;
+  font-size: 12px;
+}
+.factory-compare-header h1 {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  color: #405578;
+}
+.factory-compare-content {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  min-width: 0;
+}
 .compare-controls {
   padding: 16px 25px;
   border-bottom: 1px solid #e3eaf4;
@@ -2322,7 +2362,8 @@ select {
   white-space: nowrap;
 }
 .compare-body {
-  padding-top: 15px;
+  padding: 15px 25px 25px;
+  min-width: 0;
 }
 .comparison-table {
   overflow: auto;
@@ -2380,7 +2421,7 @@ select {
   color: #8a9fbd;
 }
 .chart-host {
-  height: 255px;
+  height: 310px;
   width: 100%;
 }
 .compare-empty {

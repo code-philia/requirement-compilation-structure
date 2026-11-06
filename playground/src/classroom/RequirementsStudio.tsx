@@ -114,7 +114,8 @@ type TreeData = {
   collapsed: boolean;
   active: boolean;
   working: boolean;
-  onAdd: (id: string) => void;
+  canAddSibling: boolean;
+  onAdd: (id: string, relation: "child" | "sibling") => void;
   onToggle: (id: string) => void;
 };
 type TreeNode = Node<TreeData>;
@@ -150,10 +151,23 @@ function RequirementCard({ data }: NodeProps<TreeNode>) {
           disabled={data.working}
           onClick={(event) => {
             event.stopPropagation();
-            data.onAdd(node.id);
+            data.onAdd(node.id, "child");
           }}
         >
           <Plus size={13} />
+          子级
+        </button>
+        <button
+          className="nodrag nopan"
+          title={data.canAddSibling ? "添加兄弟节点" : "根节点不能添加兄弟节点"}
+          disabled={data.working || !data.canAddSibling}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onAdd(node.id, "sibling");
+          }}
+        >
+          <Plus size={13} />
+          同级
         </button>
       </div>
       <strong title={node.name}>{node.name}</strong>
@@ -187,6 +201,7 @@ function NodeEditor({
   revision,
   nodes,
   working,
+  error,
   onSave,
   onMove,
   onDelete,
@@ -196,11 +211,18 @@ function NodeEditor({
   revision: number;
   nodes: { node: Requirement; parent: string | null }[];
   working: boolean;
+  error: string;
   onSave: (id: string, patch: object, revision: number) => Promise<boolean>;
   onMove: (id: string, parent: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
 }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
   const [draft, setDraft] = useState(() => structuredClone(node));
   const [baseRevision, setBaseRevision] = useState(revision);
   const [dirty, setDirty] = useState(false);
@@ -246,136 +268,201 @@ function NodeEditor({
     };
   }
   return (
-    <section className="rs-node-editor">
-      <header>
-        <strong>编辑节点 · {node.id}</strong>
-        <button title="关闭编辑" onClick={onClose}>
-          <X size={15} />
-        </button>
-      </header>
-      {dirty && baseRevision !== revision && (
-        <p className="rs-error">
-          文档已变化，草稿仍保留。请复制草稿后重新载入再保存。
-        </p>
-      )}
-      <fieldset disabled={working}>
-        <label>
-          名称
-          <input
-            value={draft.name}
-            onChange={(event) => change({ ...draft, name: event.target.value })}
-          />
-        </label>
-        <label>
-          描述
-          <textarea
-            value={draft.description.text}
-            onChange={(event) =>
-              change({
-                ...draft,
-                description: { ...draft.description, text: event.target.value },
-              })
-            }
-            placeholder="用户、输入、业务规则、结果、边界与不做什么"
-          />
-        </label>
-        {draft.description.image.length > 0 && (
-          <p className="rs-hint">
-            已有 {draft.description.image.length}{" "}
-            张参考图关联，编辑文字会保留关联。
-          </p>
-        )}
-        <div className="rs-editor-heading">
-          <strong>验收场景</strong>
-          <button
-            className="cr-text-button"
-            onClick={() =>
-              change({
-                ...draft,
-                scenarios: [
-                  ...draft.scenarios,
-                  {
-                    id: "SCN-" + crypto.randomUUID().slice(0, 8),
-                    name: "新场景",
-                    steps: [newStep()],
-                  },
-                ],
-              })
-            }
-          >
-            <Plus size={12} />
-            场景
+    <dialog
+      ref={dialog}
+      className="rs-node-dialog"
+      aria-labelledby="rs-node-editor-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+    >
+      <section className="rs-node-editor">
+        <header>
+          <strong id="rs-node-editor-title">编辑需求 · {node.id}</strong>
+          <button title="关闭编辑" onClick={onClose}>
+            <X size={15} />
           </button>
-        </div>
-        {draft.scenarios.map((scenario, index) => (
-          <div className="rs-scenario" key={scenario.id}>
-            <div className="rs-editor-heading">
-              <input
-                aria-label="场景名称"
-                value={scenario.name}
-                onChange={(event) => scenarioName(index, event.target.value)}
-              />
-              <button
-                title="删除场景"
-                onClick={() =>
-                  change({
-                    ...draft,
-                    scenarios: draft.scenarios.filter((_, i) => i !== index),
-                  })
-                }
-              >
-                <X size={12} />
-              </button>
-            </div>
-            {scenario.steps.map((step, stepIndex) => (
-              <div key={step.id} className="rs-step-fields">
-                {(
-                  [
-                    ["Given", "前置条件"],
-                    ["When", "用户操作"],
-                    ["Then", "预期结果"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label key={key}>
-                    {label} · {key}
-                    <textarea
-                      value={step[key]}
-                      onChange={(event) =>
-                        stepField(index, stepIndex, key, event.target.value)
-                      }
-                    />
-                  </label>
-                ))}
-                {scenario.steps.length > 1 && (
-                  <button
-                    className="cr-text-button"
-                    onClick={() => {
-                      const next = structuredClone(draft);
-                      next.scenarios[index].steps.splice(stepIndex, 1);
-                      change(next);
-                    }}
-                  >
-                    删除此步
-                  </button>
-                )}
-              </div>
-            ))}
+        </header>
+        <fieldset disabled={working}>
+          {error && (
+            <p className="rs-error" role="alert">
+              {error}
+            </p>
+          )}
+          {dirty && baseRevision !== revision && (
+            <p className="rs-error">
+              文档已变化，草稿仍保留。请复制草稿后重新载入再保存。
+            </p>
+          )}
+          <label>
+            名称
+            <input
+              value={draft.name}
+              onChange={(event) =>
+                change({ ...draft, name: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            描述
+            <textarea
+              value={draft.description.text}
+              onChange={(event) =>
+                change({
+                  ...draft,
+                  description: {
+                    ...draft.description,
+                    text: event.target.value,
+                  },
+                })
+              }
+              placeholder="用户、输入、业务规则、结果、边界与不做什么"
+            />
+          </label>
+          {draft.description.image.length > 0 && (
+            <p className="rs-hint">
+              已有 {draft.description.image.length}{" "}
+              张参考图关联，编辑文字会保留关联。
+            </p>
+          )}
+          <div className="rs-editor-heading">
+            <strong>验收场景</strong>
             <button
               className="cr-text-button"
-              onClick={() => {
-                const next = structuredClone(draft);
-                next.scenarios[index].steps.push(newStep());
-                change(next);
-              }}
+              onClick={() =>
+                change({
+                  ...draft,
+                  scenarios: [
+                    ...draft.scenarios,
+                    {
+                      id: "SCN-" + crypto.randomUUID().slice(0, 8),
+                      name: "新场景",
+                      steps: [newStep()],
+                    },
+                  ],
+                })
+              }
             >
-              ＋ 添加步骤
+              <Plus size={12} />
+              场景
             </button>
           </div>
-        ))}
-        <div className="rs-actions">
+          {draft.scenarios.map((scenario, index) => (
+            <div className="rs-scenario" key={scenario.id}>
+              <div className="rs-editor-heading">
+                <input
+                  aria-label="场景名称"
+                  value={scenario.name}
+                  onChange={(event) => scenarioName(index, event.target.value)}
+                />
+                <button
+                  title="删除场景"
+                  onClick={() =>
+                    change({
+                      ...draft,
+                      scenarios: draft.scenarios.filter((_, i) => i !== index),
+                    })
+                  }
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              {scenario.steps.map((step, stepIndex) => (
+                <div key={step.id} className="rs-step-fields">
+                  {(
+                    [
+                      ["Given", "前置条件"],
+                      ["When", "用户操作"],
+                      ["Then", "预期结果"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key}>
+                      {label} · {key}
+                      <textarea
+                        value={step[key]}
+                        onChange={(event) =>
+                          stepField(index, stepIndex, key, event.target.value)
+                        }
+                      />
+                    </label>
+                  ))}
+                  {scenario.steps.length > 1 && (
+                    <button
+                      className="cr-text-button"
+                      onClick={() => {
+                        const next = structuredClone(draft);
+                        next.scenarios[index].steps.splice(stepIndex, 1);
+                        change(next);
+                      }}
+                    >
+                      删除此步
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                className="cr-text-button"
+                onClick={() => {
+                  const next = structuredClone(draft);
+                  next.scenarios[index].steps.push(newStep());
+                  change(next);
+                }}
+              >
+                ＋ 添加步骤
+              </button>
+            </div>
+          ))}
+          {nodes.find((item) => item.node.id === node.id)?.parent && (
+            <details className="rs-node-structure">
+              <summary>调整层级与删除</summary>
+              <label>
+                移动到父节点
+                <select
+                  value={parent}
+                  onChange={(event) => setParent(event.target.value)}
+                >
+                  {nodes
+                    .filter((item) => !descendants.has(item.node.id))
+                    .map((item) => (
+                      <option key={item.node.id} value={item.node.id}>
+                        {item.node.id} · {item.node.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <div className="rs-actions">
+                <button
+                  className="cr-button secondary"
+                  disabled={dirty}
+                  onClick={() => onMove(node.id, parent)}
+                >
+                  移动节点
+                </button>
+                <button
+                  className="cr-text-button rs-danger"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `删除“${node.name}”及其子节点？可通过撤销恢复。`,
+                      )
+                    )
+                      onDelete(node.id);
+                  }}
+                >
+                  删除子树
+                </button>
+              </div>
+            </details>
+          )}
+        </fieldset>
+        <footer className="rs-editor-actions">
+          <span role="status">
+            {working ? "处理中…" : dirty ? "有未保存的修改" : "已保存"}
+          </span>
           <button
             className="cr-button primary"
-            disabled={!dirty}
+            disabled={working || !dirty || baseRevision !== revision}
             onClick={async () => {
               if (
                 await onSave(
@@ -395,6 +482,7 @@ function NodeEditor({
           </button>
           <button
             className="cr-button secondary"
+            disabled={working}
             onClick={() => {
               setDraft(structuredClone(node));
               setDirty(false);
@@ -403,50 +491,9 @@ function NodeEditor({
           >
             重新载入
           </button>
-        </div>
-        {nodes.find((item) => item.node.id === node.id)?.parent && (
-          <div className="rs-node-structure">
-            <label>
-              移动到父节点
-              <select
-                value={parent}
-                onChange={(event) => setParent(event.target.value)}
-              >
-                {nodes
-                  .filter((item) => !descendants.has(item.node.id))
-                  .map((item) => (
-                    <option key={item.node.id} value={item.node.id}>
-                      {item.node.id} · {item.node.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <div className="rs-actions">
-              <button
-                className="cr-button secondary"
-                disabled={dirty}
-                onClick={() => onMove(node.id, parent)}
-              >
-                移动节点
-              </button>
-              <button
-                className="cr-text-button rs-danger"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      `删除“${node.name}”及其子节点？可通过撤销恢复。`,
-                    )
-                  )
-                    onDelete(node.id);
-                }}
-              >
-                删除子树
-              </button>
-            </div>
-          </div>
-        )}
-      </fieldset>
-    </section>
+        </footer>
+      </section>
+    </dialog>
   );
 }
 
@@ -598,9 +645,20 @@ export default function RequirementsStudio(props: Props) {
       setBusy(false);
     }
   }
-  async function add(parent: string) {
+  async function add(id: string, relation: "child" | "sibling") {
+    let parent = id;
+    let position: number | undefined;
+    if (relation === "sibling") {
+      const parentId = nodes.find((item) => item.node.id === id)?.parent;
+      if (!parentId) return;
+      const parentNode = nodes.find((item) => item.node.id === parentId)?.node;
+      if (!parentNode) return;
+      parent = parentId;
+      position = parentNode.children.findIndex((child) => child.id === id) + 1;
+    }
     const value = await mutate("add_node", {
       parent_id: parent,
+      position,
       node: {
         name: "新需求",
         description: { text: "" },
@@ -614,10 +672,10 @@ export default function RequirementsStudio(props: Props) {
         next.delete(parent);
         return next;
       });
-      const id = value.changes.at(-1)?.node_id || parent;
-      setSelected(id);
+      const addedId = value.changes.at(-1)?.node_id || parent;
+      setSelected(addedId);
       setEditing(true);
-      setFocus(id);
+      setFocus(addedId);
     }
   }
   async function send(compact = false) {
@@ -687,6 +745,7 @@ export default function RequirementsStudio(props: Props) {
           collapsed: collapsed.has(node.id),
           active: selected === node.id,
           working,
+          canAddSibling: depth > 0,
           onAdd: add,
           onToggle: (id) =>
             setCollapsed((current) => {
@@ -1158,10 +1217,25 @@ export default function RequirementsStudio(props: Props) {
                   </button>
                   <button
                     disabled={working}
-                    onClick={() => add(selected || session.tree.id)}
+                    title="为当前节点添加子节点"
+                    onClick={() => add(selected || session.tree.id, "child")}
                   >
                     <Plus size={12} />
-                    节点
+                    子节点
+                  </button>
+                  <button
+                    disabled={
+                      working || !selected || selected === session.tree.id
+                    }
+                    title={
+                      selected && selected !== session.tree.id
+                        ? "在当前节点后添加兄弟节点"
+                        : "请选择非根节点"
+                    }
+                    onClick={() => add(selected, "sibling")}
+                  >
+                    <Plus size={12} />
+                    兄弟节点
                   </button>
                 </div>
                 {query && (
@@ -1220,6 +1294,7 @@ export default function RequirementsStudio(props: Props) {
                     revision={session.revision}
                     nodes={nodes}
                     working={working}
+                    error={error}
                     onClose={() => setEditing(false)}
                     onSave={async (id, patch, revision) =>
                       !!(await mutate(

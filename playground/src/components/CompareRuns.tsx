@@ -5,17 +5,9 @@ import {
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  DataZoomComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import {
-  ArrowLeft,
-  ChartNoAxesCombined,
-  ChevronDown,
-  LoaderCircle,
-  Plus,
-  X,
-} from "lucide-react";
+import { ArrowLeft, ChartNoAxesCombined, LoaderCircle, X } from "lucide-react";
 import {
   api,
   compact,
@@ -25,14 +17,12 @@ import {
   type Detail,
   type Run,
 } from "../types";
-import { Modal } from "./Details";
 echarts.use([
   LineChart,
   BarChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  DataZoomComponent,
   CanvasRenderer,
 ]);
 const colors = [
@@ -49,17 +39,12 @@ function callRequirementPoints(call: Call): string[] {
   if (call.requirement_ids?.length) return [...new Set(call.requirement_ids)];
   return [call.task_id ? "任务 · " + call.task_id : "未关联需求"];
 }
-export default function CompareRuns({
-  runs,
-  currentId,
-  onClose,
-  onInspect,
-}: {
-  runs: Run[];
-  currentId?: string;
-  onClose: () => void;
-  onInspect: (id: string, stage?: string) => void;
-}) {
+export default function CompareRuns() {
+  const currentId = new URLSearchParams(window.location.search).get("run");
+  const factoryUrl = currentId ? "/?run=" + encodeURIComponent(currentId) : "/";
+  function onInspect(id: string) {
+    window.location.assign("/?run=" + encodeURIComponent(id));
+  }
   const [ids, setIds] = useState<string[]>(currentId ? [currentId] : []);
   const [details, setDetails] = useState<Record<string, Detail>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -67,13 +52,20 @@ export default function CompareRuns({
   const [cumulative, setCumulative] = useState(false);
   const [chartType, setChartType] = useState<"line" | "bar">("line");
   const [search, setSearch] = useState("");
-  const [options, setOptions] = useState(runs);
+  const [options, setOptions] = useState<Run[]>([]);
+  const [listError, setListError] = useState("");
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
       api("/runs?limit=100&search=" + encodeURIComponent(search)).then(
         (data) => {
-          if (!cancelled) setOptions(data.items);
+          if (!cancelled) {
+            setOptions(data.items);
+            setListError("");
+          }
+        },
+        (error) => {
+          if (!cancelled) setListError(error.message);
         },
       );
     }, 250);
@@ -201,227 +193,248 @@ export default function CompareRuns({
     return result;
   }, [selected, ids, stage, labels, callLabels, cumulative]);
   return (
-    <Modal open onClose={onClose} title="运行对比" eyebrow="RUN ANALYTICS" wide>
-      <div className="compare-controls">
-        <div className="selected-runs">
-          {ids.map((id, index) => (
-            <span
-              className="selected-run"
-              key={id}
-              style={
-                {
-                  "--run-color": colors[index % colors.length],
-                } as React.CSSProperties
-              }
-            >
-              <i />
-              {details[id]?.run.name ||
-                runs.find((run) => run.id === id)?.name ||
-                "读取中…"}
-              <button
-                title="移除此运行"
-                onClick={() =>
-                  setIds((before) => before.filter((value) => value !== id))
+    <main className="factory-compare-page">
+      <header className="factory-compare-header">
+        <a href={factoryUrl}>
+          <ArrowLeft size={16} />
+          需求工厂
+        </a>
+        <h1>运行对比</h1>
+        <a className="classroom-entry" href="/classroom">
+          课堂练习室
+        </a>
+      </header>
+      <div className="factory-compare-content">
+        <div className="compare-controls">
+          <div className="selected-runs">
+            {ids.map((id, index) => (
+              <span
+                className="selected-run"
+                key={id}
+                style={
+                  {
+                    "--run-color": colors[index % colors.length],
+                  } as React.CSSProperties
                 }
               >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div className="compare-add">
-          <input
-            value={search}
-            placeholder="搜索更多历史运行"
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          <select
-            aria-label="添加运行"
-            value=""
-            onChange={(event) => {
-              if (event.target.value && !ids.includes(event.target.value))
-                setIds([...ids, event.target.value]);
-            }}
-          >
-            <option value="">＋ 添加运行</option>
-            {options.map((run) => (
-              <option
-                value={run.id}
-                key={run.id}
-                disabled={ids.includes(run.id)}
-              >
-                {run.name} · {run.started_at?.slice(0, 16) || "历史目录"} ·{" "}
-                {run.settings.model || run.output}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div className="compare-toolbar">
-        <div>
-          <ChartNoAxesCombined size={15} />
-          <span>横轴粒度</span>
-          <select
-            value={stage}
-            onChange={(event) => setStage(event.target.value)}
-          >
-            <option value="">所有阶段</option>
-            {stages.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.id.slice(0, 2)} · {item.label} / 执行任务
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="chart-type-controls">
-          <div className="chart-type-switch" role="group" aria-label="图表类型">
-            <button
-              aria-pressed={chartType === "line"}
-              onClick={() => setChartType("line")}
-            >
-              折线图
-            </button>
-            <button
-              aria-pressed={chartType === "bar"}
-              onClick={() => setChartType("bar")}
-            >
-              柱状图
-            </button>
-          </div>
-          <label>
-            <input
-              type="checkbox"
-              checked={cumulative}
-              onChange={(event) => setCumulative(event.target.checked)}
-            />
-            累计值
-          </label>
-        </div>
-      </div>
-      <div className="modal-body compare-body">
-        {ids.filter((id) => !details[id] && !errors[id]).length > 0 && (
-          <div className="loading-state">
-            <LoaderCircle size={18} className="spin" />
-            读取运行统计…
-          </div>
-        )}
-        {Object.entries(errors)
-          .filter(([id]) => ids.includes(id))
-          .map(([id, error]) => (
-            <div className="error-box" key={id}>
-              {error}
-            </div>
-          ))}
-        {selected.length === 0 ? (
-          <div className="compare-empty">
-            <ChartNoAxesCombined size={36} />
-            <h3>选择两次运行，开始比较</h3>
-            <p>也可以继续添加运行，每次运行对应一种颜色。</p>
-          </div>
-        ) : (
-          <>
-            <div className="comparison-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>运行 / 输入</th>
-                    <th>状态</th>
-                    <th>墙钟耗时</th>
-                    <th>Token</th>
-                    <th>模型调用次数</th>
-                    <th>估算金额</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selected.map((detail, index) => (
-                    <tr key={detail.run.id}>
-                      <td>
-                        <span
-                          className="table-run-dot"
-                          style={{
-                            background:
-                              colors[
-                                ids.indexOf(detail.run.id) % colors.length
-                              ],
-                          }}
-                        />
-                        <button
-                          className="text-link"
-                          onClick={() => onInspect(detail.run.id)}
-                        >
-                          {detail.run.name}
-                        </button>
-                        <small>
-                          {detail.run.input || "输入未记录"} ·{" "}
-                          {detail.run.id.slice(0, 20)}
-                        </small>
-                      </td>
-                      <td>{detail.run.status}</td>
-                      <td>{duration(detail.seconds)}</td>
-                      <td>
-                        {compact(
-                          detail.metrics.usage_calls ||
-                            detail.metrics.calls === 0
-                            ? detail.metrics.input + detail.metrics.output
-                            : null,
-                        )}
-                      </td>
-                      <td>{detail.metrics.calls.toLocaleString("zh-CN")}</td>
-                      <td>
-                        {money(detail.metrics.cost)}
-                        {detail.metrics.cost != null &&
-                        detail.metrics.priced_calls < detail.metrics.calls
-                          ? " *"
-                          : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {new Set(
-              selected.map((detail) => detail.run.input || detail.run.output),
-            ).size > 1 && (
-              <div className="data-note">
-                运行使用了不同或未记录的需求输入，比较时请结合任务规模。
-              </div>
-            )}
-            <p className="chart-note">
-              {stage
-                ? "结构化记录显示任务实际耗时；历史记录缺少任务计时时显示模型耗时之和。共享 API 按实际任务统计。"
-                : "阶段时间为实际墙钟耗时；历史记录缺失的数据留空。点击图表中的阶段可下钻到执行任务。"}{" "}
-              ＊
-              表示部分计价。阶段内的调用次数按需求点归集，共享调用会计入每个关联需求点，不宜直接相加；缺少关联时按任务展示。
-            </p>
-            {(["seconds", "tokens", "cost", "calls"] as Metric[]).map(
-              (metric) => (
-                <Chart
-                  key={metric}
-                  title={
-                    metric === "seconds"
-                      ? stage
-                        ? "任务耗时"
-                        : "阶段耗时"
-                      : metric === "tokens"
-                        ? "Token 使用量"
-                        : metric === "calls"
-                          ? "模型调用次数"
-                          : "估算费用 · CNY"
+                <i />
+                {details[id]?.run.name ||
+                  options.find((run) => run.id === id)?.name ||
+                  "读取中…"}
+                <button
+                  title="移除此运行"
+                  onClick={() =>
+                    setIds((before) => before.filter((value) => value !== id))
                   }
-                  labels={metric === "calls" ? callLabels : labels}
-                  series={chartData[metric]}
-                  line={chartType === "line"}
-                  metric={metric}
-                  onClick={(index) => {
-                    if (!stage) setStage(stages[index].id);
-                  }}
-                />
-              ),
-            )}
-          </>
-        )}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="compare-add">
+            <input
+              value={search}
+              placeholder="搜索更多历史运行"
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <select
+              aria-label="添加运行"
+              value=""
+              onChange={(event) => {
+                if (event.target.value && !ids.includes(event.target.value))
+                  setIds([...ids, event.target.value]);
+              }}
+            >
+              <option value="">＋ 添加运行</option>
+              {options.map((run) => (
+                <option
+                  value={run.id}
+                  key={run.id}
+                  disabled={ids.includes(run.id)}
+                >
+                  {run.name} · {run.started_at?.slice(0, 16) || "历史目录"} ·{" "}
+                  {run.settings.model || run.output}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="compare-toolbar">
+          <div>
+            <ChartNoAxesCombined size={15} />
+            <span>横轴粒度</span>
+            <select
+              value={stage}
+              onChange={(event) => setStage(event.target.value)}
+            >
+              <option value="">所有阶段</option>
+              {stages.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.id.slice(0, 2)} · {item.label} / 执行任务
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="chart-type-controls">
+            <div
+              className="chart-type-switch"
+              role="group"
+              aria-label="图表类型"
+            >
+              <button
+                aria-pressed={chartType === "line"}
+                onClick={() => setChartType("line")}
+              >
+                折线图
+              </button>
+              <button
+                aria-pressed={chartType === "bar"}
+                onClick={() => setChartType("bar")}
+              >
+                柱状图
+              </button>
+            </div>
+            <label>
+              <input
+                type="checkbox"
+                checked={cumulative}
+                onChange={(event) => setCumulative(event.target.checked)}
+              />
+              累计值
+            </label>
+          </div>
+        </div>
+        <div className="compare-body">
+          {listError && (
+            <div className="error-box" role="alert">
+              {listError}
+            </div>
+          )}
+          {ids.filter((id) => !details[id] && !errors[id]).length > 0 && (
+            <div className="loading-state">
+              <LoaderCircle size={18} className="spin" />
+              读取运行统计…
+            </div>
+          )}
+          {Object.entries(errors)
+            .filter(([id]) => ids.includes(id))
+            .map(([id, error]) => (
+              <div className="error-box" key={id}>
+                {error}
+              </div>
+            ))}
+          {selected.length === 0 ? (
+            <div className="compare-empty">
+              <ChartNoAxesCombined size={36} />
+              <h3>选择两次运行，开始比较</h3>
+              <p>也可以继续添加运行，每次运行对应一种颜色。</p>
+            </div>
+          ) : (
+            <>
+              <div className="comparison-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>运行 / 输入</th>
+                      <th>状态</th>
+                      <th>墙钟耗时</th>
+                      <th>Token</th>
+                      <th>模型调用次数</th>
+                      <th>估算金额</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.map((detail, index) => (
+                      <tr key={detail.run.id}>
+                        <td>
+                          <span
+                            className="table-run-dot"
+                            style={{
+                              background:
+                                colors[
+                                  ids.indexOf(detail.run.id) % colors.length
+                                ],
+                            }}
+                          />
+                          <button
+                            className="text-link"
+                            onClick={() => onInspect(detail.run.id)}
+                          >
+                            {detail.run.name}
+                          </button>
+                          <small>
+                            {detail.run.input || "输入未记录"} ·{" "}
+                            {detail.run.id.slice(0, 20)}
+                          </small>
+                        </td>
+                        <td>{detail.run.status}</td>
+                        <td>{duration(detail.seconds)}</td>
+                        <td>
+                          {compact(
+                            detail.metrics.usage_calls ||
+                              detail.metrics.calls === 0
+                              ? detail.metrics.input + detail.metrics.output
+                              : null,
+                          )}
+                        </td>
+                        <td>{detail.metrics.calls.toLocaleString("zh-CN")}</td>
+                        <td>
+                          {money(detail.metrics.cost)}
+                          {detail.metrics.cost != null &&
+                          detail.metrics.priced_calls < detail.metrics.calls
+                            ? " *"
+                            : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {new Set(
+                selected.map((detail) => detail.run.input || detail.run.output),
+              ).size > 1 && (
+                <div className="data-note">
+                  运行使用了不同或未记录的需求输入，比较时请结合任务规模。
+                </div>
+              )}
+              <p className="chart-note">
+                {stage
+                  ? "结构化记录显示任务实际耗时；历史记录缺少任务计时时显示模型耗时之和。共享 API 按实际任务统计。"
+                  : "阶段时间为实际墙钟耗时；历史记录缺失的数据留空。点击图表中的阶段可下钻到执行任务。"}{" "}
+                ＊
+                表示部分计价。阶段内的调用次数按需求点归集，共享调用会计入每个关联需求点，不宜直接相加；缺少关联时按任务展示。
+              </p>
+              {(["seconds", "tokens", "cost", "calls"] as Metric[]).map(
+                (metric) => (
+                  <Chart
+                    key={metric}
+                    title={
+                      metric === "seconds"
+                        ? stage
+                          ? "任务耗时"
+                          : "阶段耗时"
+                        : metric === "tokens"
+                          ? "Token 使用量"
+                          : metric === "calls"
+                            ? "模型调用次数"
+                            : "估算费用 · CNY"
+                    }
+                    labels={metric === "calls" ? callLabels : labels}
+                    series={chartData[metric]}
+                    line={chartType === "line"}
+                    metric={metric}
+                    onClick={(index) => {
+                      if (!stage) setStage(stages[index].id);
+                    }}
+                  />
+                ),
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </Modal>
+    </main>
   );
 }
 function Chart({
@@ -469,7 +482,12 @@ function Chart({
         animationDuration: 350,
         color: series.map((item) => item.color),
         textStyle: { fontFamily: "Inter, system-ui, sans-serif" },
-        grid: { left: 55, right: 24, top: 45, bottom: 70 },
+        grid: {
+          left: 55,
+          right: 24,
+          top: 45,
+          bottom: labels.length > 8 ? 100 : 70,
+        },
         tooltip: { trigger: "axis", confine: true },
         legend: {
           data: series.map((item) => item.name),
@@ -487,7 +505,7 @@ function Chart({
             width: 95,
             overflow: "truncate",
             interval: 0,
-            rotate: labels.length > 8 ? 20 : 0,
+            rotate: labels.length > 16 ? 60 : labels.length > 8 ? 40 : 0,
           },
           axisTick: { show: false },
         },
@@ -502,26 +520,6 @@ function Chart({
               metric === "cost" ? "¥" + value.toFixed(3) : compact(value),
           },
         },
-        dataZoom: [
-          {
-            type: "inside",
-            start: 0,
-            end:
-              labels.length > 20
-                ? Math.min(100, (20 / labels.length) * 100)
-                : 100,
-          },
-          {
-            type: "slider",
-            height: 13,
-            bottom: 8,
-            borderColor: "transparent",
-            backgroundColor: "#f1f4f8",
-            fillerColor: "#dce3f5",
-            handleSize: "80%",
-            showDetail: false,
-          },
-        ],
         series: series.map((item) => ({
           id: item.id,
           name: item.name,
