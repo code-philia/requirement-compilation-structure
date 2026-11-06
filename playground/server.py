@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import signal
 import socket
 import subprocess
 import sys
@@ -34,7 +33,7 @@ sys.path.insert(0, str(HERE.parent))
 from course_exercises import api as course_api
 from course_exercises.browser_testing import api as browser_api
 from course_exercises.requirements_studio import api as requirements_api
-from infrastructure.utils.processes import child_environment
+from infrastructure.utils.processes import start_process, stop_process
 
 repository = Repository()
 repository.prices = MODEL_PRICES
@@ -113,16 +112,6 @@ def update_settings(settings):
         configuration["OPENAI_API_KEY"] = settings.api_key
     if settings.visual_api_key:
         configuration["VISUAL_API_KEY"] = settings.visual_api_key
-
-
-def stop_process(process):
-    if process.poll() is None:
-        os.killpg(process.pid, signal.SIGINT)
-        try:
-            process.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=5)
 
 
 @asynccontextmanager
@@ -499,14 +488,12 @@ def start(body: StartRun):
             "model_offset": source_log.stat().st_size if source_log.exists() else 0,
             "event_offset": event_log.stat().st_size if event_log.exists() else 0,
         }
-        process = subprocess.Popen(
+        process = start_process(
             [sys.executable, "-u", str(HERE / "worker.py")],
             cwd=ROOT,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            env=child_environment(),
-            start_new_session=True,
         )
         processes[identity] = process
         process.stdin.write((json.dumps(config) + "\n").encode())
