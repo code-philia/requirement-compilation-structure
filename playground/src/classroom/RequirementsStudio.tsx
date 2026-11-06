@@ -1126,9 +1126,35 @@ export default function RequirementsStudio(props: Props) {
               setError("");
               try {
                 if (file.size > 1000000) throw new Error("文档不能超过 1MB");
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                let text: string;
+                if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+                  text = new TextDecoder("utf-16le", { fatal: true }).decode(
+                    bytes,
+                  );
+                } else if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+                  text = new TextDecoder("utf-16be", { fatal: true }).decode(
+                    bytes,
+                  );
+                } else {
+                  try {
+                    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+                  } catch {
+                    // Older Chinese Windows editors commonly save GBK/GB18030.
+                    try {
+                      text = new TextDecoder("gb18030", { fatal: true }).decode(
+                        bytes,
+                      );
+                    } catch {
+                      throw new Error(
+                        "无法识别文件编码，请将文档另存为 UTF-8 后导入。",
+                      );
+                    }
+                  }
+                }
                 const value = await course<Workspace>(
                   `/requirements/sessions/${identity}/import`,
-                  { revision: session.revision, text: await file.text() },
+                  { revision: session.revision, text },
                 );
                 setSession(value);
                 setSelected(value.tree.id);

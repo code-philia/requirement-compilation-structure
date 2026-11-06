@@ -75,6 +75,8 @@ async def stream_model(base_url, api_key, request, timeout):
                 yield json.loads(await response.aread())
                 return
             data_lines = []
+            # SSE is UTF-8 regardless of the host locale or a gateway's charset.
+            response.encoding = "utf-8"
             async for line in response.aiter_lines():
                 if line.startswith("data:"):
                     data_lines.append(line[5:].lstrip())

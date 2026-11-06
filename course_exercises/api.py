@@ -23,13 +23,13 @@ from .model_client import estimate_cost, normalize_usage, response_text, stream_
 
 HERE = Path(__file__).resolve().parent
 RECORDS = HERE / "records"
-PRICING = json.loads((HERE / "pricing.json").read_text())
+PRICING = json.loads((HERE / "pricing.json").read_text(encoding="utf-8-sig"))
 MODELS = {model["id"]: model for model in PRICING["models"]}
 router = APIRouter(prefix="/api/course", tags=["classroom"])
 profiles = {}
 running = {}
 records = {}
-TASK_NAMES = {task["id"]: task["name"] for task in json.loads((HERE / "tasks.json").read_text(encoding="utf-8"))}
+TASK_NAMES = {task["id"]: task["name"] for task in json.loads((HERE / "tasks.json").read_text(encoding="utf-8-sig"))}
 
 
 def initialize():
@@ -66,7 +66,7 @@ def initialize():
         }
     for path in RECORDS.glob("*.json"):
         try:
-            record = json.loads(path.read_text())
+            record = json.loads(path.read_text(encoding="utf-8-sig"))
             if record["status"] == "RUNNING":
                 record.update(
                     status="INTERRUPTED",
@@ -176,18 +176,18 @@ class CsvInput(BaseModel):
 
 @router.get("/config")
 async def config():
-    tasks = json.loads((HERE / "tasks.json").read_text(encoding="utf-8"))
+    tasks = json.loads((HERE / "tasks.json").read_text(encoding="utf-8-sig"))
     for task in tasks:
         filename = task.get("prompt_file")
         if filename:
-            task["prompt"] = (HERE / filename).read_text(encoding="utf-8")
+            task["prompt"] = (HERE / filename).read_text(encoding="utf-8-sig")
     return {
         "models": [
             dict(model, settings=public_profile(identity))
             for identity, model in MODELS.items()
         ],
         "tasks": tasks,
-        "sample_csv": (HERE / "tasks/orders.csv").read_text(),
+        "sample_csv": (HERE / "tasks/orders.csv").read_text(encoding="utf-8-sig"),
         "active": list(running),
     }
 
@@ -225,8 +225,11 @@ async def lesson():
 
 @router.get("/tasks/orders.csv")
 async def sample_csv():
-    return FileResponse(
-        HERE / "tasks/orders.csv", filename="orders.csv", media_type="text/csv"
+    # Excel on Windows recognizes UTF-8 CSV reliably when the file has a BOM.
+    return Response(
+        "\ufeff" + (HERE / "tasks/orders.csv").read_text(encoding="utf-8-sig"),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="orders.csv"'},
     )
 
 
@@ -549,7 +552,7 @@ async def preview(identity: str, request: Request):
     if record["status"] != "COMPLETED":
         raise ValueError("请等待回复正常完成后再打开预览")
     document = html_answer(record)
-    resize_script = (HERE / "preview_resize.js").read_text(encoding="utf-8")
+    resize_script = (HERE / "preview_resize.js").read_text(encoding="utf-8-sig")
     resize_script = resize_script.replace("__CLASSROOM_RUN_ID__", json.dumps(identity))
     position = document.lower().rfind("</body")
     if position < 0:

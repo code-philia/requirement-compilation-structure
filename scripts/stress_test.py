@@ -67,7 +67,7 @@ def parse_args(argv=None):
 def launch(args):
     """Detach jobs without waiting; persist each PID immediately for later inspection."""
     ports = available_ports(args.base_port, args.count)
-    environment = {**os.environ, **{key: value for key, value in dotenv_values(args.env_file).items() if value is not None},
+    environment = {**os.environ, **{key: value for key, value in dotenv_values(args.env_file, encoding="utf-8-sig").items() if value is not None},
         "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / "logs").mkdir()

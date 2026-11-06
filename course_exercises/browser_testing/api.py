@@ -85,7 +85,7 @@ def get_session(identity):
     path = SESSIONS / identity / "session.json"
     if not path.is_file():
         raise HTTPException(404, "找不到练习")
-    session = json.loads(path.read_text(encoding="utf-8"))
+    session = json.loads(path.read_text(encoding="utf-8-sig"))
     if session["status"] != "IDLE":
         session.update(status="IDLE", error="服务已重启，上一次操作已中断")
         for execution in session["executions"]:
@@ -164,7 +164,7 @@ async def create_session():
         "intent": DEFAULT_INTENT,
         "requirements": REQUIREMENTS,
         "script": "",
-        "html": (HERE / "expense.html").read_text(encoding="utf-8"),
+        "html": (HERE / "expense.html").read_text(encoding="utf-8-sig"),
         "revision": 0,
         "calls": [],
         "executions": [],

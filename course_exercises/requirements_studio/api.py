@@ -89,7 +89,7 @@ def get_session(identity):
     path = SESSIONS / identity / "session.json"
     if not path.is_file():
         raise HTTPException(404, "找不到需求项目")
-    session = json.loads(path.read_text(encoding="utf-8"))
+    session = json.loads(path.read_text(encoding="utf-8-sig"))
     if session["status"] != "IDLE":
         session.update(status="IDLE", phase="", error="服务已重启，上次对话中断；已保存的文档修改仍保留")
         interrupted_turn = None
@@ -182,7 +182,7 @@ async def list_sessions():
 @router.post("/sessions")
 async def create(body: Create):
     if body.template == "input":
-        tree = yaml.safe_load((ROOT / "input/requirements.yaml").read_text(encoding="utf-8"))
+        tree = yaml.safe_load((ROOT / "input/requirements.yaml").read_text(encoding="utf-8-sig"))
     elif body.template == "blank":
         tree = {"id": "ROOT", "name": "我的需求项目", "description": {"text": ""}, "scenarios": [], "children": []}
     else:
@@ -245,7 +245,7 @@ async def import_document(identity: str, body: Import):
 async def export(identity: str, format: str):
     session = get_session(identity)
     if format == "yaml":
-        return Response(yaml_document(session["tree"]), media_type="application/yaml", headers={"Content-Disposition": 'attachment; filename="requirements.yaml"'})
+        return Response(yaml_document(session["tree"]), media_type="application/yaml; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="requirements.yaml"'})
     if format == "markdown":
         return Response(markdown_document(session["tree"]), media_type="text/markdown", headers={"Content-Disposition": 'attachment; filename="requirements.md"'})
     if format != "zip":

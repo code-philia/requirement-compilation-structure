@@ -8,6 +8,7 @@ from io import StringIO
 import json
 from pathlib import Path
 import re
+import sys
 
 
 def inspect_orders(source: str):
@@ -165,8 +166,12 @@ def inspect_orders(source: str):
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv_file", type=Path)
+    parser.add_argument("--encoding", default="utf-8-sig", help="CSV 编码，默认 UTF-8；旧版 Excel 文件可指定 gb18030")
     args = parser.parse_args()
-    result = inspect_orders(args.csv_file.read_text(encoding="utf-8-sig"))
+    result = inspect_orders(args.csv_file.read_text(encoding=args.encoding))
     print(json.dumps(result, ensure_ascii=False, indent=2))

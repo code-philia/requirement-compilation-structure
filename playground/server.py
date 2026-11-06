@@ -34,6 +34,7 @@ sys.path.insert(0, str(HERE.parent))
 from course_exercises import api as course_api
 from course_exercises.browser_testing import api as browser_api
 from course_exercises.requirements_studio import api as requirements_api
+from infrastructure.utils.processes import child_environment
 
 repository = Repository()
 repository.prices = MODEL_PRICES
@@ -504,6 +505,7 @@ def start(body: StartRun):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env=child_environment(),
             start_new_session=True,
         )
         processes[identity] = process
@@ -564,6 +566,9 @@ def index(path: str):
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()

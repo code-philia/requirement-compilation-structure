@@ -53,9 +53,9 @@ def main():
     GitRepository(output).initialize()
     exclude = output / ".git" / "info" / "exclude"
     exclude.parent.mkdir(parents=True, exist_ok=True)
-    existing = exclude.read_text() if exclude.exists() else ""
+    existing = exclude.read_text(encoding="utf-8-sig") if exclude.exists() else ""
     if "/.arc/playground/" not in existing.splitlines():
-        exclude.write_text(existing.rstrip() + "\n/.arc/playground/\n")
+        exclude.write_text(existing.rstrip() + "\n/.arc/playground/\n", encoding="utf-8", newline="\n")
 
     lock = threading.RLock()
     stopped = threading.Event()
