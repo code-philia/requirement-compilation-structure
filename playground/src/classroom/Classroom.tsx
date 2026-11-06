@@ -51,7 +51,7 @@ import RequirementsStudio from "./RequirementsStudio";
 import { compact, duration } from "../types";
 import "./classroom.css";
 const Comparison = lazy(() => import("./Comparison"));
-type Draft = { prompt: string };
+type Draft = { prompt: string; task_id?: string; task_name?: string };
 type Connection = Profile & { api_key: string };
 type Screen = "workbench" | "compare" | "tasks" | "browser" | "requirements";
 type OutputTab = "reasoning" | "answer" | "rendered" | "preview" | "request";
@@ -61,7 +61,11 @@ function initialDraft(): Draft {
       sessionStorage.getItem("classroom-input") || "null",
     );
     if (value && typeof value.prompt === "string")
-      return { prompt: value.prompt };
+      return {
+        prompt: value.prompt,
+        task_id: value.task_id,
+        task_name: value.task_name,
+      };
   } catch {
     /* Use an empty input when browser storage is unavailable. */
   }
@@ -82,10 +86,13 @@ export default function Classroom() {
     new URLSearchParams(location.search).get("attempt"),
   );
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [compared, setCompared] = useState<string[]>([]);
   const [screen, setScreen] = useState<Screen>(() => {
     const requested = new URLSearchParams(location.search).get("screen");
-    if (requested === "browser" || requested === "requirements")
+    if (
+      requested === "browser" ||
+      requested === "requirements" ||
+      requested === "compare"
+    )
       return requested;
     return "tasks";
   });
@@ -105,7 +112,6 @@ export default function Classroom() {
   const [phonePreview, setPhonePreview] = useState(false);
   const [previewHeight, setPreviewHeight] = useState(900);
   const previewFrame = useRef<HTMLIFrameElement>(null);
-  const initialized = useRef(false);
   const outputArea = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const model = config?.models.find((item) => item.id === modelId);
@@ -116,14 +122,6 @@ export default function Classroom() {
     try {
       const data = await course<{ items: Run[] }>("/runs");
       setRuns(data.items);
-      if (initialized.current)
-        setCompared((current) =>
-          current.filter((id) => data.items.some((run) => run.id === id)),
-        );
-      else {
-        setCompared(data.items.slice(0, 6).map((run) => run.id));
-        initialized.current = true;
-      }
     } catch (error) {
       setError((error as Error).message);
     }
@@ -272,11 +270,12 @@ export default function Classroom() {
       const result = await course<{ id: string }>("/runs", {
         model_id: modelId,
         prompt: draft.prompt,
+        task_id: draft.task_id || "",
+        task_name: draft.task_name || "",
         thinking,
         effort,
       });
       await refreshRuns();
-      setCompared((current) => [...new Set([...current, result.id])]);
       setSelectedId(result.id);
       setScreen("workbench");
     } catch (error) {
@@ -298,7 +297,6 @@ export default function Classroom() {
   async function remove(run: Run) {
     try {
       await course("/runs/" + run.id, undefined, "DELETE");
-      setCompared((current) => current.filter((id) => id !== run.id));
       setRuns((current) => current.filter((item) => item.id !== run.id));
       if (selectedId === run.id) {
         setSelectedId(null);
@@ -324,6 +322,8 @@ export default function Classroom() {
     setEffort(detail.effort || "low");
     setDraft({
       prompt: detail.prompt + (detail.csv ? "\n\nCSV：\n" + detail.csv : ""),
+      task_id: detail.task_id,
+      task_name: detail.task_name,
     });
     input.current?.focus();
   }
@@ -370,7 +370,6 @@ export default function Classroom() {
               onClick={() => setScreen(id)}
             >
               {title}
-              {id === "compare" && <span>{compared.length}</span>}
             </button>
           ))}
         </nav>
@@ -399,7 +398,7 @@ export default function Classroom() {
         </div>
       )}
       <div
-        className={`cr-layout ${screen === "browser" ? "cr-browser-layout" : ""} ${screen === "requirements" ? "cr-requirements-layout" : ""}`}
+        className={`cr-layout ${screen === "browser" ? "cr-browser-layout" : ""} ${screen === "requirements" ? "cr-requirements-layout" : ""} ${screen === "compare" ? "cr-compare-layout" : ""}`}
       >
         <aside className="cr-controls">
           {(screen === "browser" || screen === "requirements") && (
@@ -411,6 +410,7 @@ export default function Classroom() {
                 className="cr-button primary"
                 onClick={() => {
                   setSelectedId(null);
+                  editDraft({ task_id: "", task_name: "" });
                   history.replaceState(null, "", "/classroom");
                   input.current?.focus();
                 }}
@@ -615,8 +615,8 @@ export default function Classroom() {
           {screen === "tasks" && config ? (
             <Tasks
               config={config}
-              onUse={(prompt) => {
-                editDraft({ prompt });
+              onUse={(prompt, task_id, task_name) => {
+                editDraft({ prompt, task_id, task_name });
                 setScreen("workbench");
                 setTimeout(() => input.current?.focus(), 0);
               }}
@@ -651,10 +651,15 @@ export default function Classroom() {
             >
               <Comparison
                 runs={runs}
-                selected={compared}
+                tasks={config?.tasks || []}
                 onOpen={(id) => {
                   setSelectedId(id);
                   setScreen("workbench");
+                  if (id === selectedId) {
+                    course<Detail>("/runs/" + id)
+                      .then(setDetail)
+                      .catch((error) => setError(error.message));
+                  }
                 }}
               />
             </Suspense>
@@ -662,6 +667,19 @@ export default function Classroom() {
             <>
               <section className="cr-chat-composer">
                 <label htmlFor="cr-free-prompt">提示词</label>
+                <span className="cr-prompt-task">
+                  {draft.task_id && draft.task_id !== "custom-chat"
+                    ? draft.task_name
+                    : "自定义对话"}
+                  {draft.task_id && draft.task_id !== "custom-chat" && (
+                    <button
+                      title="切换为自定义对话"
+                      onClick={() => editDraft({ task_id: "", task_name: "" })}
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </span>
                 <textarea
                   ref={input}
                   id="cr-free-prompt"
@@ -940,214 +958,205 @@ export default function Classroom() {
             </>
           )}
         </main>
-        {screen !== "browser" && screen !== "requirements" && (
-          <aside className="cr-inspector">
-            <section className="cr-bill">
-              <div className="cr-bill-heading">
-                <h2>调用统计</h2>
-                {detail?.status === "RUNNING" && (
-                  <button onClick={() => cancel(detail)}>
-                    <Square size={11} />
-                    取消
-                  </button>
-                )}
-              </div>
-              <div className="cr-stat-grid">
-                <div>
-                  <span>
-                    <Clock3 size={12} />
-                    耗时
-                  </span>
-                  <b title={seconds(elapsed)}>{duration(elapsed)}</b>
+        {screen !== "browser" &&
+          screen !== "requirements" &&
+          screen !== "compare" && (
+            <aside className="cr-inspector">
+              <section className="cr-bill">
+                <div className="cr-bill-heading">
+                  <h2>调用统计</h2>
+                  {detail?.status === "RUNNING" && (
+                    <button onClick={() => cancel(detail)}>
+                      <Square size={11} />
+                      取消
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <span>
-                    <MessageSquareText size={12} />
-                    Token
-                  </span>
-                  <b title={number(detail?.usage.total)}>
-                    {compact(detail?.usage.total)}
-                  </b>
-                  <small>
-                    入 {compact(detail?.usage.input)} / 出{" "}
-                    {compact(detail?.usage.output)}
-                  </small>
+                <div className="cr-stat-grid">
+                  <div>
+                    <span>
+                      <Clock3 size={12} />
+                      耗时
+                    </span>
+                    <b title={seconds(elapsed)}>{duration(elapsed)}</b>
+                  </div>
+                  <div>
+                    <span>
+                      <MessageSquareText size={12} />
+                      Token
+                    </span>
+                    <b title={number(detail?.usage.total)}>
+                      {compact(detail?.usage.total)}
+                    </b>
+                    <small>
+                      入 {compact(detail?.usage.input)} / 出{" "}
+                      {compact(detail?.usage.output)}
+                    </small>
+                  </div>
+                  <div>
+                    <span>
+                      <Coins size={12} />
+                      估算 CNY
+                    </span>
+                    <b
+                      className="cr-stat-price"
+                      title={detail ? money(detail.cost) : ""}
+                    >
+                      {detail ? money(detail.cost) : "—"}
+                    </b>
+                  </div>
                 </div>
-                <div>
-                  <span>
-                    <Coins size={12} />
-                    估算 CNY
-                  </span>
-                  <b
-                    className="cr-stat-price"
-                    title={detail ? money(detail.cost) : ""}
-                  >
-                    {detail ? money(detail.cost) : "—"}
-                  </b>
-                </div>
-              </div>
-            </section>
-            {detail && (
-              <details className="cr-bill-details">
-                <summary>
-                  时延与计费明细
-                  <ChevronDown size={13} />
-                </summary>
-                <dl>
-                  <dt>缓存输入 / 思考 Token</dt>
-                  <dd>
-                    {number(detail.usage.cached)} /{" "}
-                    {number(detail.usage.reasoning)}
-                  </dd>
-                  <dt>首个可见内容</dt>
-                  <dd>{seconds(detail.first_token)}</dd>
-                  <dt>首个正式回复</dt>
-                  <dd>{seconds(detail.first_answer)}</dd>
-                  <dt>输入 / 输出单价</dt>
-                  <dd>
-                    ¥{detail.price.input} / ¥{detail.price.output}
-                  </dd>
-                  <dt>缓存输入单价</dt>
-                  <dd>
-                    {detail.price.cached == null
-                      ? "按普通输入"
-                      : `¥${detail.price.cached}`}
-                  </dd>
-                  <dt>口径</dt>
-                  <dd>
-                    {detail.price.period === "off_peak"
-                      ? "闲时教学估算价"
-                      : "北京标准价"}
-                  </dd>
-                </dl>
-                <p>
-                  单价单位：元 / 百万
-                  Token。网络和排队包含在往返时延中；未返回的缓存或思考用量不猜测为零。
-                </p>
-              </details>
-            )}
-            <section className="cr-history">
-              <div className="cr-history-heading">
-                <div>
-                  <h2>调用记录</h2>
-                </div>
-                <span>{runs.length}</span>
-              </div>
-              <input
-                className="cr-search"
-                placeholder="筛选模型、思考设置…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <div className="cr-history-actions">
-                <button
-                  className="cr-text-button"
-                  onClick={() => setCompared(visibleRuns.map((run) => run.id))}
-                >
-                  全选可见
-                </button>
-                <button
-                  className="cr-text-button"
-                  onClick={() => setCompared([])}
-                >
-                  清空选择
-                </button>
-                <button
-                  className="cr-text-button"
-                  onClick={() => setScreen("compare")}
-                >
-                  对比 {compared.length} 次<ArrowRight size={12} />
-                </button>
-              </div>
-              {visibleRuns.length === 0 && (
-                <p className="cr-history-empty">
-                  还没有记录。
-                  <br />
-                  发送后自动保存记录。
-                </p>
+              </section>
+              {detail && (
+                <details className="cr-bill-details">
+                  <summary>
+                    时延与计费明细
+                    <ChevronDown size={13} />
+                  </summary>
+                  <dl>
+                    <dt>缓存输入 / 思考 Token</dt>
+                    <dd>
+                      {number(detail.usage.cached)} /{" "}
+                      {number(detail.usage.reasoning)}
+                    </dd>
+                    <dt>首个可见内容</dt>
+                    <dd>{seconds(detail.first_token)}</dd>
+                    <dt>首个正式回复</dt>
+                    <dd>{seconds(detail.first_answer)}</dd>
+                    <dt>输入 / 输出单价</dt>
+                    <dd>
+                      ¥{detail.price.input} / ¥{detail.price.output}
+                    </dd>
+                    <dt>缓存输入单价</dt>
+                    <dd>
+                      {detail.price.cached == null
+                        ? "按普通输入"
+                        : `¥${detail.price.cached}`}
+                    </dd>
+                    <dt>口径</dt>
+                    <dd>
+                      {detail.price.period === "off_peak"
+                        ? "闲时教学估算价"
+                        : "北京标准价"}
+                    </dd>
+                  </dl>
+                  <p>
+                    单价单位：元 / 百万
+                    Token。网络和排队包含在往返时延中；未返回的缓存或思考用量不猜测为零。
+                  </p>
+                </details>
               )}
-              <div className="cr-run-list">
-                {visibleRuns.map((run) => (
-                  <article
-                    key={run.id}
-                    className={`cr-history-run ${run.id === selectedId ? "selected" : ""}`}
+              <section className="cr-history">
+                <div className="cr-history-heading">
+                  <div>
+                    <h2>调用记录</h2>
+                  </div>
+                  <span>{runs.length}</span>
+                </div>
+                <input
+                  className="cr-search"
+                  placeholder="筛选模型、思考设置…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                <div className="cr-history-actions">
+                  <button
+                    className="cr-text-button"
+                    onClick={() => setScreen("compare")}
                   >
-                    <input
-                      aria-label={`对比 ${run.model_name} ${run.id.slice(0, 6)}`}
-                      type="checkbox"
-                      checked={compared.includes(run.id)}
-                      onChange={(e) =>
-                        setCompared((current) =>
-                          e.target.checked
-                            ? [...current, run.id]
-                            : current.filter((id) => id !== run.id),
-                        )
-                      }
-                    />
-                    <button
-                      className="cr-run-select"
-                      onClick={() => {
-                        setSelectedId(run.id);
-                        setScreen("workbench");
-                      }}
+                    查看任务对比
+                    <ArrowRight size={12} />
+                  </button>
+                </div>
+                {visibleRuns.length === 0 && (
+                  <p className="cr-history-empty">
+                    还没有记录。
+                    <br />
+                    发送后自动保存记录。
+                  </p>
+                )}
+                <div className="cr-run-list">
+                  {visibleRuns.map((run) => (
+                    <article
+                      key={run.id}
+                      className={`cr-history-run ${run.id === selectedId ? "selected" : ""}`}
                     >
-                      <div>
-                        <strong>{run.model_name}</strong>
-                        <span
-                          className={`cr-call-status state-${run.status.toLowerCase()}`}
-                          title={statusText[run.status]}
-                        >
-                          {run.status === "RUNNING"
-                            ? "进行中"
-                            : run.status === "COMPLETED"
-                              ? "已完成"
-                              : "失败"}
-                        </span>
-                      </div>
-                      <p>{mode(run)}</p>
-                      <div className="cr-run-numbers">
-                        <span title="估算金额">
-                          <Coins size={10} />
-                          {money(run.cost)}
-                        </span>
-                        <span title={`Token：${number(run.usage.total)}`}>
-                          <MessageSquareText size={10} />
-                          {compact(run.usage.total)}
-                        </span>
-                        <span title="耗时">
-                          <Clock3 size={10} />
-                          {duration(run.duration)}
-                        </span>
-                      </div>
-                    </button>
-                    <button
-                      className="cr-run-delete"
-                      aria-label={
-                        run.status === "RUNNING"
-                          ? "取消此次尝试"
-                          : "删除此次尝试"
-                      }
-                      title={
-                        run.status === "RUNNING"
-                          ? "取消此次尝试"
-                          : "删除此次尝试"
-                      }
-                      onClick={() =>
-                        run.status === "RUNNING" ? cancel(run) : remove(run)
-                      }
-                    >
-                      {run.status === "RUNNING" ? (
-                        <Square size={12} />
-                      ) : (
-                        <Trash2 size={13} />
-                      )}
-                    </button>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </aside>
-        )}
+                      <button
+                        className="cr-run-select"
+                        onClick={() => {
+                          setSelectedId(run.id);
+                          setScreen("workbench");
+                        }}
+                      >
+                        <div>
+                          <strong>{run.model_name}</strong>
+                          <span
+                            className={`cr-call-status state-${run.status.toLowerCase()}`}
+                            title={statusText[run.status]}
+                          >
+                            {run.status === "RUNNING"
+                              ? "进行中"
+                              : run.status === "COMPLETED"
+                                ? "已完成"
+                                : "失败"}
+                          </span>
+                        </div>
+                        <p>
+                          <span
+                            className="cr-record-task"
+                            title={
+                              run.task_kind === "custom"
+                                ? "自定义对话"
+                                : `所属任务：${run.task_name}`
+                            }
+                          >
+                            {run.task_name}
+                          </span>{" "}
+                          · {mode(run)}
+                        </p>
+                        <div className="cr-run-numbers">
+                          <span title="估算金额">
+                            <Coins size={10} />
+                            {money(run.cost)}
+                          </span>
+                          <span title={`Token：${number(run.usage.total)}`}>
+                            <MessageSquareText size={10} />
+                            {compact(run.usage.total)}
+                          </span>
+                          <span title="耗时">
+                            <Clock3 size={10} />
+                            {duration(run.duration)}
+                          </span>
+                        </div>
+                      </button>
+                      <button
+                        className="cr-run-delete"
+                        aria-label={
+                          run.status === "RUNNING"
+                            ? "取消此次尝试"
+                            : "删除此次尝试"
+                        }
+                        title={
+                          run.status === "RUNNING"
+                            ? "取消此次尝试"
+                            : "删除此次尝试"
+                        }
+                        onClick={() =>
+                          run.status === "RUNNING" ? cancel(run) : remove(run)
+                        }
+                      >
+                        {run.status === "RUNNING" ? (
+                          <Square size={12} />
+                        ) : (
+                          <Trash2 size={13} />
+                        )}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </aside>
+          )}
       </div>
 
       {!config && !error && (

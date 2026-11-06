@@ -8,7 +8,7 @@ export default function Tasks({
   onError,
 }: {
   config: Config;
-  onUse: (prompt: string) => void;
+  onUse: (prompt: string, taskId: string, taskName: string) => void;
   onCopy: (text: string) => void;
   onError: (message: string) => void;
 }) {
@@ -51,7 +51,9 @@ export default function Tasks({
             <div className="cr-task-actions">
               <button
                 className="cr-button primary"
-                onClick={() => onUse(promptFor(task.id, task.prompt))}
+                onClick={() =>
+                  onUse(promptFor(task.id, task.prompt), task.id, task.name)
+                }
               >
                 填入工作台
                 <ArrowRight size={14} />

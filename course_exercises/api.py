@@ -29,6 +29,7 @@ router = APIRouter(prefix="/api/course", tags=["classroom"])
 profiles = {}
 running = {}
 records = {}
+TASK_NAMES = {task["id"]: task["name"] for task in json.loads((HERE / "tasks.json").read_text(encoding="utf-8"))}
 
 
 def initialize():
@@ -105,6 +106,26 @@ def public_profile(identity):
     }
 
 
+def task_info(record):
+    if record.get("task_id") == "custom-chat" or record.get("task_source") in {"custom", "prompt"}:
+        return {"task_id": "custom-chat", "task_name": "自定义对话", "task_source": "custom", "task_kind": "custom"}
+    if record.get("task_id"):
+        return {
+            "task_id": record["task_id"],
+            "task_name": record.get("task_name") or TASK_NAMES.get(record["task_id"], "自由实验"),
+            "task_source": record.get("task_source", "task"),
+            "task_kind": "task",
+        }
+    prompt = record["prompt"]
+    if all(field in prompt for field in ("order_id", "quantity", "unit_price")) and "CSV" in prompt:
+        identity = "csv"
+    elif "建筑日照" in prompt and "太阳" in prompt:
+        identity = "html"
+    else:
+        return {"task_id": "custom-chat", "task_name": "自定义对话", "task_source": "custom", "task_kind": "custom"}
+    return {"task_id": identity, "task_name": TASK_NAMES[identity], "task_source": "inferred", "task_kind": "task"}
+
+
 def summary(record):
     result = {
         key: value
@@ -120,11 +141,11 @@ def summary(record):
             "quality",
             "note",
             "checks",
-            "task_id",
-            "task_name",
         }
     }
     result["prompt_preview"] = record["prompt"].strip().splitlines()[0][:60]
+    result.update(task_info(record))
+    result["experiment"] = record.get("experiment") or hashlib.sha256(record["prompt"].encode()).hexdigest()[:16]
     return result
 
 
@@ -139,6 +160,14 @@ class Attempt(BaseModel):
     prompt: str = Field(min_length=1, max_length=100000)
     thinking: bool = False
     effort: str = "low"
+    task_id: str = Field(default="", max_length=100)
+    task_name: str = Field(default="", max_length=80)
+
+
+class TaskAssignment(BaseModel):
+    run_ids: list[str] = Field(min_length=1, max_length=500)
+    task_id: str = Field(default="", max_length=100)
+    name: str = Field(default="", max_length=80)
 
 
 class CsvInput(BaseModel):
@@ -232,6 +261,25 @@ async def list_runs():
     return {"items": [summary(record) for record in ordered]}
 
 
+@router.post("/runs/assign-task")
+async def assign_task(body: TaskAssignment):
+    if body.task_id in TASK_NAMES:
+        identity = body.task_id
+        name = TASK_NAMES[identity]
+    else:
+        name = body.name.strip()
+        if not name:
+            raise ValueError("请填写任务名称")
+        identity = "custom-" + hashlib.sha256(name.encode()).hexdigest()[:16]
+    chosen = [get_record(run_id) for run_id in body.run_ids]
+    if any(record["status"] == "RUNNING" for record in chosen):
+        raise ValueError("请等待运行结束后再调整任务归类")
+    for record in chosen:
+        record.update(task_id=identity, task_name=name, task_source="manual", task_kind="task")
+        save(record)
+    return {"task_id": identity, "task_name": name}
+
+
 @router.post("/runs")
 async def start(body: Attempt):
     if body.model_id not in MODELS:
@@ -287,6 +335,10 @@ async def start(body: Attempt):
         "base_url": profile["base_url"],
         "prompt_preview": body.prompt.strip().splitlines()[0][:60],
         "prompt": body.prompt,
+        "task_id": body.task_id or "custom-chat",
+        "task_name": TASK_NAMES.get(body.task_id, body.task_name) if body.task_id and body.task_id != "custom-chat" else "自定义对话",
+        "task_source": "task" if body.task_id and body.task_id != "custom-chat" else "custom",
+        "task_kind": "task" if body.task_id and body.task_id != "custom-chat" else "custom",
         "request": request,
         "thinking": body.thinking,
         "effort": body.effort if provider == "deepseek" else None,
@@ -485,6 +537,7 @@ def html_answer(record):
 def public_record(record):
     return dict(
         record,
+        **task_info(record),
         html_available=record["status"] == "COMPLETED"
         and extract_html(record["answer"]) is not None,
     )

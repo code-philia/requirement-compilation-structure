@@ -1,0 +1,151 @@
+.classroom-shell .cr-layout.cr-compare-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.cr-compare-layout > .cr-controls {
+  display: none;
+}
+.classroom-shell .cr-compare-layout > .cr-main {
+  grid-column: 1;
+  grid-row: 1;
+  padding: 16px;
+}
+.cmp-workspace {
+  max-width: 1320px;
+  margin: 0 auto;
+  color: #3d4d67;
+}
+.cmp-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.cmp-heading > div {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+}
+.cmp-heading h2 {
+  font-size: 19px;
+  font-weight: 600;
+  margin: 0;
+}
+.cmp-heading span {
+  color: #8b99b0;
+  font-size: 11px;
+}
+.cmp-ranking-description {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cmp-filters select {
+  max-width: 230px;
+  font-size: 11px;
+}
+.cmp-task-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #7185a6;
+  font-size: 12px;
+}
+.cmp-task-select select {
+  min-width: 190px;
+  border-color: #b6c7e7;
+  color: #4b67a1;
+}
+.cmp-note {
+  margin: 11px 0 16px;
+  color: #8b99ad;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.cmp-ranking-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+.cmp-ranking {
+  min-width: 0;
+  padding-top: 16px;
+  background: white;
+  border: 1px solid #dce4ef;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.cmp-ranking > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 20px 12px;
+  border-bottom: 1px solid #edf1f7;
+}
+.cmp-ranking > header strong {
+  color: #4e678d;
+  font-size: 15px;
+  font-weight: 550;
+}
+.cmp-ranking > header span {
+  color: #98a6bc;
+  font-size: 11px;
+}
+.cmp-chart {
+  width: 100%;
+}
+.cmp-chart-empty {
+  display: grid;
+  place-content: center;
+  min-height: 240px;
+  padding: 20px;
+  color: #9aa8bc;
+  font-size: 12px;
+  text-align: center;
+}
+.cmp-missing {
+  margin: 0;
+  padding: 0 20px 14px;
+  color: #98a6bc;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.cmp-panel-note {
+  margin: 12px 0 0;
+  color: #9aa7ba;
+  font-size: 10px;
+  line-height: 1.8;
+}
+@media (max-width: 600px) {
+  .classroom-shell .cr-compare-layout > .cr-main {
+    padding: 10px;
+  }
+  .cmp-heading > div {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .cmp-filters select {
+    flex: 1;
+    min-width: 100px;
+    max-width: 100%;
+  }
+  .cmp-task-select {
+    width: 100%;
+  }
+  .cmp-task-select select {
+    flex: 1;
+  }
+  .cmp-ranking > header {
+    padding-inline: 12px;
+  }
+}

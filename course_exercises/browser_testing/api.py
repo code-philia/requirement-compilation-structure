@@ -387,6 +387,8 @@ async def perform(session, body):
             prompt=prompt,
             thinking=body.thinking,
             effort=body.effort,
+            task_id="browser",
+            task_name="浏览器测试",
         ))
         identity = started["id"]
         model_task = course.running[identity]

@@ -33,6 +33,10 @@ export type Run = {
   model_name: string;
   actual_model: string;
   experiment: string;
+  task_id: string;
+  task_name: string;
+  task_source: string;
+  task_kind: "task" | "custom";
   returned_model: string | null;
   base_url: string;
   prompt_preview: string;

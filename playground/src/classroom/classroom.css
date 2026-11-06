@@ -523,6 +523,23 @@
   font-size: 11px;
   color: #7b89a3;
 }
+.classroom-shell .cr-prompt-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 9px;
+  color: #8b9cb8;
+  font-size: 10px;
+}
+.cr-prompt-task button {
+  padding: 0;
+  background: none;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: #9bacbf;
+}
 .classroom-shell .cr-chat-composer > textarea {
   display: block;
   width: 100%;
@@ -1172,7 +1189,7 @@
 }
 .cr-history-run {
   display: grid;
-  grid-template-columns: 13px minmax(0, 1fr) 14px;
+  grid-template-columns: minmax(0, 1fr) 14px;
   align-items: start;
   gap: 8px;
   padding: 12px 4px;
@@ -1187,10 +1204,9 @@
   background: #f3f6ff;
   box-shadow: inset 2px 0 #8da2de;
 }
-.cr-history-run > input {
-  width: 12px;
-  height: 12px;
-  margin: 2px 0 0;
+.cr-record-task {
+  color: #6c83a7;
+  font-size: 10px;
 }
 .cr-run-select {
   display: block;
