@@ -154,6 +154,10 @@ must retain the failing SQL filename and underlying cause for diagnosis.
 Do not replace the canonical schema with a test-only database, omit a failing table,
 catch an error and pretend startup succeeded, disable constraints to hide a failure,
 change the schema artifact, weaken checks, or add mocks. Do not drop existing user data.
+Repair SQL to implement the supplied schema, including sqlite_type, composite primary
+keys and entity.unique_constraints. An ER-imported schema is the same design contract:
+its SQL implementation is repairable, but its fields, relationships and constraints
+must not be redesigned to bypass an initialization failure.
 This task owns database SQL and the supplied startup wiring; later API/UI tasks do not.
 Use the supplied files first. Read missing related SQL/startup lines with read_file;
 read the canonical table DDL for missing definitions. Use edit_file/replace for exact local repairs or

@@ -9,6 +9,8 @@ from infrastructure.utils.presentation.formatting import format_changes, format_
 from infrastructure.shared.rag.schema import SchemaRetriever
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.database.schema import apply_patch, check_related_fields
+from infrastructure.stages.database.er import import_er_schema
+from infrastructure.shared.project.git import checkpoint
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
@@ -80,7 +82,8 @@ def requirement_nodes(root: dict):
         yield {**tree.requirements[rid], "steps": tree.concatenated_steps(rid)}
 
 
-def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10) -> dict:
+def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10,
+        input_dir: Path | None = None) -> dict:
     requirements_path = arc_dir / "requirements.json"
     if not requirements_path.is_file():
         raise ValueError("Run main.py --stage 01 first to create .arc/requirements.json")
@@ -92,6 +95,21 @@ def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_atte
     if top_k < 1:
         raise ValueError("--top-k must be positive")
     console = DemoConsole(pause)
+    imported = import_er_schema(requirements, input_dir or arc_dir.parent)
+    if imported is not None:
+        for fields in imported["requirements"].values():
+            check_related_fields(imported, fields)
+        save_json(arc_dir / "db_schema.json", imported)
+        save_json(arc_dir / "er_import.json", imported["er_import"])
+        checkpoint(arc_dir.parent, stage="02", task="ER schema import",
+            action="Compile published ER into canonical database schema",
+            details={"source": imported["er_import"]["source_path"],
+                "source_sha256": imported["er_import"]["source_sha256"],
+                "tables": list(imported["entities"]),
+                "diagnostics": imported["er_import"]["diagnostics"]})
+        console.artifact("db_schema", imported, "Canonical schema imported from ER (no model inference)")
+        print(f"Imported ER schema: {len(imported['entities'])} tables; {arc_dir / 'db_schema.json'}", flush=True)
+        return imported
     retriever = SchemaRetriever()
     model = TextModel()
     schema = {"entities": {}, "requirements": {}}

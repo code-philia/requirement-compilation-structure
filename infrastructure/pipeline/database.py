@@ -5,6 +5,7 @@ from pathlib import Path
 
 from infrastructure.stages.database.order import implementation_groups, table_dependencies
 from infrastructure.stages.database.runtime import initializer_source
+from infrastructure.stages.database.er import validate_imported_schema
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
@@ -30,6 +31,12 @@ Create the current entity with CREATE TABLE IF NOT EXISTS, preserving its entity
 field names and quoting identifiers with double quotes. Implement the supplied keys,
 nullability, uniqueness, references and SQLite-enforceable value constraints.
 Map string/uuid/date/datetime/json to TEXT, integer/boolean to INTEGER, number to REAL.
+When a field supplies sqlite_type, preserve that storage type. In particular,
+source_type=decimal with sqlite_type=TEXT is exact decimal text, not REAL.
+The supplied schema is the design contract, including imported ER designs: implement
+it without renaming, adding, dropping or redesigning tables/fields. Preserve every
+entity.unique_constraints column group as a table-level UNIQUE constraint. Multiple
+primary_key fields form one composite PRIMARY KEY, not several column primary keys.
 Use explicit NOT NULL when nullable=false. SQLite INTEGER PRIMARY KEY can generate
 its value; application code supplies other generated values unless schema evidence
 specifies otherwise. Do not invent defaults, normalization, cascades or uniqueness.
@@ -60,6 +67,8 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
         if not (output_dir / required).is_file():
             raise ValueError("Run main.py --stage 00 first to initialize the project structure")
     schema = json.loads(source.read_text(encoding="utf-8-sig"))
+    if schema.get("er_import"):
+        validate_imported_schema(arc_dir, schema)
     console = DemoConsole(pause)
     # --- Extension point 04B: dependency-aware table implementation -----------
     # Referenced tables precede dependents. Cyclic groups use forward references;
