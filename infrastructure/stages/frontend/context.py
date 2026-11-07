@@ -1,12 +1,8 @@
 """Frontend inputs retain image/page evidence alongside normalized requirements."""
 
-import json
-import re
-
 from infrastructure.stages.requirements.tree import RequirementTree
+from infrastructure.stages.requirements.images import build_image_catalog
 from infrastructure.utils.files import read_artifact
-
-REFERENCE = re.compile(r"\\ref\[image\]\(([^)]+)\)")
 
 
 def load_ui_design(arc_dir, tree):
@@ -19,35 +15,27 @@ def load_ui_context(arc_dir, input_dir):
     raw = read_artifact(arc_dir, "requirements.json")
     tree = RequirementTree(raw)
     analysis = read_artifact(arc_dir, "visual_analysis.json")
-    images, nodes = {}, {}
-
-    def visit(node):
-        """Index raw requirements and their concrete image definitions, rejecting missing files or conflicting evidence."""
-        nodes[node["id"]] = node
-        description = node.get("description", {})
-        for image in description.get("image", []) if isinstance(description, dict) else []:
-            if REFERENCE.fullmatch(image["reference"]):
-                continue
-            source = (input_dir / image["reference"]).resolve()
-            if not source.is_relative_to(input_dir.resolve()) or not source.is_file():
-                raise ValueError(f"Missing input image or image escapes input: {image['reference']}")
-            record = {**image, "analysis": analysis.get(image["reference"], {})}
-            images[image["id"]] = record
-        for child in node.get("children", []):
-            visit(child)
-
-    visit(raw)
+    catalog = build_image_catalog(raw, input_dir)
+    source_path = arc_dir / "visual_analysis_sources.json"
+    sources = read_artifact(arc_dir, source_path.name) if source_path.is_file() else {}
+    if not isinstance(analysis, dict) or not isinstance(sources, dict):
+        raise ValueError("Invalid image analysis artifacts; rerun stage 01")
+    images = {}
+    for iid, image in catalog["images"].items():
+        reference = image["reference"]
+        if image["source_field"] == "ui" and reference not in analysis:
+            raise ValueError(f"Missing UI image analysis for {reference}; rerun stage 01")
+        if reference in analysis and (
+            (image["source_field"] == "ui" or reference in sources)
+            and sources.get(reference) != image["sha256"]
+        ):
+            raise ValueError(f"Image analysis is stale or unverified for {reference}; rerun stage 01")
+        images[iid] = {**image, "analysis": analysis.get(reference, {})}
     contexts = {}
     for rid in tree.leaves:
-        node = nodes[rid]
-        direct = {key: value for key, value in node.items() if key != "children"}
-        refs = set(REFERENCE.findall(json.dumps(direct)))
-        description = node.get("description", {})
-        for image in description.get("image", []) if isinstance(description, dict) else []:
-            if image.get("id") in images:
-                refs.add(image["id"])
+        refs = catalog["requirements"].get(rid, [])
         contexts[rid] = {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
-            "images": {key: images[key] for key in sorted(refs) if key in images}}
+            "images": {key: images[key] for key in refs}}
     return tree, images, contexts
 
 

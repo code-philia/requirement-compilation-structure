@@ -38,6 +38,10 @@ record names and user-entered values remain dynamic; example data is not fixed U
 
 pages maps PAGE IDs to {name, route, root, images}. route is a URL path, root is an
 ELEMENT ID and images lists supplied image IDs. Preserve explicit image.page hints.
+For source_field=ui, image.id is a screenshot capture ID and image.page is its supplied
+page-name hint. Several captures with the same page hint can show different states of
+one page; do not create a separate top-level page or route for every screenshot. Images
+provide visible evidence only; do not infer permissions, process effects or seed data.
 Do not add fixtures or sample objects. Reference images describe appearance, not actual
 loaded records. Requirement-defined defaults remain requirement evidence for implementation;
 do not turn them into a separate initialization model in this design.
