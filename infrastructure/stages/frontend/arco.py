@@ -1,6 +1,7 @@
 """Shared Arco component and callback contracts for all four frontend passes."""
 
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,8 +9,10 @@ from infrastructure.utils.files import save_json, save_text
 
 PACKAGE = "@arco-design/web-react"
 VERSION = "2.66.18"
-GUIDE = Path(__file__).with_name("arco-reference.md")
-REFERENCE_PATH = "frontend/arco-reference.md"
+KNOWLEDGE_ROOT = Path(__file__).resolve().parents[2] / "knowledge/arco"
+REFERENCE_ROOT = "references/arco"
+GUIDE = KNOWLEDGE_ROOT / "guide.md"
+REFERENCE_PATH = REFERENCE_ROOT + "/guide.md"
 PROVIDER_PATH = "frontend/src/design-system.tsx"
 
 # Callback arguments are values from the React library, not DOM event guesses.
@@ -82,14 +85,16 @@ Follow task.frontend_stack and each element.component. Use the actual installed 
 Arco components, not styled HTML imitations or Ant Design/Vue component APIs. Import from
 @arco-design/web-react; icons from @arco-design/web-react/icon. Preserve the shared
 DesignSystemProvider/CSS in frontend/src/design-system.tsx and wrap the app in it.
-The compiler supplies frontend/arco-reference.md and readonly frontend/arco-api/**/*.d.ts;
-read these declarations (copied from the pinned package after installation)
+The compiler mounts its own knowledge base at readonly virtual paths references/arco/.
+Read references/arco/guide.md and references/arco/api/2.66.18/**/*.d.ts
 for exact props when a component is unfamiliar. Keep imports/version/provider intact.
 task.component_knowledge contains selected component-use references. With list_files,
-search_files and read_file, inspect frontend/arco-components/*.md for use cases and
-frontend/arco-api/**/*.d.ts for exact API definitions. Search literal property names
+search_files and read_file, inspect references/arco/components/*.md for use cases and
+references/arco/api/2.66.18/**/*.d.ts for exact API definitions. Search literal property names
 within a narrow component glob, then read the relevant lines. Examples are illustrative
 patterns, never production fixtures. Search misses do not authorize invented props.
+These paths refer to compiler-owned references outside the application. Never copy
+the knowledge base or its declarations into application sources or runtime imports.
 Native wrappers are allowed for landmarks, layout, labels and test selectors.
 Keep data-testid on a concrete visible control/container; render popup selectors inside
 the actual portal content, not an invisible placeholder. Repeated rows need row-scoped
@@ -143,8 +148,8 @@ def stack_context(elements=None):
     """Supply the same compact callback vocabulary to design, implementation and repair."""
     names = {n.get("component", {}).get("name") for n in (elements or {}).values()}
     selected = {k:v for k,v in COMPONENTS.items() if not names or k in names}
-    return {"library": "arco", "package": PACKAGE, "version": VERSION, "types_root": "frontend/arco-api",
-        "knowledge_root":"frontend/arco-components", "design_discovery_kind":"component",
+    return {"library": "arco", "package": PACKAGE, "version": VERSION, "types_root": REFERENCE_ROOT+"/api/"+VERSION,
+        "knowledge_root":REFERENCE_ROOT+"/components", "design_discovery_kind":"component",
         "provider": PROVIDER_PATH, "reference": REFERENCE_PATH,
         "components": deepcopy(selected), "semantic_html": sorted(HTML)}
 
@@ -190,9 +195,8 @@ def configure_arco(output):
     package = json.loads(package_path.read_text(encoding="utf-8-sig"))
     package.setdefault("dependencies", {})[PACKAGE] = VERSION
     save_json(package_path, package)
-    save_text(output / REFERENCE_PATH, GUIDE.read_text())
-    from infrastructure.stages.frontend.arco_knowledge import publish_knowledge
-    publish_knowledge(output)
+    from infrastructure.stages.frontend.arco_knowledge import record_knowledge_reference
+    record_knowledge_reference(output)
     provider = output / PROVIDER_PATH
     if not provider.exists():
         template = Path(__file__).resolve().parents[2] / "shared/project/templates" / PROVIDER_PATH
@@ -209,23 +213,31 @@ def configure_arco(output):
         save_text(main, source)
 
 
-def publish_component_types(output):
-    """Expose installed API declarations to agents whose file tools exclude node_modules."""
+def arco_references():
+    """Return a compiler-owned readonly reference mount, never an app directory."""
+    if not GUIDE.is_file() or not (KNOWLEDGE_ROOT / "api" / VERSION / "manifest.json").is_file():
+        raise ValueError("Missing compiler Arco knowledge bundle; restore infrastructure/knowledge/arco")
+    from infrastructure.stages.frontend.arco_knowledge import component_records
+    index = KNOWLEDGE_ROOT / "components/index.json"
+    if not index.is_file() or json.loads(index.read_text()) != component_records():
+        raise ValueError("Arco component guides are stale; run python -m infrastructure.stages.frontend.arco_knowledge --rebuild-guides in plusplus")
+    return {REFERENCE_ROOT: KNOWLEDGE_ROOT}
+
+
+def validate_component_types(output):
+    """Verify the installed library against compiler-owned API references without copying."""
     root = next((p for p in (output / "node_modules" / PACKAGE, output / "frontend/node_modules" / PACKAGE)
         if (p / "package.json").is_file()), None)
     if root is None:
-        raise ValueError("Install frontend dependencies before publishing Arco API references")
+        raise ValueError("Install frontend dependencies before validating the Arco version")
     version = json.loads((root / "package.json").read_text())["version"]
     if version != VERSION:
         raise ValueError(f"Expected {PACKAGE}@{VERSION}, found {version}; reinstall frontend dependencies")
-    paths = []
-    for source in sorted((root / "es").rglob("*.d.ts")):
-        relative = "frontend/arco-api/" + source.relative_to(root / "es").as_posix()
-        save_text(output / relative, source.read_text())
-        paths.append(relative)
-    if not paths:
-        raise ValueError("Arco package contains no published TypeScript API declarations")
-    license_path = root / "LICENSE"
-    if license_path.is_file():
-        save_text(output / "frontend/arco-api/LICENSE", license_path.read_text())
-    save_json(output / ".arc/arco_types.json", {"package": PACKAGE, "version": version, "files": paths})
+    arco_references()
+    manifest_path = KNOWLEDGE_ROOT / "api" / VERSION / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("version") != version or manifest.get("package") != PACKAGE:
+        raise ValueError("Compiler Arco API snapshot disagrees with the installed package")
+    save_json(output / ".arc/arco_types.json", {"package": PACKAGE, "version":version,
+        "reference":REFERENCE_ROOT+"/api/"+VERSION,
+        "manifest_sha256":hashlib.sha256(manifest_path.read_bytes()).hexdigest()})

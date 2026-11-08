@@ -12,7 +12,7 @@ from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
-from infrastructure.stages.frontend.arco_knowledge import ComponentContextIndex, retrieve_components, record_retrieval, publish_knowledge
+from infrastructure.stages.frontend.arco_knowledge import ComponentContextIndex, retrieve_components, record_retrieval, record_knowledge_reference
 from infrastructure.stages.frontend.arco import DESIGN_INSTRUCTIONS, validate_components, stack_context
 
 
@@ -52,7 +52,7 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
     updates; implementation and browser tests belong to step 08."""
     design, retriever = empty_design(), PageRetriever()
     design["frontend_stack"] = stack_context()
-    publish_knowledge(arc_dir.parent)
+    record_knowledge_reference(arc_dir.parent)
     save_json(arc_dir / "frontend_stack.json", design["frontend_stack"])
     for rid in tree.requirements:
         if tree.children[rid]:

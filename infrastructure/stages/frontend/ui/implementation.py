@@ -17,7 +17,7 @@ from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import read_artifact, save_json, save_text
 from infrastructure.shared.project.git import checkpoint
-from infrastructure.stages.frontend.arco import IMPLEMENT_INSTRUCTIONS as ARCO_IMPLEMENT_INSTRUCTIONS, stack_context, REFERENCE_PATH, PROVIDER_PATH, publish_component_types
+from infrastructure.stages.frontend.arco import IMPLEMENT_INSTRUCTIONS as ARCO_IMPLEMENT_INSTRUCTIONS, stack_context, REFERENCE_PATH, PROVIDER_PATH, validate_component_types, arco_references
 from infrastructure.stages.frontend.arco_knowledge import retrieve_components, record_retrieval
 
 INSTRUCTIONS = """Implement the current requirement's UI on task.page.
@@ -99,7 +99,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     prepare_frontend(output)
     console.show("UI TDD preparation | Dependencies", "Install workspace dependencies and Playwright Chromium. No backend is started.")
     install_dependencies(output)
-    publish_component_types(output)
+    validate_component_types(output)
     checks = FrontendChecks(output)
     checks.install_browser()
     checkpoint(output, stage="08", task="runtime", action="Prepare requirement-driven UI implementation",
@@ -176,7 +176,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                         "visual_references": {iid: (images or {}).get(iid, image)
                             for iid, image in requirement.get("images", {}).items()},
                     }
-                    workspace = FileTools(output, ["frontend"], requirements=[rid], stage="ui", discovery=True,
+                    workspace = FileTools(output, ["frontend"], requirements=[rid], stage="ui", discovery=True, references=arco_references(),
                         files=[REFERENCE_PATH, PROVIDER_PATH, "frontend/src/ui-runtime.ts", *files, "frontend/package.json",
                             "frontend/tsconfig.json", "frontend/playwright.ui.config.ts", *APPLICATION_ENTRYPOINTS])
                     agent = run_file_agent(model, INSTRUCTIONS + ARCO_IMPLEMENT_INSTRUCTIONS, context, workspace, implementation_gate,

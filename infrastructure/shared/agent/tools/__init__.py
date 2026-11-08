@@ -15,7 +15,7 @@ class FileTools:
     """One scoped read/write workspace with automatic requirement-file associations."""
 
     def __init__(self, output, scope, *, requirements=(), stage, files=(), writable=None,
-            readable=None, allow_write=None, discovery=False):
+            readable=None, allow_write=None, discovery=False, references=None):
         self.output = Path(output).resolve()
         self.scope = tuple(scope)
         if not self.scope:
@@ -25,6 +25,14 @@ class FileTools:
                 raise ValueError(f"Invalid project scope: {directory}")
         self.requirements = list(dict.fromkeys(requirements))
         self.stage = stage
+        self.reference_roots = {}
+        for prefix, directory in (references or {}).items():
+            if not prefix.startswith("references/") or '\\' in prefix or any(not part or part.startswith('.') for part in prefix.split('/')):
+                raise ValueError("Readonly references require a references/NAME virtual prefix")
+            root = Path(directory).resolve()
+            if not root.is_dir():
+                raise ValueError(f"Missing readonly reference root {prefix}")
+            self.reference_roots[prefix] = root
         self.discovery = discovery
         self.tool_registry = {name:entry for name,entry in TOOL_REGISTRY.items()
             if discovery or name not in {"list_files","search_files"}}
@@ -39,13 +47,23 @@ class FileTools:
         self.available_paths = set(self.files)
         for directory in self.scope:
             self.available_paths.update(source_paths(self.output, directory))
+        for prefix, root in self.reference_roots.items():
+            self.available_paths.update(prefix+'/'+path for path in source_paths(root,''))
         self.available_paths = {path for path in self.available_paths if self.can_read(path)}
         self.supplied_contents, self.read_files, self._pending = {}, {}, {}
         for path in self.files:
             self.path(path)
 
     def path(self, path):
+        for prefix, root in sorted(self.reference_roots.items(),key=lambda item:-len(item[0])):
+            if path == prefix:
+                raise FileToolError("PATH_IS_DIRECTORY", "Use list_files for reference directories", path)
+            if path.startswith(prefix+'/'):
+                return workspace_path(root,path[len(prefix)+1:])
         return workspace_path(self.output, path)
+
+    def is_reference(self, path):
+        return any(path==prefix or path.startswith(prefix+'/') for prefix in self.reference_roots)
 
     def in_scope(self, path):
         return any(path == directory or path.startswith(directory.rstrip("/") + "/") for directory in self.scope)
@@ -53,9 +71,11 @@ class FileTools:
     def can_read(self, path):
         if self.readable is not None:
             return path in self.readable
-        return self.in_scope(path) or path in self.files
+        return self.is_reference(path) or self.in_scope(path) or path in self.files
 
     def can_write(self, path):
+        if self.is_reference(path):
+            return False
         if not self.in_scope(path):
             return False
         if self.writable is not None:
@@ -65,11 +85,11 @@ class FileTools:
         return editable_application_path(self.output, path)
 
     def scope_state(self):
-        paths = sorted(path for path in self.available_paths if not self.discovery or not path.startswith(
-            ("frontend/arco-api/","frontend/arco-components/")))
+        paths = sorted(path for path in self.available_paths if not self.discovery or not self.is_reference(path))
         return {"directories": list(self.scope), "existing_files": paths,
             "reference_files_omitted":len(self.available_paths)-len(paths),
             "reference_discovery":"Use list_files/search_files for omitted reference paths" if self.discovery else None,
+            "readonly_reference_roots":list(self.reference_roots),
             "writable_files": sorted(self.writable) if self.writable is not None else "application sources inside scope",
             "requirement_ids": self.requirements,
             "readable_files": sorted(self.readable) if self.readable is not None else "scope and related reference files",

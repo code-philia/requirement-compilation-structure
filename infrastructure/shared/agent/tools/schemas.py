@@ -16,11 +16,11 @@ STRING = {"type": "string"}
 TOOL_REGISTRY = {
     "list_files": (list_files, definition("list_files", "Find authorized project/reference files by POSIX glob. ** matches zero or more directories. Readonly; use next_offset to page results.",
         {"glob":STRING,"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}}, [],
-        {"tool":"list_files","glob":"frontend/arco-api/Table/**/*.d.ts","limit":20}), "read"),
+        {"tool":"list_files","glob":"references/arco/api/**/Table/**/*.d.ts","limit":20}), "read"),
     "search_files": (search_files, definition("search_files", "Case-insensitive literal text search in authorized files, filtered by glob. Returns paths, 1-based line numbers and bounded context. No regex or shell. Narrow glob if scan_truncated; read_file for complete definitions.",
         {"query":STRING,"glob":STRING,"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1},"context":{"type":"integer","minimum":0}}, ["query"],
-        {"tool":"search_files","query":"onChange","glob":"frontend/arco-api/Select/**/*.d.ts","limit":10,"context":2}), "read"),
-    "read_file": (read_file, definition("read_file", "Read an additional project file or inclusive 1-based line range ONLY when the current requirement "
+        {"tool":"search_files","query":"onChange","glob":"references/arco/api/**/Select/**/*.d.ts","limit":10,"context":2}), "read"),
+    "read_file": (read_file, definition("read_file", "Read an authorized project file or readonly compiler reference, with an optional inclusive 1-based line range, ONLY when the current requirement "
         "cannot be completed correctly using the full related-file contents already in input.files. "
         "Explain the concrete missing dependency in diagnosis.reason. Do not re-read supplied or retained files.",
         {"path": STRING, "start_line": {"type": "integer", "minimum": 1},

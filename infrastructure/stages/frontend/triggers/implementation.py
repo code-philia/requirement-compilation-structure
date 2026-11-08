@@ -24,7 +24,7 @@ from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
 from infrastructure.shared.project.git import checkpoint
-from infrastructure.stages.frontend.arco import IMPLEMENT_INSTRUCTIONS as ARCO_IMPLEMENT_INSTRUCTIONS, ACCEPTANCE_INSTRUCTIONS, stack_context, REFERENCE_PATH, PROVIDER_PATH, publish_component_types
+from infrastructure.stages.frontend.arco import IMPLEMENT_INSTRUCTIONS as ARCO_IMPLEMENT_INSTRUCTIONS, ACCEPTANCE_INSTRUCTIONS, stack_context, REFERENCE_PATH, PROVIDER_PATH, validate_component_types, arco_references
 from infrastructure.stages.frontend.arco_knowledge import retrieve_components, record_retrieval
 
 
@@ -172,7 +172,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     prepare_e2e(output, backend)
     console.show("E2E preparation | Dependencies", "Install workspace dependencies and Chromium. Each browser run owns a new real test database; production data is not used.")
     install_dependencies(output)
-    publish_component_types(output)
+    validate_component_types(output)
     checks = E2EChecks(output)
     checks.install_browser()
     checkpoint(output, stage="10", task="runtime", action="Prepare real-app browser tests and isolated database fixtures",
@@ -204,7 +204,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         except (ValueError, RuntimeError) as error:
             components = retrieve_components({"name":"Frontend baseline repair","description":str(error)})
             record_retrieval(arc_dir,"10_implement_frontend_tdd","baseline",components)
-            workspace = FileTools(output, ["frontend", "backend"], requirements=tree.leaves, discovery=True,
+            workspace = FileTools(output, ["frontend", "backend"], requirements=tree.leaves, discovery=True, references=arco_references(),
                 stage="frontend", files=[REFERENCE_PATH, PROVIDER_PATH, *APPLICATION_ENTRYPOINTS, "frontend/src/ui-runtime.ts"],
                 allow_write=lambda path: editable_runtime_path(output, path))
             repair = run_file_agent(model,
@@ -270,7 +270,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 return {"typecheck": compiled, "behavior": behavior, "status": test_run_status(behavior)}
 
             test_context = {**model_context(context), "schema": related_schema(schema, context["backend_apis"].values()), "test_path": relative}
-            test_workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True,
+            test_workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True, references=arco_references(),
                 writable=[relative], files=[relative, "frontend/src/ui-runtime.ts", CONFIG, FIXTURE, "backend/tests/support/context.ts",
                     *APPLICATION_ENTRYPOINTS,
                     "frontend/package.json", "frontend/tsconfig.json", "frontend/vite.config.ts",
@@ -354,7 +354,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 "application_entrypoints": list(APPLICATION_ENTRYPOINTS),
                 "backend_entrypoints": {"registry": "backend/src/api/register.ts",
                     "app": "backend/src/app.ts", "server": "backend/src/server.ts"}}
-            workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True,
+            workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True, references=arco_references(),
                 files=[REFERENCE_PATH, PROVIDER_PATH, relative, *ui_files, "backend/tests/support/context.ts", "frontend/src/ui-runtime.ts",
                     CONFIG, *APPLICATION_ENTRYPOINTS, "frontend/src/style.css",
                     *api_test_paths(output, called), "frontend/package.json", "frontend/tsconfig.json"],

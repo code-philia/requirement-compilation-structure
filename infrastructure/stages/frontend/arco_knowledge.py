@@ -3,14 +3,13 @@
 from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
 
 from infrastructure.shared.rag.bm25 import rank
 from infrastructure.shared.agent.discovery import ContextIndex
-from infrastructure.stages.frontend.arco import COMPONENTS, VERSION
+from infrastructure.stages.frontend.arco import COMPONENTS, VERSION, KNOWLEDGE_ROOT, REFERENCE_ROOT, arco_references
 from infrastructure.utils.files import save_json, save_text
 
-SOURCE = Path(__file__).with_name("arco-components.json")
+SOURCE = KNOWLEDGE_ROOT / "components.json"
 
 
 class ComponentContextIndex(ContextIndex):
@@ -40,8 +39,8 @@ def component_records():
                 "group":group["components"][0],
                 **deepcopy({k:v for k,v in group.items() if k != "components"}),
                 "related_components": group["components"], "callbacks": COMPONENTS[name],
-                "guide": "frontend/arco-components/" + name + ".md",
-                "types_directory": "frontend/arco-api/" + name.split('.')[0]}
+                "guide": REFERENCE_ROOT+"/components/" + name + ".md",
+                "types_directory": REFERENCE_ROOT+"/api/"+VERSION+"/" + name.split('.')[0]}
     if set(records) != set(COMPONENTS):
         raise ValueError(f"Missing Arco knowledge: {sorted(set(COMPONENTS)-set(records))}")
     return records
@@ -77,13 +76,15 @@ def retrieve_components(requirement, elements=None, top_k=6):
 def record_retrieval(arc_dir, stage, identity, retrieved):
     path = arc_dir / "arco_retrieval.json"
     data = json.loads(path.read_text()) if path.is_file() else {}
-    data.setdefault(stage, {})[identity] = retrieved
+    data.setdefault(stage, {})[identity] = {k:v for k,v in retrieved.items() if k!="records"}
+    data[stage][identity]["components"] = list(retrieved.get("records",{}))
     save_json(path, data)
 
 
-def publish_knowledge(output):
+def rebuild_component_guides():
+    """Maintainer-only refresh inside plusplus; generation never writes the knowledge base."""
     records = component_records()
-    save_json(output / "frontend/arco-components/index.json", records)
+    save_json(KNOWLEDGE_ROOT / "components/index.json", records)
     for name, record in records.items():
         text = (f"# {name} — Arco React {VERSION}\n\n{record['description']}\n\n"
             f"适用：{record['use_when']}\n\n注意：{record['avoid_when']}\n\n"
@@ -95,6 +96,20 @@ def publish_knowledge(output):
             + '\n```\n\n只读类型目录：' + record['types_directory']
             + '\n\n官方参考：\n' + '\n'.join('- '+url for url in record['sources'])
             + '\n\n本文件是编译器整理的用途指南；准确属性以固定版本类型声明为准。\n')
-        save_text(output / record["guide"], text)
+        save_text(KNOWLEDGE_ROOT / "components" / (name+".md"), text)
+
+
+def record_knowledge_reference(output):
+    """Keep only provenance in compile artifacts, not a distributed knowledge corpus."""
+    arco_references()
     save_json(output / ".arc/arco_knowledge.json", {"version":VERSION,
-        "sha256":hashlib.sha256(SOURCE.read_bytes()).hexdigest(), "components":list(records)})
+        "sha256":hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
+        "reference":REFERENCE_ROOT, "components":list(component_records())})
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Refresh plusplus-owned Arco component guides")
+    parser.add_argument("--rebuild-guides",action="store_true",required=True)
+    parser.parse_args()
+    rebuild_component_guides()

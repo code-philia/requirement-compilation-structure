@@ -12,16 +12,21 @@
 - [Table 接口](https://github.com/arco-design/arco-design/blob/main/components/Table/interface.tsx)
 - [Modal 接口](https://github.com/arco-design/arco-design/blob/main/components/Modal/interface.ts)
 
-安装依赖后，编译器将该版本 `es/**/*.d.ts` 复制到 `frontend/arco-api/`，文件工具可读取。
-从 `frontend/arco-api/COMPONENT/interface.d.ts`、`index.d.ts` 或具体组件的声明入手。
+知识库位于 plusplus 的 `infrastructure/knowledge/arco/`，包含用途指南及固定版本的
+官方 API 声明。生成应用时不复制知识库；编译器通过只读虚拟路径 `references/arco/`
+供智能体查阅。虚拟路径不是应用目录，也不能用于运行时 import。
+从 `references/arco/api/2.66.18/COMPONENT/interface.d.ts`、`index.d.ts` 或具体组件的声明入手。
 按需查阅引用的其他声明；不要修改这些参考文件，也不要将其当作本地组件导入。
-清单在 `.arc/arco_types.json`。升级版本时需同步调整编译器组件/事件目录和声明，不能只改包名。
+来源和逐文件哈希在知识库的 `api/2.66.18/manifest.json`；应用 `.arc/arco_types.json`
+只记录版本和引用。安装应用依赖后会检查版本一致性，不复制声明或改写编译器知识库。
+升级版本时需同步调整编译器组件/事件目录和声明，不能只改包名。
 
 ## 组件检索与文件查阅
 
-组件用途资料来自编译器的 `arco-components.json`，覆盖允许目录中的 58 个组件/子组件。
-每项含用途、适用/不适用场景、关键属性、交互模式、简例和来源。生成项目的
-`frontend/arco-components/index.json` 及每组件 Markdown 提供同一份只读资料。
+组件用途资料来自知识库的 `components.json`，覆盖允许目录中的 58 个组件/子组件。
+每项含用途、适用/不适用场景、关键属性、交互模式、简例和来源。知识库的
+`components/index.json` 及每组件 Markdown 提供同一份只读资料。
+例如 `references/arco/components/Table.md` 直接对应 plusplus 知识库里的文档。
 它们不是完整官网镜像，也不取代固定版本的 API 声明。
 
 第 07 阶段根据当前需求和已检索页面，用 BM25 选择用途候选；同组子组件候选去重，
@@ -43,26 +48,28 @@
 由编译器执行，不依赖模型提供商的原生 function calling。先找文件：
 
 ```json
-{"tool_calls":[{"tool":"list_files","glob":"frontend/arco-api/Select/**/*.d.ts","limit":20}]}
+{"tool_calls":[{"tool":"list_files","glob":"references/arco/api/2.66.18/Select/**/*.d.ts","limit":20}]}
 ```
 
 然后搜索具体属性：
 
 ```json
-{"tool_calls":[{"tool":"search_files","query":"onChange","glob":"frontend/arco-api/Select/**/*.d.ts","context":2,"limit":10}]}
+{"tool_calls":[{"tool":"search_files","query":"onChange","glob":"references/arco/api/2.66.18/Select/**/*.d.ts","context":2,"limit":10}]}
 ```
 
-再按返回路径与行号使用 read_file。也可在 `frontend/arco-components/*.md` 搜索中文用途，
+再按返回路径与行号使用 read_file。也可在 `references/arco/components/*.md` 搜索中文用途，
 或在任务授权的应用源码中找已有组件用法。支持 next_offset 分页；搜索为不区分大小写
 的字面字符串，不是正则或 shell 命令。`**` 匹配零层或多层目录。
 
-文件发现受任务现有范围和排除规则约束，不能访问 node_modules、隐藏目录、越界路径
+文件发现限于应用任务范围和显式挂载的编译器只读资料，不能任意读取其他外部文件。
+应用和知识库访问均排除 node_modules、隐藏目录、越界路径
 或符号链接。每次最多返回 100 项；内容搜索限制上下文、长行、总片段长度、扫描文件数
 和字节数。看到 scan_truncated/skipped_files 时应缩小 glob，不能推断内容不存在。
 大批只读参考路径不再全部注入 scope.existing_files，可通过 list_files 获取。
 发现工具只返回路径/片段，文件写权限保持原来的限制。后端等其他智能体默认不增加这些工具。
 
-初始检索结果保存在 `.arc/arco_retrieval.json`；设计阶段的 component 按需查询保存在
+初始检索的版本、哈希和命中 ID 保存在 `.arc/arco_retrieval.json`，不保存整套文档；
+设计阶段的 component 按需查询保存在
 `.arc/arco_queries.jsonl`。`.arc/arco_knowledge.json` 记录知识库版本与哈希。
 
 ## 全局设置

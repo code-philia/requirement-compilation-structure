@@ -14,6 +14,9 @@ reconfirm supplied definitions, or read unrelated files merely because they are 
 Choose an actual filename from scope.existing_files or readonly discovery results instead
 of guessing a path. Large reference inventories may be omitted from existing_files;
 reference_files_omitted indicates this and list_files can inspect those authorized files.
+readonly_reference_roots are virtual paths backed by compiler-owned documentation outside
+the application. Search/read them normally; they are never writable. Do not copy reference
+libraries into the generated application or import virtual paths at runtime.
 When list_files/search_files appear in input.tools, use them for a specific missing
 component/document/source definition. list_files filters paths by glob; search_files
 performs case-insensitive literal search and returns line numbers. Then read_file the
