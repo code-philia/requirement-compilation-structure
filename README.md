@@ -50,7 +50,7 @@ Add `--model-log` to display and save detailed model input/output, or `--port 33
 
 ### Step by step
 
-Run these commands in order to execute the same 11 passes as the full pipeline. Each command runs only the selected stage and reads existing artifacts from `outputs/demo/.arc/`.
+Run these commands in order to execute the same 12 passes as the full pipeline. Each command runs only the selected stage and reads existing artifacts from `outputs/demo/.arc/`.
 
 ```bash
 # 00: Initialize project
@@ -61,6 +61,9 @@ uv run main.py input --output-dir outputs/demo --stage 01_explore_requirement
 
 # 02: Design database schema
 uv run main.py input --output-dir outputs/demo --stage 02_build_db_schema
+
+# 02B: Normalize authorization/process evidence and publish shared backend infrastructure
+uv run main.py input --output-dir outputs/demo --stage 02_design_backend_foundation
 
 # 03: Infer database read/write obligations
 uv run main.py input --output-dir outputs/demo --stage 03_infer_db_obligations
@@ -88,6 +91,8 @@ uv run main.py input --output-dir outputs/demo --stage 10_implement_frontend_tdd
 ```
 
 The `--stage` option accepts only a full stage name such as `06_implement_backend_tdd`. Use `uv run main.py --help` to see all stages. Add `--pause` for teaching pauses or `--model-log` for detailed model I/O. Set a custom backend port with `--port` in stage 00.
+
+For structured authorization/BPMN inputs, see [backend evidence contracts](infrastructure/stages/backend/README.md).
 
 ### Start the generated application
 

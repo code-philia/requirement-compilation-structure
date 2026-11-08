@@ -10,6 +10,8 @@ from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
+from infrastructure.stages.backend.evidence import load_evidence, scoped_evidence
+from infrastructure.utils.files import read_artifact
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
@@ -29,6 +31,13 @@ Return:
 Use [] when a set is empty. Include the supplied step IDs; use steps={} when there
 are no steps. Select existing schema symbols; do not create schema definitions.
 
+Use backend_evidence and backend_foundation alongside descriptions/scenarios. Include
+source-required transition effects, reversals and all related inventory/ledger fields;
+Automatic ownership creation, audit and command receipts are compiler infrastructure
+and need not be charged as extra business writes. An explicitly required workflow
+assignee change MUST include record_access.assignee_id as a domain effect. Login/me/logout use the fixed auth_sessions,
+users, org_units and user_ou_roles contracts, not invented Session/Account synonyms.
+Do not classify source-required effects as UI-only because their ER reference is indirect.
 Infer requirement effects from its description and complete scenarios. Infer each
 step's effects from its own Given/When/Then and requirement context. Keep these
 records specific: do not copy the requirement's writes into every step. The leaf
@@ -58,6 +67,8 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
         raise ValueError("--top-k must be positive")
     tree = RequirementTree(json.loads((arc_dir / "requirements.json").read_text(encoding="utf-8-sig")))
     schema = json.loads((arc_dir / "db_schema.json").read_text(encoding="utf-8-sig"))
+    evidence = load_evidence(arc_dir)
+    foundation = read_artifact(arc_dir,"backend_foundation.json") if (arc_dir/"backend_foundation.json").is_file() else {"enabled":False}
     # --- Pass boundary: use the existing database symbol space ----------------
     # Inference may select existing fields, but cannot create schema symbols.
     # An unmapped concept should trigger schema review, not a fabricated field.
@@ -97,6 +108,8 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
             # for model correction rather than silently expanding its records.
             request = {
                 "requirement": requirement,
+                "backend_evidence": scoped_evidence(evidence,rid),
+                "backend_foundation": foundation,
                 "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
                 "related_fields": sorted(related_fields),
                 "related_schema": {"entities": related_entities},

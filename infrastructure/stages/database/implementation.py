@@ -26,7 +26,14 @@ WIRING = (
     "backend/scripts/copy-db.mjs", "package.json", "backend/package.json", "backend/tsconfig.json",
 )
 
-SEED_INSTRUCTIONS = '''Read the current requirement and incrementally maintain its prerequisite database rows.
+SEED_INSTRUCTIONS = '''If compiler platform bootstrap exists, users, roles, org_units and user_ou_roles are
+already bootstrapped from source accounts. Preserve them; do not duplicate/reset identities.
+Business prerequisite rows still belong in their canonical per-table insertion files.
+For explicit multi-unit or ownership prerequisites, maintain record_access rows with
+correct resource/record_id/unit_id/owner_id/assignee_id; never assign every record to
+one unit when requirements specify multiple units. The single-unit initial bootstrap
+can assign otherwise-unowned seed rows to that sole unit, without guessing ownership.
+Read the current requirement and incrementally maintain its prerequisite database rows.
 Each table has one insertion file: backend/src/db/seeds/ENTITY.sql. The compiler has
 created these files and a dependency-ordered seed.ts loader. Edit only the insertion
 SQL files; do not put records or INSERT statements in seed.ts or the table DDL files.
@@ -179,6 +186,8 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
         nonlocal manifest
         current = [(output / name).read_text(encoding="utf-8-sig") for name in ("package.json", "backend/package.json")]
         dependencies = ("tsx", "typescript", "better-sqlite3", "express")
+        if (output / "backend/src/platform/settings.ts").is_file():
+            dependencies += ("casbin", "xstate", "decimal.js")
         if (manifest is not None and current != manifest) or any(not (output / "node_modules" / name).exists() for name in dependencies):
             install_dependencies(output)
         manifest = current
@@ -200,8 +209,9 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
     sql_paths = {name: f"backend/src/db/tables/{name}.sql" for name in schema["entities"]}
     insert_paths = {name: f"backend/src/db/seeds/{name}.sql" for name in schema["entities"]}
     allowed = {*WIRING, *sql_paths.values(), *insert_paths.values()}
+    protected = {"backend/src/app.ts", "backend/src/api/register.ts", "backend/src/db/initialize.ts", "backend/src/db/seed.ts"} if (output / "backend/src/platform/settings.ts").is_file() else set()
     workspace = FileTools(output, ["backend", "package.json"], requirements=list(schema.get("requirements", {})),
-        stage="database", files=WIRING, writable=allowed, readable=allowed)
+        stage="database", files=WIRING, writable=allowed-protected, readable=allowed)
     task = {"table_order": [name for group in implementation_groups(schema) for name in group],
         "startup_data_loader": SEED_PATH,
         "insertion_directory": "backend/src/db/seeds",
@@ -222,7 +232,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
                     pending.append(target)
         # Retain wiring and replace the previous failing table context instead of accumulating it.
         workspace.files = set(WIRING) | {sql_paths[name] for name in selected} | {insert_paths[name] for name in selected}
-        workspace.writable = set(workspace.files)
+        workspace.writable = set(workspace.files)-protected
         task["entities"] = {name: schema["entities"][name] for name in sorted(selected)}
         return value
 

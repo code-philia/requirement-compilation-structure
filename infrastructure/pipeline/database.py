@@ -6,6 +6,7 @@ from pathlib import Path
 from infrastructure.stages.database.order import implementation_groups, table_dependencies
 from infrastructure.stages.database.runtime import initializer_source
 from infrastructure.stages.database.er import validate_imported_schema
+from infrastructure.stages.backend.platform_files import wire_initializer
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
@@ -27,6 +28,7 @@ existing SQL when rerunning. This task owns this one fixed SQL path. Read the su
 related SQL first; use read_file only for missing relevant evidence. The compiler adapts
 an unambiguous misplaced creation to output_path and reports the actual path.
 
+Honor entity.unique_constraints as table-level composite UNIQUE constraints.
 Create the current entity with CREATE TABLE IF NOT EXISTS, preserving its entity and
 field names and quoting identifiers with double quotes. Implement the supplied keys,
 nullability, uniqueness, references and SQLite-enforceable value constraints.
@@ -140,6 +142,8 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
     if not initializer.resolve().is_relative_to(output_dir):
         raise ValueError("DB initializer path escapes the output directory")
     save_text(initializer, initializer_source(implementations))
+    if (output_dir / "backend/src/platform/bootstrap.ts").is_file():
+        wire_initializer(initializer)
     checkpoint(output_dir, stage="04", task="database initializer", action="Publish ordered SQL initialization",
         details={"table_order": order, "published_tables": list(implementations)})
     print(f"Database initialization wired: {initializer}", flush=True)

@@ -16,7 +16,7 @@ def coverage(required, apis):
     # Required reads are minimum capabilities, not a prohibition on supporting
     # lookups, joins or reusable response projections. Writes retain their boundary.
     return {"missing": difference(required, combined),
-        "excess": {"read": [], "write": sorted(set(combined["write"]) - set(required["write"]))}}
+        "excess": {"read": [], "write": sorted(set(combined["write"]) - set(required["write"]) - set(union([api for api in apis if api.get("platform_builtin")])["write"]))}}
 
 
 def validate_design(design, obligations, complete=True, tree=None):

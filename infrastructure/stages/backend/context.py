@@ -1,6 +1,7 @@
 """Resolve the requirement tree, database symbols, and requirement obligations."""
 
 from pathlib import Path
+from infrastructure.stages.backend.evidence import load_evidence, scoped_evidence
 
 from infrastructure.utils.files import read_artifact
 
@@ -11,6 +12,9 @@ from infrastructure.stages.requirements.tree import RequirementTree
 def load_context(arc_dir: Path):
     """Load the requirement tree, schema, and normalized obligations."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
+    tree.backend_evidence = load_evidence(arc_dir)
+    foundation_path = arc_dir / "backend_foundation.json"
+    tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled":False}
     schema = read_artifact(arc_dir, "db_schema.json")
     obligations = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
     check_symbols([*obligations["requirements"].values(), *obligations["steps"].values()], schema)
@@ -19,13 +23,14 @@ def load_context(arc_dir: Path):
 
 def requirement_context(tree, rid: str) -> dict:
     """Return one requirement with its own structured steps and their concatenated teaching/model context."""
-    return {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]]}
+    return {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
+        "backend_evidence": scoped_evidence(getattr(tree,"backend_evidence",{}),rid),
+        "backend_foundation": getattr(tree,"backend_foundation",{"enabled":False})}
 
 
 def api_requirement_uses(tree, allocations: dict, aid: str) -> list[dict]:
     """Supply every API owner once, with structured steps as the sole scenario representation."""
-    return [{**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]]}
-        for rid, ids in allocations.items() if aid in ids]
+    return [requirement_context(tree,rid) for rid, ids in allocations.items() if aid in ids]
 
 
 def supplied_sources(output: Path, api: dict, schema: dict) -> list[str]:
@@ -44,6 +49,8 @@ def supplied_sources(output: Path, api: dict, schema: dict) -> list[str]:
     paths.extend(f"backend/src/db/tables/{name}.sql" for name in sorted(entities))
     paths.extend(f"backend/src/db/seeds/{name}.sql" for name in sorted(entities)
         if (output / f"backend/src/db/seeds/{name}.sql").is_file())
+    if (output / "backend/src/platform/runtime.ts").is_file():
+        paths += ["backend/src/platform/runtime.ts", "backend/src/platform/types.ts", "backend/src/platform/settings.ts"]
     return paths
 
 

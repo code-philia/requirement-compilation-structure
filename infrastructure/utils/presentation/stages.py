@@ -17,5 +17,7 @@ STAGES = {
 
 def stage_label(script: str) -> str:
     """Show the pipeline stage number and its purpose."""
+    if script == "02_design_backend_foundation":
+        return "Stage 02B | Normalize backend permissions and workflows"
     number = script[:2]
     return f"Stage {number} | {STAGES[number]}" if number in STAGES else script

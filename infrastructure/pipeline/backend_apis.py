@@ -6,6 +6,8 @@ from pathlib import Path
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
 from infrastructure.stages.database.obligations.records import check_symbols
 from infrastructure.stages.backend.primitives import apply_decomposition, validate_design
+from infrastructure.stages.backend.contracts import CONTRACT_INSTRUCTIONS, validate_backend_contracts, builtin_apis, validate_process_coverage, finalize_backend_contracts
+from infrastructure.stages.backend.platform_files import publish_routes
 from infrastructure.shared.models.text import TextModel
 from infrastructure.stages.database.obligations.rules import union
 from infrastructure.utils.presentation.formatting import format_apis
@@ -134,8 +136,10 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
         raise ValueError("--top-k must be positive")
     console, retriever, model = DemoConsole(pause), ApiRetriever(), TextModel()
     conventions = load_conventions(arc_dir)
+    foundation = getattr(tree,"backend_foundation",{"enabled":False})
+    evidence = getattr(tree,"backend_evidence",{})
     # Parents organize requirements; they do not receive APIs or coverage checks.
-    design = {"apis": {}, "requirements": {rid: [] for rid in tree.requirements if tree.children[rid]}}
+    design = {"apis": builtin_apis(schema) if foundation.get("enabled") else {}, "requirements": {rid: [] for rid in tree.requirements if tree.children[rid]}}
     # --- Extension point 05A: leaf order and reusable API discovery ------------
     failures = TaskFailures(arc_dir, "05_design_backend_apis", console)
     save_json(arc_dir / "backend_apis.json", design)
@@ -170,6 +174,8 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 if any(symbol.startswith(name + ".") for symbol in related)}
             request = {
                 "requirement": context, "obligations": required, "step_obligations": step_obligations,
+                "backend_foundation": foundation,
+                "platform_apis": builtin_apis(schema) if foundation.get("enabled") else {},
                 "related_schema": related_schema,
                 "shared_conventions": select_conventions(conventions, fields=related, requirements=[rid]),
                 "retrieved_apis": retrieved["apis"], "api_inventory": list(retrieved["apis"]),
@@ -177,7 +183,10 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
             def accept(response):
                 nonlocal conventions
                 updated = apply_decomposition(design, response, rid, obligations, tree=tree)
+                finalize_backend_contracts(updated,foundation)
                 check_symbols(updated["apis"].values(), schema)
+                validate_backend_contracts(updated,foundation,evidence,schema)
+                validate_process_coverage(updated,foundation,evidence)
                 revised = merge_conventions(conventions, response, rid, related)
                 selected = {aid: updated["apis"][aid] for aid in updated["requirements"][rid]}
                 definitions = {aid: {key: api[key] for key in (
@@ -190,16 +199,21 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 conventions = revised
                 return updated
 
-            updated, _ = propose_json(model, INSTRUCTIONS + "\n\n" + CONVENTION_RULES, request, accept, console,
+            updated, _ = propose_json(model, INSTRUCTIONS + "\n\n" + CONVENTION_RULES + (CONTRACT_INSTRUCTIONS if foundation.get("enabled") else ""), request, accept, console,
                 f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.leaves}}))
             design = updated
             save_json(arc_dir / "backend_apis.json", design)
+            publish_routes(arc_dir.parent,design,foundation)
             save_json(arc_dir / "shared_conventions.json", conventions)
             console.artifact("backend_apis", design, f"{label} | Accepted APIs")
+    publish_routes(arc_dir.parent,design,foundation)
     failures.finish()
     # --- Extension point 05B: API -> DB Access Primitive decomposition ---------
     # Intentionally absent: an API directly accesses the database in step 06.
     validate_design(design, obligations, tree=tree)
+    validate_backend_contracts(design,foundation,evidence,schema)
+    validate_process_coverage(design,foundation,evidence)
+    publish_routes(arc_dir.parent,design,foundation)
     save_json(arc_dir / "backend_apis.json", design)
     print(f"Backend API Primitives saved: {arc_dir / 'backend_apis.json'}", flush=True)
     return design

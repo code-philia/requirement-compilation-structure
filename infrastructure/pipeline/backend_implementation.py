@@ -6,10 +6,12 @@ from pathlib import Path
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
-from infrastructure.stages.backend.context import load_context, requirement_context, supplied_sources, related_schema
+from infrastructure.stages.backend.context import load_context, requirement_context, supplied_sources, related_schema, api_requirement_uses
 from infrastructure.utils.files import read_artifact
 from infrastructure.stages.backend.runtime import REGISTER_PATH, TEST_RUNNER_PATH, TEST_SUPPORT_PATH, prepare_runtime, test_path
 from infrastructure.stages.backend.testing import BackendChecks, require_green, test_run_status
+from infrastructure.stages.backend.contracts import CONTRACT_INSTRUCTIONS, validate_backend_contracts
+from infrastructure.stages.backend.platform_files import publish_routes, implementation_path
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.shared.project.dependencies import install_dependencies
@@ -79,7 +81,10 @@ using a relative .js ESM import. Return status/body/optional headers, not Expres
 
 Implement request validation, API preconditions, success/rejection responses and DB
 effects according to the contract and scenarios. Use the supplied connection, parameterized
-better-sqlite3 SQL, and transactions for related writes. Respect schema-generated integer
+better-sqlite3 SQL. When task.backend_foundation.enabled is true, the compiler owns the
+transaction and API registry: implement the handle at task.implementation_path only and
+never edit wiring or begin/commit/rollback a transaction. Otherwise use transactions for
+related writes and wire the route as described below. Respect schema-generated integer
 keys and use node:crypto for UUIDs or hashing when the schema/contract requires them.
 Use the supplied test utilities and generated tests to understand existing fixture data
 conventions. Preserve compatibility when reading those records. Production storage must
@@ -91,7 +96,7 @@ Use installed dependencies and Node standard modules. Implement the operation di
 no DB-access primitive layer is generated. The compiler owns the HTTP test runner and fixture.
 Predefined credentials in seeds/*.sql use seed_password_hash; its scrypt encoding is
 defined in backend/src/db/seed.ts and must remain readable by credential handlers.
-Read and edit task.api_wiring.registry to import this handle and register its actual
+Only when task.backend_foundation.enabled is false, read and edit task.api_wiring.registry to import this handle and register its actual
 Express route, adapting params/query/body/headers and status/body/headers between HTTP
 and the handler contract. Inspect app/server wiring when needed. The compiler will not
 regenerate these files. Preserve all existing routes and middleware; insert/update this
@@ -125,6 +130,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
     for name in schema["entities"]:
         if not (output / f"backend/src/db/tables/{name}.sql").is_file():
             raise ValueError(f"Missing implemented SQL for {name}; run step 04")
+    foundation = getattr(tree,"backend_foundation",{"enabled":False})
+    validate_backend_contracts(contracts,foundation,getattr(tree,"backend_evidence",{}),schema)
+    publish_routes(output,contracts,foundation)
+    builtin_ids = {aid for aid,api in contracts["apis"].items() if api.get("platform_builtin")}
     prepare_runtime(output)
     console = DemoConsole(pause)
     console.show("TDD preparation | Install dependencies", f"Workspace: {output}\nCommand: npm install --include=dev --no-audit --no-fund")
@@ -152,7 +161,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         accepted, attempted = [], set()
         for requirement_number, rid in enumerate(tree.leaves, 1):
             ids = contracts["requirements"].get(rid, [])
-            pending = [aid for aid in ids if aid not in attempted]
+            pending = [aid for aid in ids if aid not in attempted and aid not in builtin_ids]
             requirement_label = f"Requirement {requirement_number}/{len(tree.leaves)} {rid}"
             console.show(f"{requirement_label} | Begin requirement TDD", json.dumps(requirement_context(tree, rid), ensure_ascii=False, indent=2))
             report["requirements"][rid] = {"status": "RUNNING", "apis": ids}
@@ -202,10 +211,11 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "db_schema": related_schema(schema, [api]), "test_path": relative,
                         "max_tests": max_tests,
                         "support_module": TEST_SUPPORT_PATH,
+                        "api_uses": api_requirement_uses(tree,contracts["requirements"],aid),
                     }
                     workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend",
                         files=[relative, *supplied_sources(output, api, schema)], writable=[relative])
-                    agent = run_file_agent(model, TEST_INSTRUCTIONS, context, workspace,
+                    agent = run_file_agent(model, TEST_INSTRUCTIONS + (PLATFORM_TEST_INSTRUCTIONS if foundation.get("enabled") else ""), context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation")
                     for owner in api_owners:
                         report["tests"].setdefault(owner, {})[aid] = targets[aid]
@@ -238,12 +248,15 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     context = {
                         "api_id": aid, "api": api, "db_schema": related_schema(schema, [api]),
                         "requirement": requirement_context(tree, rid),
+                        "api_uses": api_requirement_uses(tree,contracts["requirements"],aid),
+                        "implementation_path": implementation_path(aid) if foundation.get("enabled") else None,
+                        "backend_foundation": foundation,
                         "api_wiring": {"registry": REGISTER_PATH, "app": "backend/src/app.ts",
                             "server": "backend/src/server.ts"},
                     }
                     workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend",
-                        files=[REGISTER_PATH, *files_by_api[aid], *supplied_sources(output, api, schema)])
-                    agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, context, workspace,
+                        files=[REGISTER_PATH, *([implementation_path(aid)] if foundation.get("enabled") else []), *files_by_api[aid], *supplied_sources(output, api, schema)])
+                    agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS + (PLATFORM_IMPLEMENT_INSTRUCTIONS if foundation.get("enabled") else ""), context, workspace,
                         implementation_gate, max_turns, console, aid + " / Implementation", feedback=current)
                     accepted.append(aid)
                     result = agent["checks"]["tests"]
@@ -253,7 +266,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     console.show(f"{aid} | GREEN: contract and regression tests pass", result["output"])
                     entry["status"] = "GREEN"
                 save_json(arc_dir / "backend_tdd.json", report)
-            report["requirements"][rid]["status"] = "GREEN" if all(aid in accepted for aid in ids) else "FAILED"
+            report["requirements"][rid]["status"] = "GREEN" if all(aid in accepted or aid in builtin_ids for aid in ids) else "FAILED"
             save_json(arc_dir / "backend_tdd.json", report)
             console.show(f"{requirement_label} | " + report["requirements"][rid]["status"], "Proceed to the next requirement; failed APIs remain recorded.")
         all_files = [targets[aid] for aid in accepted]
@@ -276,3 +289,34 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                 requirement["status"] = "FAILED"
         save_json(arc_dir / "backend_tdd.json", report)
         raise
+
+
+PLATFORM_TEST_INSTRUCTIONS = """
+The fixed auth endpoints and guarded API registry are compiler infrastructure, not stubs
+for the model to replace. Obtain a real login cookie and csrfToken from POST /api/auth/login;
+send Cookie and X-CSRF-Token on mutations. Workflow requests also need Idempotency-Key.
+Use the supplied platform runtime/types/settings as the exact helper contract.
+Cover source-required role denials, cross-unit IDs, list/count/export isolation, related
+foreign-ID isolation and denied features. For transitions cover allowed/invalid states,
+failed guards with unchanged state/effects/audit, replay with unchanged inventory, changed
+payload with reused key, and compensated effects when required. Scope this to the API's
+source evidence, not a universal fixed warehouse scenario. Use persistent role/ownership
+rows in isolated Given fixtures; never manufacture trusted headers or bypass real auth.
+"""
+PLATFORM_IMPLEMENT_INSTRUCTIONS = CONTRACT_INSTRUCTIONS + """
+Implement only the current API's handle export at task.implementation_path; keep the
+existing ApiRequest/ApiHandler signature. The compiler owns register.ts, app.ts, platform
+settings/auth/authorization/workflow/transaction code. Do not modify or bypass them.
+Use request.access.principal for trusted subject/unit/roles. For scoped SQL:
+const scope = request.access.scope('actual-resource', 'read', 'alias.id');
+const rows = connection.prepare(`SELECT ... FROM ... alias WHERE ${scope.sql}`).all(...scope.params);
+Apply scope in every contributing count/aggregate/join and supporting lookup as needed.
+Side-effect resource writes are constrained by declared API fields and ownership; use
+request.access.register for created resource IDs when needed. Never start/commit/rollback
+transactions or write canonical machine state. The gateway performs state transition,
+compares the old state, writes audit/receipt and commits only on a successful response.
+Implement all bound business guards and effects inside the provided transaction. Read-only
+business state is not a substitute for applying stock/financial effects or reversals.
+Compiler infrastructure bootstrap rows and auth endpoints already exist. Preserve all
+unrelated source functionality and earlier API behavior while extending ordinary handlers.
+"""
