@@ -78,11 +78,12 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     raise FileToolError("QUERY_DISABLED", "Implementation tasks do not query designs. Use the supplied requirement/design and read_file within scope.")
                 elif "tool_calls" in response and files.effect(response["tool_calls"]) == "read":
                     calls = response["tool_calls"]
-                    console.show(label + " | Read files", str([call.get("path") for call in calls]))
+                    console.show(label + " | Read/discover files", str([
+                        {"tool":call["tool"],"target":call.get("path",call.get("glob","**/*"))} for call in calls]))
                     results = files.execute(calls)
                     observation = {"tool_results": results}
                     for item in results:
-                        if "error" in item:
+                        if "error" in item or item.get("tool") != "read_file":
                             continue
                         record = item["result"]
                         if record.get("cached"):
@@ -94,7 +95,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         excerpts.append(record)
                     context_result = {
                         "phase": "context_read", "acceptance_ran": False,
-                        "read_paths": [item["result"]["path"] for item in results if "result" in item],
+                        "read_paths": [item["result"]["path"] for item in results if "result" in item and item.get("tool")=="read_file"],
+                        "tool_results": [item for item in results if item.get("tool") != "read_file"],
                         "errors": [item["error"] for item in results if "error" in item],
                         "references": [item["result"] for item in results if item.get("result", {}).get("cached")],
                     }

@@ -9,6 +9,7 @@ import re
 
 from infrastructure.shared.project.initialize import enable_import_case_checks
 from infrastructure.utils.files import save_text
+from infrastructure.stages.frontend.arco import configure_arco
 
 PLAYWRIGHT_VERSION = "1.64.1"
 APPLICATION_ENTRYPOINTS = ("frontend/src/main.tsx", "frontend/src/App.tsx")
@@ -81,8 +82,10 @@ def configure_tailwind(output: Path) -> None:
         'main { max-width: 48rem; margin: 5rem auto; padding: 2rem; background: white; border-radius: 1rem; }\n')
     if styles.startswith(legacy):
         styles = styles[len(legacy):]
-    if not re.search(r'@import\s+[\'"]tailwindcss[\'"]', styles):
-        styles = '@import "tailwindcss";\n' + styles
+    # Arco owns control styling; omit Tailwind preflight to avoid resetting its buttons/forms.
+    styles = re.sub(r'(?m)^[ \t]*@import\s+[\'"]tailwindcss[\'"]\s*;[ \t]*(?:\r?\n)?', '', styles)
+    if 'tailwindcss/theme.css' not in styles:
+        styles = '@layer theme, base, components, utilities;\n@import "tailwindcss/theme.css" layer(theme);\n@import "tailwindcss/utilities.css" layer(utilities);\n' + styles
     save_text(package_path, json.dumps(package, indent=2) + "\n")
     save_text(configuration, source)
     save_text(stylesheet, styles)
@@ -93,6 +96,7 @@ def prepare_frontend(output: Path) -> None:
     for relative in ("package.json", "frontend/package.json", "frontend/src/main.tsx", "frontend/tsconfig.json", "frontend/vite.config.ts"):
         if not (output / relative).is_file():
             raise ValueError(f"Missing {relative}; run main.py --stage 00 first")
+    configure_arco(output)
     configure_tailwind(output)
     enable_import_case_checks(output, "frontend")
     path = output / "package.json"

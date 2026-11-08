@@ -5,11 +5,13 @@ import json
 
 EXAMPLE = {
     "elements": {
-        "UI-home": {"type": "page", "parent": None, "mode": [], "data": [], "prop": {}},
+        "UI-home": {"type": "page", "component": {"library": "html", "name": "main", "reason": "Page landmark"}, "parent": None, "mode": [], "data": [], "prop": {}},
         "UI-search": {"type": "input", "parent": "UI-home", "mode": ["user_write"],
+            "component": {"library": "arco", "name": "Input.Search"},
             "data": [{"var": "search.query", "dtype": "string", "constraints": []}],
             "prop": {"label": "Search"}},
         "UI-results": {"type": "list", "parent": "UI-home", "mode": ["user_read"],
+            "component": {"library": "arco", "name": "List"},
             "data": [{"var": "search.results", "dtype": "array",
                 "constraints": ["Entries contain id and title strings and match the submitted query"]}], "prop": {}},
     },

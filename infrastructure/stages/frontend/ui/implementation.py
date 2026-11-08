@@ -17,6 +17,8 @@ from infrastructure.stages.frontend.ui.testing import FrontendChecks, existence_
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import read_artifact, save_json, save_text
 from infrastructure.shared.project.git import checkpoint
+from infrastructure.stages.frontend.arco import IMPLEMENT_INSTRUCTIONS as ARCO_IMPLEMENT_INSTRUCTIONS, stack_context, REFERENCE_PATH, PROVIDER_PATH, publish_component_types
+from infrastructure.stages.frontend.arco_knowledge import retrieve_components, record_retrieval
 
 INSTRUCTIONS = """Implement the current requirement's UI on task.page.
 The supplied page is a requirement-scoped slice: owned elements plus structural ancestors,
@@ -97,6 +99,7 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
     prepare_frontend(output)
     console.show("UI TDD preparation | Dependencies", "Install workspace dependencies and Playwright Chromium. No backend is started.")
     install_dependencies(output)
+    publish_component_types(output)
     checks = FrontendChecks(output)
     checks.install_browser()
     checkpoint(output, stage="08", task="runtime", action="Prepare requirement-driven UI implementation",
@@ -159,7 +162,11 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                 else:
                     entry["status"] = "IMPLEMENTING"
                     save_json(arc_dir / "ui_checks.json", report)
+                    components = retrieve_components(requirement,page_elements(current_design,pid))
+                    record_retrieval(arc_dir,"08_implement_ui",rid+"/"+pid,components)
                     context = {
+                        "component_knowledge":components,
+                        "frontend_stack": stack_context(current_design["elements"]),
                         "requirement": {key: value for key, value in requirement.items() if key != "images"},
                         "page": page_context(current_design, pid),
                         "accepted_requirements": list(accepted),
@@ -169,10 +176,10 @@ def implement_ui(arc_dir: Path, design: dict, model, console, report: dict, max_
                         "visual_references": {iid: (images or {}).get(iid, image)
                             for iid, image in requirement.get("images", {}).items()},
                     }
-                    workspace = FileTools(output, ["frontend"], requirements=[rid], stage="ui",
-                        files=["frontend/src/ui-runtime.ts", *files, "frontend/package.json",
+                    workspace = FileTools(output, ["frontend"], requirements=[rid], stage="ui", discovery=True,
+                        files=[REFERENCE_PATH, PROVIDER_PATH, "frontend/src/ui-runtime.ts", *files, "frontend/package.json",
                             "frontend/tsconfig.json", "frontend/playwright.ui.config.ts", *APPLICATION_ENTRYPOINTS])
-                    agent = run_file_agent(model, INSTRUCTIONS, context, workspace, implementation_gate,
+                    agent = run_file_agent(model, INSTRUCTIONS + ARCO_IMPLEMENT_INSTRUCTIONS, context, workspace, implementation_gate,
                         max_turns, console, label + " / " + pid + " / Implementation", feedback=current)
                 entry["page_results"][pid] = {
                     "status": "GREEN", "turns": agent["turns"],

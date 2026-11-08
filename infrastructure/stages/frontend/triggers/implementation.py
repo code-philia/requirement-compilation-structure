@@ -24,6 +24,8 @@ from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
 from infrastructure.shared.project.git import checkpoint
+from infrastructure.stages.frontend.arco import IMPLEMENT_INSTRUCTIONS as ARCO_IMPLEMENT_INSTRUCTIONS, ACCEPTANCE_INSTRUCTIONS, stack_context, REFERENCE_PATH, PROVIDER_PATH, publish_component_types
+from infrastructure.stages.frontend.arco_knowledge import retrieve_components, record_retrieval
 
 
 def scenario_context(ui, design, rid):
@@ -170,6 +172,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     prepare_e2e(output, backend)
     console.show("E2E preparation | Dependencies", "Install workspace dependencies and Chromium. Each browser run owns a new real test database; production data is not used.")
     install_dependencies(output)
+    publish_component_types(output)
     checks = E2EChecks(output)
     checks.install_browser()
     checkpoint(output, stage="10", task="runtime", action="Prepare real-app browser tests and isolated database fixtures",
@@ -199,8 +202,10 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         try:
             baseline = baseline_gate()
         except (ValueError, RuntimeError) as error:
-            workspace = FileTools(output, ["frontend", "backend"], requirements=tree.leaves,
-                stage="frontend", files=[*APPLICATION_ENTRYPOINTS, "frontend/src/ui-runtime.ts"],
+            components = retrieve_components({"name":"Frontend baseline repair","description":str(error)})
+            record_retrieval(arc_dir,"10_implement_frontend_tdd","baseline",components)
+            workspace = FileTools(output, ["frontend", "backend"], requirements=tree.leaves, discovery=True,
+                stage="frontend", files=[REFERENCE_PATH, PROVIDER_PATH, *APPLICATION_ENTRYPOINTS, "frontend/src/ui-runtime.ts"],
                 allow_write=lambda path: editable_runtime_path(output, path))
             repair = run_file_agent(model,
                 "Restore the existing application's compilation and display behavior before business work. "
@@ -208,9 +213,10 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 "do not recreate a compiler-owned dispatcher, global input capture or design interpreter. "
                 "Preserve earlier pages, selectors and behavior. This is a shared baseline repair, not "
                 "implementation of all future triggers. Use the supplied requirement/design evidence. "
-                "Shared presentation/test infrastructure is read-only. Repair the actual application.",
+                "Shared presentation/test infrastructure is read-only. Repair the actual application." + ARCO_IMPLEMENT_INSTRUCTIONS,
                 {"task": "application_baseline", "application_entrypoints": list(APPLICATION_ENTRYPOINTS),
-                    "requirements": contexts, "ui_design": ui},
+                    "requirements": contexts, "ui_design": ui, "frontend_stack": stack_context(ui["elements"]),
+                    "component_knowledge":components},
                 workspace, baseline_gate, max_turns, console, "Application baseline repair",
                 feedback=getattr(error, "feedback", {"error": str(error)}),
                 feedback_filter=None)
@@ -264,7 +270,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 return {"typecheck": compiled, "behavior": behavior, "status": test_run_status(behavior)}
 
             test_context = {**model_context(context), "schema": related_schema(schema, context["backend_apis"].values()), "test_path": relative}
-            test_workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend",
+            test_workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True,
                 writable=[relative], files=[relative, "frontend/src/ui-runtime.ts", CONFIG, FIXTURE, "backend/tests/support/context.ts",
                     *APPLICATION_ENTRYPOINTS,
                     "frontend/package.json", "frontend/tsconfig.json", "frontend/vite.config.ts",
@@ -280,12 +286,12 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 except (ValueError, RuntimeError) as error:
                     generation_feedback = getattr(error, "feedback", {"error": str(error)})
             if agent is None:
-                agent = run_file_agent(model, TEST_INSTRUCTIONS, test_context,
+                agent = run_file_agent(model, TEST_INSTRUCTIONS + ACCEPTANCE_INSTRUCTIONS, test_context,
                     test_workspace, test_gate, max_turns, console, label + " / Test Generation",
                     feedback=generation_feedback)
             report["requirements"][rid]["test_turns"] = agent["turns"]
             if agent["checks"]["status"] != "GREEN":
-                review = run_file_agent(model, REVIEW_INSTRUCTIONS, test_context,
+                review = run_file_agent(model, REVIEW_INSTRUCTIONS + ACCEPTANCE_INSTRUCTIONS, test_context,
                     test_workspace, test_gate, max_turns, console, label + " / Test Review",
                     feedback=agent["checks"]["behavior"])
                 report["requirements"][rid]["review_turns"] = review["turns"]
@@ -339,12 +345,17 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             checkpoint(output, stage="10", task=rid, action="Publish requirement acceptance tests before implementation",
                 status=generated["status"], details={"test_path": relative, "checks": generated})
             report["requirements"][rid]["status"] = "IMPLEMENTING"
+            selected_elements = {uid:node for page in pages.values() for uid,node in page["elements"].items()}
+            components = retrieve_components(contexts[rid],selected_elements)
+            record_retrieval(arc_dir,"10_implement_frontend_tdd",rid,components)
             task = {**model_context(context),
+                "component_knowledge":components,
+                "frontend_stack": stack_context(ui["elements"]),
                 "application_entrypoints": list(APPLICATION_ENTRYPOINTS),
                 "backend_entrypoints": {"registry": "backend/src/api/register.ts",
                     "app": "backend/src/app.ts", "server": "backend/src/server.ts"}}
-            workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend",
-                files=[relative, *ui_files, "backend/tests/support/context.ts", "frontend/src/ui-runtime.ts",
+            workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True,
+                files=[REFERENCE_PATH, PROVIDER_PATH, relative, *ui_files, "backend/tests/support/context.ts", "frontend/src/ui-runtime.ts",
                     CONFIG, *APPLICATION_ENTRYPOINTS, "frontend/src/style.css",
                     *api_test_paths(output, called), "frontend/package.json", "frontend/tsconfig.json"],
                 allow_write=lambda path: editable_runtime_path(output, path))
@@ -355,7 +366,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 except (ValueError, RuntimeError) as error:
                     current = getattr(error, "feedback", {"error": str(error)})
             if agent is None:
-                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS, task, workspace,
+                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS + ARCO_IMPLEMENT_INSTRUCTIONS, task, workspace,
                     implementation_gate, max_turns, console, label + " / Interaction Implementation",
                     feedback=current)
             accepted.append(rid)

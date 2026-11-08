@@ -15,7 +15,7 @@ class FileTools:
     """One scoped read/write workspace with automatic requirement-file associations."""
 
     def __init__(self, output, scope, *, requirements=(), stage, files=(), writable=None,
-            readable=None, allow_write=None):
+            readable=None, allow_write=None, discovery=False):
         self.output = Path(output).resolve()
         self.scope = tuple(scope)
         if not self.scope:
@@ -25,6 +25,9 @@ class FileTools:
                 raise ValueError(f"Invalid project scope: {directory}")
         self.requirements = list(dict.fromkeys(requirements))
         self.stage = stage
+        self.discovery = discovery
+        self.tool_registry = {name:entry for name,entry in TOOL_REGISTRY.items()
+            if discovery or name not in {"list_files","search_files"}}
         self.related_files = set(files) | related_files(self.output, self.requirements)
         self.files = self.related_files | project_files(self.output, self.scope)
         self.writable = set(writable) if writable is not None else None
@@ -62,7 +65,11 @@ class FileTools:
         return editable_application_path(self.output, path)
 
     def scope_state(self):
-        return {"directories": list(self.scope), "existing_files": sorted(self.available_paths),
+        paths = sorted(path for path in self.available_paths if not self.discovery or not path.startswith(
+            ("frontend/arco-api/","frontend/arco-components/")))
+        return {"directories": list(self.scope), "existing_files": paths,
+            "reference_files_omitted":len(self.available_paths)-len(paths),
+            "reference_discovery":"Use list_files/search_files for omitted reference paths" if self.discovery else None,
             "writable_files": sorted(self.writable) if self.writable is not None else "application sources inside scope",
             "requirement_ids": self.requirements,
             "readable_files": sorted(self.readable) if self.readable is not None else "scope and related reference files",
@@ -83,7 +90,7 @@ class FileTools:
         return records
 
     def schemas(self):
-        return deepcopy([item[1] for item in TOOL_REGISTRY.values()])
+        return deepcopy([item[1] for item in self.tool_registry.values()])
 
     def effect(self, calls):
         """Classify a batch before execution; read arguments are validated per item."""
@@ -94,16 +101,16 @@ class FileTools:
             if not isinstance(call, dict) or not isinstance(call.get("tool"), str):
                 raise FileToolError("INVALID_CALL", "Each tool_calls item must be an object with a tool name", call_index=number)
             name = call["tool"]
-            if name not in TOOL_REGISTRY:
+            if name not in self.tool_registry:
                 raise FileToolError("UNKNOWN_TOOL", f"Unknown tool {name!r}",
-                    call_index=number, available_tools=list(TOOL_REGISTRY))
-            effects.add(TOOL_REGISTRY[name][2])
+                    call_index=number, available_tools=list(self.tool_registry))
+            effects.add(self.tool_registry[name][2])
         if len(effects) > 1:
             raise FileToolError("MIXED_TOOL_BATCH", "Separate read calls from edit calls; inspect reads before editing")
         return next(iter(effects), "write")
 
     def validate_call(self, call, number):
-        schema = TOOL_REGISTRY[call["tool"]][1]
+        schema = self.tool_registry[call["tool"]][1]
         parameters = schema["parameters"]
         missing = [key for key in parameters["required"] if key not in call]
         unexpected = sorted(set(call) - set(parameters["properties"]))
@@ -136,7 +143,7 @@ class FileTools:
         try:
             for number, call in enumerate(calls, 1):
                 name = call["tool"]
-                function, schema, _effect = TOOL_REGISTRY[name]
+                function, schema, _effect = self.tool_registry[name]
                 parameters = {key: value for key, value in call.items() if key != "tool"}
                 try:
                     self.validate_call(call, number)

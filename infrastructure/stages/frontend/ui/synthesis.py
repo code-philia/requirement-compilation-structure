@@ -12,7 +12,8 @@ from infrastructure.shared.rag.pages import PageRetriever
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
-from infrastructure.shared.agent.discovery import ContextIndex
+from infrastructure.stages.frontend.arco_knowledge import ComponentContextIndex, retrieve_components, record_retrieval, publish_knowledge
+from infrastructure.stages.frontend.arco import DESIGN_INSTRUCTIONS, validate_components, stack_context
 
 
 def bind_requirement_image_pages(design, requirement, rid):
@@ -50,6 +51,9 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
     response-consumption errors back for repair. Save accepted ui_design.json
     updates; implementation and browser tests belong to step 08."""
     design, retriever = empty_design(), PageRetriever()
+    design["frontend_stack"] = stack_context()
+    publish_knowledge(arc_dir.parent)
+    save_json(arc_dir / "frontend_stack.json", design["frontend_stack"])
     for rid in tree.requirements:
         if tree.children[rid]:
             design["requirements"][rid] = []
@@ -66,7 +70,12 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
             console.show(label + " | 2. All Existing Pages", json.dumps(design["pages"], ensure_ascii=False, indent=2))
             retrieved = retriever.retrieve(requirement, design, top_k)
             console.show(label + " | 3. Retrieved page subtrees (RAG)", json.dumps(retrieved, ensure_ascii=False, indent=2))
+            reuse_elements = {uid:node for page in retrieved["pages"].values() for uid,node in page["elements"].items()}
+            components = retrieve_components(requirement,reuse_elements)
+            record_retrieval(arc_dir,"07_design_ui",rid,components)
             request = {
+                "component_knowledge":components,
+                "frontend_stack": stack_context(),
                 "requirement": requirement, "retrieved_pages": retrieved["pages"],
                 "all_pages": {pid: {key: page[key] for key in ("name", "route", "root", "images")}
                     for pid, page in design["pages"].items() if pid in retrieved["pages"]},
@@ -74,6 +83,7 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
             def accept(proposal):
                 try:
                     updated = apply_proposal(design, proposal, rid, tree)
+                    validate_components(proposal["elements"])
                 except (KeyError, TypeError, AttributeError) as error:
                     raise UIResponseError(error, proposal) from error
                 bind_requirement_image_pages(updated, requirement, rid)
@@ -81,8 +91,8 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
                     console.show(label + f" | Page context {pid}", json.dumps(page_context(updated, pid), ensure_ascii=False, indent=2))
                 return updated
 
-            updated, proposal = propose_json(model, INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS,
-                request, accept, console, label, max_attempts, context_index=ContextIndex(lambda: {"page": design["pages"], "ui_element": design["elements"], "ui_data": data_symbols(design["elements"])}))
+            updated, proposal = propose_json(model, INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS + DESIGN_INSTRUCTIONS,
+                request, accept, console, label, max_attempts, context_index=ComponentContextIndex(lambda: {"page": design["pages"], "ui_element": design["elements"], "ui_data": data_symbols(design["elements"])},arc_dir,"07_design_ui",rid))
             console.show(label + " | 4. Incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
             design = updated
             save_json(arc_dir / "ui_design.json", design)

@@ -15,6 +15,7 @@ Complete response example; substitute supplied IDs and behavior:
     "TR-save": {
       "source": "UI-form",
       "event": "submit",
+      "binding": {"component":"Form","callback":"onSubmit","arguments":["values"]},
       "guard": null,
       "read": [
         "form.text"

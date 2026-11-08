@@ -3,6 +3,7 @@
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.requirements.images import build_image_catalog
 from infrastructure.utils.files import read_artifact
+from infrastructure.stages.frontend.arco import stack_context
 
 
 def load_ui_design(arc_dir, tree):
@@ -38,6 +39,7 @@ def load_ui_context(arc_dir, input_dir):
     for rid in tree.leaves:
         refs = catalog["requirements"].get(rid, [])
         contexts[rid] = {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
+            "frontend_stack": stack_context(),
             "images": {key: images[key] for key in refs},
             "backend_foundation": getattr(tree,"backend_foundation",{"enabled":False}),
             "platform_http": {"login":"POST /api/auth/login", "me":"GET /api/auth/me", "logout":"POST /api/auth/logout",
