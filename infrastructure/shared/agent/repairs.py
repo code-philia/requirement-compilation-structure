@@ -7,8 +7,8 @@ from infrastructure.utils.files import save_json
 
 TARGETS = {
     "schema": "02_design_backend_foundation", "backend_foundation": "02_design_backend_foundation",
-    "obligations": "05_design_backend_joint", "backend_api": "05_design_backend_joint",
-    "ui_design": "07_design_frontend_joint", "triggers": "07_design_frontend_joint",
+    "obligations": "06_implement_backend_tdd", "backend_api": "06_implement_backend_tdd",
+    "ui_design": "07_design_frontend_joint", "triggers": "10_implement_frontend_joint",
     "acceptance": "10_implement_frontend_joint", "validation_data": "04_implement_db",
     "input_evidence": "01_explore_requirement", "compiler_runtime": "compiler_maintenance",
 }

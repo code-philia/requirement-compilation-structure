@@ -32,6 +32,11 @@ from infrastructure.stages.frontend.arco_knowledge import retrieve_components, r
 
 def scenario_context(ui, design, rid):
     """Reference this requirement's triggers and directly involved pages only."""
+    if ui.get("outline"):
+        return {"outline": True, "page_subtrees": {
+            pid: {"id": pid, **ui["pages"][pid], "elements": {}}
+            for pid in ui["requirements"].get(rid, [])}, "triggers": {},
+            "implementation_notes": ui["notes"].get(rid, "")}
     triggers = {tid: design["triggers"][tid] for tid in design["requirements"].get(rid, [])}
     elements = set(ui["requirements"].get(rid, []))
     for trigger in triggers.values():
@@ -168,6 +173,33 @@ If a necessary correction is outside tool scope, explain the exact blocker in di
 """
 
 
+def outline_implementation_rules():
+    """Native implementation instructions without a required UI/trigger design DSL."""
+    rules = IMPLEMENT_INSTRUCTIONS
+    start = rules.index("Step 09's triggers")
+    end = rules.index("Read the actual entrypoints", start)
+    rules = rules[:start] + "The page outline describes scope and suggested locations, not a component tree or fixed file layout.\n" + rules[end:]
+    start = rules.index("Only task.target_trigger_ids")
+    end = rules.index("Use task.application_entrypoints", start)
+    rules = rules[:start] + """Implement the current original requirement, all its scenarios and the necessary
+entry/loading/navigation behavior. Choose the Arco components, layout, forms, modal and
+page states, callbacks, hooks and file organization directly while writing real code.
+Use page purposes/routes and implementation hints to locate existing owners, not to force
+a new file per page. Reuse shared shell, session state and API clients; preserve prior pages.
+Source UI evidence (pages/states/recipes/images) guides presentation and explicit naming.
+Cover loading, empty, error, denied and workflow states required by the source. Do not
+publish component/trigger JSON, invent a design interpreter or add display-only fixture
+branches. All normal UI state and rows come from real APIs. Acceptance uses original
+scenarios and visible behavior, not a generated component-tree schema.
+If an outline misses a source-required control or supporting page, implement it and
+explain the source evidence in diagnosis. Missing backend capability requires a concrete
+upstream revision; do not fake it in browser state. Keep scope to this requirement and
+its necessary dependencies, preserving accepted behaviors.
+
+""" + rules[end:]
+    return rules
+
+
 def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts,
         model, console, report, max_turns=10, *, joint_ui=False):
     """Implement design one requirement at a time through real-app E2E TDD.
@@ -250,15 +282,19 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             continue
         targets = tids
         relative = test_path(rid)
-        if joint_ui:
+        if joint_ui and not ui.get("outline"):
             cumulative = requirement_ui(ui, [*accepted, rid])
             context["page_subtrees"] = {pid: page_context(cumulative, pid) for pid in pages if pid in cumulative["pages"]}
             for pid in cumulative["pages"]:
                 save_text(output / ui_test_path(pid), existence_suite(cumulative, pid))
             ui_files = [ui_test_path(pid) for pid in cumulative["pages"]]
         else:
-            ui_files = [ui_test_path(pid) for pid in pages if (output / ui_test_path(pid)).is_file()]
+            ui_files = [] if ui.get("outline") else [ui_test_path(pid) for pid in pages if (output / ui_test_path(pid)).is_file()]
         called = {aid for trigger in context["triggers"].values() for aid in api_ids(trigger)}
+        if ui.get("outline"):
+            called.update(aid for page in pages.values() for aid in page.get("api_ids", []))
+            called.update(backend["requirements"].get(rid, []))
+            called.update(aid for aid, api in backend["apis"].items() if api.get("platform_builtin"))
         context["obligations"] = {tid: trigger_obligations(trigger, backend) for tid, trigger in context["triggers"].items()}
         context.update({"requirement": contexts[rid],
             "target_trigger_ids": sorted(targets),
@@ -301,6 +337,12 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     *[f"backend/src/db/tables/{name}.sql" for name in related_schema(schema, context["backend_apis"].values())],
                     *[f"backend/src/db/seeds/{name}.sql" for name in related_schema(schema, context["backend_apis"].values())
                         if (output / f"backend/src/db/seeds/{name}.sql").is_file()]])
+            source_ui_rules = ("\nThe page outline is intentionally approximate. Derive visible controls, required names, "
+                "routes and explicit empty/loading/error/denied states from this requirement and its UI evidence. "
+                "Test source-required forms, dialogs and interactions through real accessible controls. "
+                "Do not require a component-tree ID, Trigger DSL, presentation fixture or unrequested page details. "
+                "The entire shared-page outline may cover other requirements; assert this requirement's scenarios."
+                if ui.get("outline") else "")
             agent, generation_feedback = None, None
             if (output / relative).is_file():
                 try:
@@ -308,12 +350,12 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 except (ValueError, RuntimeError) as error:
                     generation_feedback = getattr(error, "feedback", {"error": str(error)})
             if agent is None:
-                agent = run_file_agent(model, TEST_INSTRUCTIONS + ACCEPTANCE_INSTRUCTIONS, test_context,
+                agent = run_file_agent(model, TEST_INSTRUCTIONS + ACCEPTANCE_INSTRUCTIONS + source_ui_rules, test_context,
                     test_workspace, test_gate, max_turns, console, label + " / Test Generation",
                     feedback=generation_feedback)
             report["requirements"][rid]["test_turns"] = agent["turns"]
             if agent["checks"]["status"] != "GREEN":
-                review = run_file_agent(model, REVIEW_INSTRUCTIONS + ACCEPTANCE_INSTRUCTIONS, test_context,
+                review = run_file_agent(model, REVIEW_INSTRUCTIONS + ACCEPTANCE_INSTRUCTIONS + source_ui_rules, test_context,
                     test_workspace, test_gate, max_turns, console, label + " / Test Review",
                     feedback=agent["checks"]["behavior"])
                 report["requirements"][rid]["review_turns"] = review["turns"]
@@ -399,7 +441,11 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     "ancestor-shell isolation; do not seed production data from screenshots. Implement the entire "
                     "current slice, preserving previously accepted slices. Empty tables have no row actions."
                     if joint_ui else "")
-                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS + ARCO_IMPLEMENT_INSTRUCTIONS + joint_rules, task, workspace,
+                if ui.get("outline"):
+                    task["implementation_outline"] = {"pages": pages, "notes": ui["notes"].get(rid, "")}
+                    joint_rules = ""
+                rules = outline_implementation_rules() if ui.get("outline") else IMPLEMENT_INSTRUCTIONS
+                agent = run_file_agent(model, rules + ARCO_IMPLEMENT_INSTRUCTIONS + joint_rules, task, workspace,
                     implementation_gate, max_turns, console, label + " / Interaction Implementation",
                     feedback=current)
             accepted.append(rid)
@@ -422,7 +468,7 @@ def verify_frontend(arc_dir, tree, backend, ui, console, report):
     console.show("Final frontend verification", "Run requirement acceptance suites, UI regression, backend checks and builds against current sources.")
     files = [test_path(rid) for rid in tree.leaves
         if (output / test_path(rid)).is_file()]
-    ui_files = [ui_test_path(pid) for pid in ui["pages"] if (output / ui_test_path(pid)).is_file()]
+    ui_files = [] if ui.get("outline") else [ui_test_path(pid) for pid in ui["pages"] if (output / ui_test_path(pid)).is_file()]
     api_checks = BackendChecks(output)
     api_files = api_test_paths(output, backend["apis"])
     verification = final_checks(console,

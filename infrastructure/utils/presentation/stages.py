@@ -7,7 +7,7 @@ STAGES = {
     "03": "Infer database read/write obligations",
     "04": "Implement database",
     "05": "Design backend APIs including P/Q",
-    "06": "Implement backend with test-first acceptance",
+    "06": "Resolve backend contracts, implement and verify",
     "07": "Design UI and frontend data",
     "08": "Implement UI and run existence tests",
     "09": "Design frontend triggers",
@@ -18,9 +18,9 @@ STAGES = {
 def stage_label(script: str) -> str:
     """Show the pipeline stage number and its purpose."""
     joint = {
-        "05_design_backend_joint": "Design backend APIs and source obligations together",
-        "07_design_frontend_joint": "Design UI and interactions together",
-        "10_implement_frontend_joint": "Implement UI and interactions with independent acceptance",
+        "05_design_backend_joint": "Outline backend APIs and implementation locations",
+        "07_design_frontend_joint": "Outline pages and implementation locations",
+        "10_implement_frontend_joint": "Implement pages and interactions directly from source evidence",
     }
     if script in joint:
         return f"Stage {script[:2]} | {joint[script]}"

@@ -22,9 +22,9 @@ PIPELINE = (
     ("01_explore_requirement", explore_requirement, "requirements"),
     ("02_design_backend_foundation", design_backend_foundation, "backend_foundation"),
     ("04_implement_db", implement_db, "db_implementations"),
-    ("05_design_backend_joint", design_backend_joint, "backend_apis"),
+    ("05_design_backend_joint", design_backend_joint, "backend_plan"),
     ("06_implement_backend_tdd", implement_backend_tdd, "backend_checks"),
-    ("07_design_frontend_joint", design_frontend_joint, "frontend_design"),
+    ("07_design_frontend_joint", design_frontend_joint, "frontend_plan"),
     ("10_implement_frontend_joint", implement_frontend_joint, "frontend_e2e"),
 )
 STAGE_MAP = {name: (name, function, artifact) for name, function, artifact in PIPELINE}

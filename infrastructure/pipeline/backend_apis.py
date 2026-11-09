@@ -1,4 +1,4 @@
-"""Step 05: design complete APIs with interfaces, obligations and P/Q."""
+"""Outline APIs in stage 05; prepare executable contracts inside implementation."""
 
 from copy import deepcopy
 import json
@@ -39,72 +39,6 @@ Each API has these separate top-level properties:
 - postcondition: [{id, description, status}], describing observable response and DB
   outcomes, including unchanged data on rejection when required.
 
-Complete response example; substitute actual requirement evidence and names:
-{
-  "apis": {
-    "API-list-notes": {
-      "description": "List persisted notes",
-      "read": [
-        "Note.text"
-      ],
-      "write": [],
-      "signature": {
-        "name": "listNotes",
-        "method": "GET",
-        "path": "/api/notes"
-      },
-      "request": {
-        "params": {
-          "type": "object"
-        },
-        "query": {
-          "type": "object"
-        },
-        "body": {
-          "type": "object"
-        },
-        "headers": {
-          "type": "object"
-        }
-      },
-      "response": {
-        "success": {
-          "status": 200,
-          "body": {
-            "type": "object",
-            "properties": {
-              "notes": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "notes"
-            ]
-          },
-          "headers": {
-            "type": "object"
-          }
-        },
-        "errors": []
-      },
-      "precondition": [],
-      "postcondition": [
-        {
-          "id": "Q-notes",
-          "description": "Return persisted note texts without changing records",
-          "status": 200
-        }
-      ]
-    }
-  },
-  "requirement_apis": [
-    "API-list-notes"
-  ]
-}
-
 Use inline JSON Schemas for I/O, with object properties/required and array items where
 appropriate. Declare route parameters in params. Use lower-case header names and
 state any shared credential/cookie convention consistently across related APIs.
@@ -132,7 +66,7 @@ Return only API definitions and requirement associations.
 """
 
 
-def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10, *, joint_obligations=False) -> dict:
+def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10, *, joint_obligations=False, implementation_plan=None) -> dict:
     tree, schema, obligations = load_context(arc_dir, infer_obligations=joint_obligations)
     if top_k < 1:
         raise ValueError("--top-k must be positive")
@@ -155,7 +89,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
         design = existing
         save_json(arc_dir/"backend_api_resume.json",{"validated_requirements":list(existing["requirements"]),"mode":"explicit_source_reviewed_resume"})
     # --- Extension point 05A: leaf order and reusable API discovery ------------
-    failures = TaskFailures(arc_dir, "05_design_backend_apis", console)
+    failures = TaskFailures(arc_dir, "06_backend_contracts" if implementation_plan is not None else "05_design_backend_apis", console)
     save_json(arc_dir / "backend_apis.json", design)
     for number, rid in enumerate(tree.leaves, 1):
         if rid in design["requirements"]:
@@ -215,6 +149,14 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 "shared_conventions": select_conventions(conventions, fields=related, requirements=[rid]),
                 "retrieved_apis": retrieved["apis"], "api_inventory": list(retrieved["apis"]),
             }
+            if implementation_plan is not None:
+                request["implementation_outline"] = {
+                    "items": {aid: implementation_plan["items"][aid]
+                        for aid in implementation_plan["requirements"][rid]},
+                    "notes": implementation_plan["notes"][rid],
+                    "policy": "Implement this outline; only add/revise operations when source evidence requires it. "
+                              "Use minimal concrete I/O and conditions needed for executable routing and acceptance. "
+                              "Do not elaborate implementation algorithms or duplicate business prose."}
             if joint_obligations:
                 request.pop("obligations")
                 request.pop("step_obligations")
@@ -254,7 +196,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                     "Never derive obligations merely by copying your API union or omit source behavior to make coverage pass. "
                     "The following effect rules apply ONLY inside obligations, not as the root response:\n" + EFFECT_RULES)
             updated, _ = propose_json(model, INSTRUCTIONS + joint_rules + "\n\n" + CONVENTION_RULES + (CONTRACT_INSTRUCTIONS if foundation.get("enabled") else ""), request, accept, console,
-                f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.leaves}}))
+                f"Backend executable contract {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.leaves}}))
             design = updated
             save_json(arc_dir / "backend_apis.json", design)
             if joint_obligations:
@@ -278,5 +220,28 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
 
 
 def design_backend_joint(arc_dir: Path, pause: bool = False) -> dict:
-    """One model proposal per leaf for API contracts and source-based effects."""
-    return design_backend_apis(arc_dir, pause=pause, joint_obligations=True)
+    """Declare approximate APIs and source locations, without detailed contracts."""
+    from infrastructure.shared.agent.outlines import plan_requirements
+    tree, schema, _ = load_context(arc_dir, infer_obligations=True)
+    builtin = builtin_apis(schema) if tree.backend_foundation.get("enabled") else {}
+    inventory = {aid: {"purpose": api["description"],
+        "method": api["signature"]["method"], "path": api["signature"]["path"],
+        "implementation_hint": "backend/src/platform/"} for aid, api in builtin.items()}
+    return plan_requirements(arc_dir, 'backend', tree,
+        {rid: requirement_context(tree, rid) for rid in tree.leaves}, inventory=inventory, pause=pause)
+
+
+def prepare_backend_contracts(arc_dir, pause=False):
+    """Implementation owns executable contracts required by the guarded HTTP runtime."""
+    from infrastructure.shared.agent.outlines import load_outline, fingerprint
+    from infrastructure.utils.files import read_artifact
+    plan = load_outline(arc_dir, 'backend')
+    marker = arc_dir / 'backend_contract_preparation.json'
+    digest = fingerprint(plan)
+    if marker.is_file() and all((arc_dir / name).is_file() for name in ('backend_apis.json', 'db_obligations.json')):
+        previous = read_artifact(arc_dir, marker.name)
+        if previous.get('status') == 'GREEN' and previous.get('plan_sha256') == digest:
+            return
+    save_json(marker, {'status': 'RUNNING', 'plan_sha256': digest})
+    design_backend_apis(arc_dir, pause=pause, joint_obligations=True, implementation_plan=plan)
+    save_json(marker, {'status': 'GREEN', 'plan_sha256': digest})

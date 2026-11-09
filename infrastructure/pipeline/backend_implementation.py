@@ -135,6 +135,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         raise ValueError("--max-turns must be positive")
     if max_tests < 1:
         raise ValueError("--max-tests must be positive")
+    from infrastructure.pipeline.backend_apis import prepare_backend_contracts
+    prepare_backend_contracts(arc_dir, pause=pause)
+    from infrastructure.shared.agent.outlines import load_outline
+    implementation_plan = load_outline(arc_dir, "backend")
     tree, schema, obligations = load_context(arc_dir)
     contracts = read_artifact(arc_dir, "backend_apis.json")
     output = arc_dir.parent.resolve()
@@ -243,6 +247,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "max_tests": max_tests,
                         "support_module": TEST_SUPPORT_PATH,
                         "api_uses": api_requirement_uses(tree,contracts["requirements"],aid),
+                        "implementation_outline": {
+                            "items": {key: implementation_plan["items"][key]
+                                for key in implementation_plan["requirements"][rid]},
+                            "notes": implementation_plan["notes"][rid]},
                     }
                     workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend", discovery=True,
                         files=[relative, *supplied_sources(output, api, schema)], writable=[relative])
@@ -280,6 +288,10 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "api_id": aid, "api": api, "db_schema": related_schema(schema, [api]),
                         "requirement": requirement_context(tree, rid),
                         "api_uses": api_requirement_uses(tree,contracts["requirements"],aid),
+                        "implementation_outline": {
+                            "items": {key: implementation_plan["items"][key]
+                                for key in implementation_plan["requirements"][rid]},
+                            "notes": implementation_plan["notes"][rid]},
                         "implementation_path": implementation_path(aid) if foundation.get("enabled") else None,
                         "backend_foundation": foundation,
                         "api_wiring": {"registry": REGISTER_PATH, "app": "backend/src/app.ts",

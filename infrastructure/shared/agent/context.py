@@ -14,10 +14,19 @@ def related_files(output, requirements):
     for rid in requirements:
         for paths in links.get(rid, {}).values():
             result.update(paths)
+    outline_path = output / ".arc/frontend_plan.json"
+    if outline_path.is_file():
+        outline = read_artifact(output / ".arc", outline_path.name)
+        bindings = outline.get("requirements", {})
+        pages = {pid for rid in requirements for pid in bindings.get(rid, [])}
+        for rid, ids in bindings.items():
+            if pages.intersection(ids):
+                for stage in ("ui", "frontend"):
+                    result.update(links.get(rid, {}).get(stage, []))
     for filename, stages in (("ui_design.json", ("ui", "frontend")),
             ("frontend_triggers.json", ("frontend",))):
         path = output / ".arc" / filename
-        if not path.is_file():
+        if outline_path.is_file() or not path.is_file():
             continue
         design = read_artifact(output / ".arc", filename)
         bindings = design.get("requirements", {})
