@@ -1,13 +1,18 @@
 """Step 01: read the requirement tree, display every field, and analyze images."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 import json
+import os
 import re
 from pathlib import Path
+from queue import Queue
 
 import yaml
 
 from infrastructure.shared.models.vision import VisualModel
 from infrastructure.utils.presentation.console import DemoConsole
+from infrastructure.utils.presentation.events import parallel_scope
 from infrastructure.utils.files import save_json, save_text
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.requirements.images import (
@@ -286,22 +291,73 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
     save_json(arc_dir / "image_references.json", catalog)
     analysis = {}
     analysis_sources = {}
-    by_hash = {}
+    save_json(arc_dir / "visual_analysis.json", analysis)
+    save_json(arc_dir / "visual_analysis_sources.json", analysis_sources)
     hashes = {record["reference"]: record["sha256"] for record in catalog["images"].values()}
     if references:
-        model = VisualModel()
-        for reference in references:
-            print(f"Analyzing image: {reference}", flush=True)
-            digest = hashes[reference]
-            if digest not in by_hash:
-                by_hash[digest] = model.analyze(input_file(input_dir, reference))
-            analysis[reference] = by_hash[digest]
-            analysis_sources[reference] = digest
-            save_json(arc_dir / "visual_analysis.json", analysis)
-            save_json(arc_dir / "visual_analysis_sources.json", analysis_sources)
-            checkpoint(arc_dir.parent, stage="01", task=reference, action="Publish visual reference analysis",
-                details={"reference": reference, "analysis": analysis[reference]})
-            console.show(f"3. Visual analysis | {reference}", json.dumps(analysis[reference], ensure_ascii=False, indent=2))
+        # Initialize configuration on the calling thread before copying contexts.
+        first_model = VisualModel()
+        models = [first_model]
+        try:
+            try:
+                concurrency = int(os.getenv("VISUAL_CONCURRENCY", "3"))
+            except ValueError as error:
+                raise ValueError("VISUAL_CONCURRENCY must be a positive integer") from error
+            if concurrency < 1:
+                raise ValueError("VISUAL_CONCURRENCY must be a positive integer")
+            grouped = {}
+            for reference in references:
+                grouped.setdefault(hashes[reference], []).append(reference)
+            workers = min(concurrency, len(grouped))
+            # Each worker owns a client and its mutable provider compatibility state.
+            for _ in range(workers - 1):
+                models.append(VisualModel())
+            print(f"Analyzing {len(references)} image references, {len(grouped)} unique images; concurrency={workers}", flush=True)
+            clients = Queue()
+            for model in models:
+                clients.put(model)
+
+            def analyze(reference):
+                model = clients.get()
+                try:
+                    with parallel_scope():
+                        print(f"Analyzing image: {reference}", flush=True)
+                        return model.analyze(input_file(input_dir, reference))
+                finally:
+                    clients.put(model)
+
+            failures = []
+            # Only this thread publishes artifacts; workers never rewrite result files.
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="visual") as executor:
+                pending = {executor.submit(copy_context().run, analyze, refs[0]): digest
+                    for digest, refs in grouped.items()}
+                for future in as_completed(pending):
+                    digest = pending[future]
+                    try:
+                        result = future.result()
+                    except Exception as error:
+                        failures.append((grouped[digest][0], error))
+                        print(f"Image analysis failed: {grouped[digest][0]} ({type(error).__name__})", flush=True)
+                        continue
+                    for reference in grouped[digest]:
+                        analysis[reference] = result
+                        analysis_sources[reference] = digest
+                    # Stable source order regardless of completion order.
+                    analysis = {ref: analysis[ref] for ref in references if ref in analysis}
+                    analysis_sources = {ref: hashes[ref] for ref in analysis}
+                    save_json(arc_dir / "visual_analysis.json", analysis)
+                    save_json(arc_dir / "visual_analysis_sources.json", analysis_sources)
+                    checkpoint(arc_dir.parent, stage="01", task=grouped[digest][0],
+                        action="Publish visual reference analysis",
+                        details={"references": grouped[digest], "analysis": result})
+                    console.show(f"3. Visual analysis | {grouped[digest][0]}",
+                        json.dumps(result, ensure_ascii=False, indent=2))
+            if failures:
+                names = ", ".join(reference for reference, _ in failures)
+                raise RuntimeError(f"Image analysis failed for {len(failures)} unique images: {names}. Completed results were saved.") from failures[0][1]
+        finally:
+            for model in models:
+                model.client.close()
     else:
         console.show("3. Visual analysis", "No referenced images; no model call is needed.")
     save_json(arc_dir / "visual_analysis.json", analysis)

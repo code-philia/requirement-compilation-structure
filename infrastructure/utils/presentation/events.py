@@ -265,6 +265,21 @@ def task_scope(label, requirement_ids=None, result=None):
         _task.reset(token)
 
 
+@contextmanager
+def parallel_scope():
+    """Isolate worker actions and task stacks; share run totals and their lock."""
+    run = _run.get()
+    if run is None:
+        yield
+        return
+    token = _run.set({**run, "action": None, "tasks": list(run["tasks"])})
+    try:
+        yield
+    finally:
+        finish_action()
+        _run.reset(token)
+
+
 def begin_action(label):
     run = _run.get()
     if run is None:
@@ -321,24 +336,25 @@ def model_finished(call_id, model, usage, seconds, status="GREEN", error=None):
     targets.extend(task["totals"] for task in run["tasks"])
     if run["action"]:
         targets.append(run["action"]["totals"])
-    for target in targets:
-        target["calls"] += 1
-        target["model_seconds"] += seconds
-        if (
-            normalized["input_tokens"] is not None
-            and normalized["output_tokens"] is not None
-        ):
-            target["usage_calls"] += 1
-        for name in (
-            "input_tokens",
-            "cached_input_tokens",
-            "output_tokens",
-            "total_tokens",
-        ):
-            target[name] += normalized[name] or 0
-        if amount is not None:
-            target["cost_cny"] += amount
-            target["priced_calls"] += 1
+    with run["lock"]:
+        for target in targets:
+            target["calls"] += 1
+            target["model_seconds"] += seconds
+            if (
+                normalized["input_tokens"] is not None
+                and normalized["output_tokens"] is not None
+            ):
+                target["usage_calls"] += 1
+            for name in (
+                "input_tokens",
+                "cached_input_tokens",
+                "output_tokens",
+                "total_tokens",
+            ):
+                target[name] += normalized[name] or 0
+            if amount is not None:
+                target["cost_cny"] += amount
+                target["priced_calls"] += 1
     if error:
         for name in ("OPENAI_API_KEY", "VISUAL_API_KEY"):
             secret = os.getenv(name)

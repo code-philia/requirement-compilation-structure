@@ -4,7 +4,7 @@ from contextvars import ContextVar
 import os
 import shutil
 import sys
-from threading import RLock
+from threading import RLock, current_thread, main_thread
 import unicodedata
 import json
 from copy import deepcopy
@@ -104,7 +104,7 @@ class WaitingStatus:
         self.progress = None
         message = "[WAITING] Waiting for model response..."
         terminal = getattr(sys.stdout, "terminal", sys.stdout)
-        if sys.stdout.isatty():
+        if sys.stdout.isatty() and current_thread() is main_thread():
             session = session_info()
             if session:
                 with session["lock"]:

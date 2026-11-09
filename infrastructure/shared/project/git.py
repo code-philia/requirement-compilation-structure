@@ -1,5 +1,7 @@
 """Output-local Git commands and deterministic compilation checkpoints."""
 
+from functools import wraps
+from threading import RLock
 import json
 import os
 from pathlib import Path
@@ -125,6 +127,18 @@ def initialize_repository(output):
         return None
 
 
+_checkpoint_lock = RLock()
+
+
+def _serialized_checkpoint(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _checkpoint_lock:
+            return function(*args, **kwargs)
+    return wrapped
+
+
+@_serialized_checkpoint
 def checkpoint(output=None, *, stage=None, task, action, status="GREEN", details=None):
     """Record a semantic step, including no-change checks, without hiding build failures."""
     from infrastructure.utils.presentation.logging import session_info

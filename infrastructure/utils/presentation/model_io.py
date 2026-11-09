@@ -245,14 +245,15 @@ def _count_call(usage, elapsed, failed=False):
     session = session_info()
     if session is None:
         return
-    stats = session.setdefault("model_stats", {})
-    stats["calls"] = stats.get("calls", 0) + 1
-    stats["failed"] = stats.get("failed", 0) + int(failed)
-    stats["seconds"] = stats.get("seconds", 0) + elapsed
-    for key, value in _usage_counts(usage).items():
-        if value is not None:
-            stats[key] = stats.get(key, 0) + value
-            stats[key + " reports"] = stats.get(key + " reports", 0) + 1
+    with session["lock"]:
+        stats = session.setdefault("model_stats", {})
+        stats["calls"] = stats.get("calls", 0) + 1
+        stats["failed"] = stats.get("failed", 0) + int(failed)
+        stats["seconds"] = stats.get("seconds", 0) + elapsed
+        for key, value in _usage_counts(usage).items():
+            if value is not None:
+                stats[key] = stats.get(key, 0) + value
+                stats[key + " reports"] = stats.get(key + " reports", 0) + 1
 
 
 def show_call_totals():
