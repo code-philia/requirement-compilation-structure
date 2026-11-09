@@ -14,6 +14,7 @@ export interface SecurityContract {
   record_id: string | null;
   action: string | null;
   operation: "read" | "create" | "update" | "delete" | "command" | "bulk";
+  record_denial_status?: 403 | 404;
 }
 export interface ApiContract {
   security: SecurityContract;
@@ -37,6 +38,6 @@ export interface PlatformSettings {
   resources: Record<string,{key:string;references:Record<string,string>}>;
   tables: Record<string,{key:string;references:Record<string,string>}>;
   boundary: "none" | "unit" | "unit_tree";
-  features: {id:string;allowed_roles:string[];denied_usernames:string[]}[];
+  features: {id:string;allowed_roles:string[];denied_usernames:string[];requirements?:string[];reason?:string}[];
   machines: Record<string,MachineSpec>;
 }

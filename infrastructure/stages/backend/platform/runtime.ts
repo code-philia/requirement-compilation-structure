@@ -197,6 +197,7 @@ export function guardedRoute(db: Database.Database, aid: string, contract: ApiCo
         if (!feature || (!principal.admin && (feature.denied_usernames.includes(principal.username) || !feature.allowed_roles.some(role=>principal.roles.includes(role))))) throw new Failure(403,"Feature entitlement required");
       }
       const e=await enforcer(db,principal);
+      const recordDenied=(message:string)=>new Failure(contract.security.record_denial_status??403,contract.security.record_denial_status===404?"Record not found":message);
       for (const permission of contract.security.permissions) if (!await permitted(db,e,principal,permission.resource,permission.action)) throw new Failure(403,"Operation permission denied");
       db.exec("BEGIN IMMEDIATE"); begun=true;
       db.exec('CREATE TEMP TABLE IF NOT EXISTS arc_allowed(resource TEXT,action TEXT,record_id TEXT,PRIMARY KEY(resource,action,record_id)); DELETE FROM arc_allowed;');
@@ -254,8 +255,8 @@ export function guardedRoute(db: Database.Database, aid: string, contract: ApiCo
       if (recordId!==null && contract.security.resource) {
         const resource=contract.security.resource;
         const owned=ownership(db,resource,recordId);
-        if (!principal.admin && !owned) throw new Failure(403,"Record has no trusted data ownership");
-        for (const p of contract.security.permissions.filter(p=>p.resource===resource)) if (!await permitted(db,e,principal,p.resource,p.action,owned)) throw new Failure(403,"Record permission denied");
+        if (!principal.admin && !owned) throw recordDenied("Record has no trusted data ownership");
+        for (const p of contract.security.permissions.filter(p=>p.resource===resource)) if (!await permitted(db,e,principal,p.resource,p.action,owned)) throw recordDenied("Record permission denied");
         used.add(resource);
 
       }

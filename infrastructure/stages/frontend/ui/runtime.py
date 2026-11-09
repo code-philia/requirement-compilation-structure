@@ -23,15 +23,17 @@ declare global {
   }
 }
 
-export function isPresentationTest(page: string): boolean {
+export function isPresentationTest(page?: string): boolean {
   const development = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV;
-  return development && window.__ARC_UI_TEST_DATA__?.page === page;
+  const testData = development ? window.__ARC_UI_TEST_DATA__ : undefined;
+  return Boolean(testData && (page === undefined || testData.page === page));
 }
 
 export function presentationData(page: string, state: Record<string, unknown>) {
   const development = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV;
   const testData = development ? window.__ARC_UI_TEST_DATA__ : undefined;
-  if (development) window.__ARC_UI_DATA__ = { page, data: state };
+  // A shell rerender must not replace the child page selected by the display suite.
+  if (development && (!testData || testData.page === page)) window.__ARC_UI_DATA__ = { page, data: state };
   return testData?.page === page ? { ...state, ...testData.data } : state;
 }
 '''

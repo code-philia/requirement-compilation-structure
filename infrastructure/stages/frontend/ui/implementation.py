@@ -70,6 +70,12 @@ with this page ID and a projection of the actual declared frontend values when r
 It supplies display-test overrides and exposes actual data keys; it does not own your state.
 Do not copy display-test records into production initial values. If representative records
 are needed, arrange them only in the writable presence suite's __ARC_UI_TEST_DATA__ setup.
+Controls declared under a Table are repeated row controls. An empty table has no such
+controls; never add detached duplicate buttons/links to satisfy presence checks. Preserve
+the stable element data-testid within each rendered row, and carry that row's actual
+record identity in its callback/data-record-id. Scope locators to rows when selectors repeat.
+Exercise positive row controls with test-local display records or real E2E records; their
+empty-state absence is valid and must not be replaced with fabricated application rows.
 
 The compiler updates presence suites for the current and previously accepted requirements,
 then compiles, runs regression checks and builds; it never regenerates

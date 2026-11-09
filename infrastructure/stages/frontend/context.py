@@ -2,7 +2,9 @@
 
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.requirements.images import build_image_catalog
-from infrastructure.utils.files import read_artifact
+from infrastructure.utils.files import read_artifact, save_json
+from infrastructure.stages.requirements.data import load_data, data_context
+from infrastructure.stages.requirements.ui_evidence import compile_ui_evidence, ui_context
 from infrastructure.stages.frontend.arco import stack_context
 
 
@@ -15,6 +17,9 @@ def load_ui_context(arc_dir, input_dir):
     """Load image evidence and optional shared backend semantics for frontend generation."""
     raw = read_artifact(arc_dir, "requirements.json")
     tree = RequirementTree(raw)
+    tree.validation_data = load_data(arc_dir)
+    tree.ui_evidence = compile_ui_evidence(raw, input_dir)
+    save_json(arc_dir / "ui_evidence.json", tree.ui_evidence)
     if (arc_dir / "backend_evidence.json").is_file():
         tree.backend_evidence = read_artifact(arc_dir,"backend_evidence.json")
         tree.backend_foundation = read_artifact(arc_dir,"backend_foundation.json")
@@ -39,6 +44,8 @@ def load_ui_context(arc_dir, input_dir):
     for rid in tree.leaves:
         refs = catalog["requirements"].get(rid, [])
         contexts[rid] = {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
+            "validation_data": data_context(tree.validation_data,rid),
+            "ui_evidence": ui_context(tree.ui_evidence,rid),
             "frontend_stack": stack_context(),
             "images": {key: images[key] for key in refs},
             "backend_foundation": getattr(tree,"backend_foundation",{"enabled":False}),

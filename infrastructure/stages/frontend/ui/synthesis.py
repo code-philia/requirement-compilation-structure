@@ -14,6 +14,7 @@ from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.stages.frontend.arco_knowledge import ComponentContextIndex, retrieve_components, record_retrieval, record_knowledge_reference
 from infrastructure.stages.frontend.arco import DESIGN_INSTRUCTIONS, validate_components, stack_context
+from infrastructure.stages.requirements.ui_evidence import UI_EVIDENCE_INSTRUCTIONS, validate_ui_mapping
 
 
 def bind_requirement_image_pages(design, requirement, rid):
@@ -87,11 +88,12 @@ def synthesize_ui(arc_dir, tree, images, contexts, model, console, top_k=3, max_
                 except (KeyError, TypeError, AttributeError) as error:
                     raise UIResponseError(error, proposal) from error
                 bind_requirement_image_pages(updated, requirement, rid)
+                validate_ui_mapping(updated,requirement.get("ui_evidence",{}),rid)
                 for pid in proposal["pages"]:
                     console.show(label + f" | Page context {pid}", json.dumps(page_context(updated, pid), ensure_ascii=False, indent=2))
                 return updated
 
-            updated, proposal = propose_json(model, INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS + DESIGN_INSTRUCTIONS,
+            updated, proposal = propose_json(model, INSTRUCTIONS + "\n\n" + EXAMPLE_INSTRUCTIONS + DESIGN_INSTRUCTIONS + UI_EVIDENCE_INSTRUCTIONS,
                 request, accept, console, label, max_attempts, context_index=ComponentContextIndex(lambda: {"page": design["pages"], "ui_element": design["elements"], "ui_data": data_symbols(design["elements"])},arc_dir,"07_design_ui",rid))
             console.show(label + " | 4. Incremental UI/data changes", json.dumps(proposal, ensure_ascii=False, indent=2))
             design = updated

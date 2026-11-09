@@ -40,7 +40,7 @@ class E2EChecks(FrontendChecks):
                 return {"returncode": 1, "output": str(error), "errors": [str(error)],
                     "passed": 0, "failed": 0, "files": {}}
         try:
-            return parse_playwright_result(result, include_files=True)
+            return parse_playwright_result(result, include_files=True, output=self.output)
         except ValueError as error:
             # A runner/startup failure may not produce reporter JSON. Keep its logs
             # as repair evidence instead of rejecting the generated business test.

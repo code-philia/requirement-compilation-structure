@@ -2,6 +2,7 @@
 
 from .files import edit_file, read_file
 from .search import list_files, search_files
+from infrastructure.shared.agent.repairs import request_design_revision, TARGETS
 
 
 def definition(name, description, properties, required, example):
@@ -14,6 +15,13 @@ def definition(name, description, properties, required, example):
 
 STRING = {"type": "string"}
 TOOL_REGISTRY = {
+    "request_design_revision": (request_design_revision, definition("request_design_revision",
+        "Request a source-backed upstream contract/compiler correction instead of editing protected artifacts or weakening tests. Pauses this task and records impacted stages for review/recompilation.",
+        {"target":{"type":"string","enum":list(TARGETS)},"requirements":{"type":"array","items":STRING},
+            "source_refs":{"type":"array","items":STRING},"reason":STRING,"proposed_change":STRING,
+            "issue_code":{"type":"string","enum":["other","missing_scoped_read"]}},
+        ["target","requirements","source_refs","reason","proposed_change"],
+        {"tool":"request_design_revision","target":"backend_api","requirements":["REQ-example"],"source_refs":["STEP-example-01-01"],"reason":"Source requires an omitted transactional effect","proposed_change":"Add the source-required ledger write to canonical API obligations and P/Q"}), "control"),
     "list_files": (list_files, definition("list_files", "Find authorized project/reference files by POSIX glob. ** matches zero or more directories. Readonly; use next_offset to page results.",
         {"glob":STRING,"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}}, [],
         {"tool":"list_files","glob":"references/arco/api/**/Table/**/*.d.ts","limit":20}), "read"),

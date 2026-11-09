@@ -68,6 +68,8 @@ def format_obligations(records: dict, empty_label: str = "(empty)") -> str:
         lines.append(node_id)
         lines.append("  READ : " + (", ".join(record["read"]) or empty_label))
         lines.append("  WRITE: " + (", ".join(record["write"]) or empty_label))
+        if record.get("observation_read"):
+            lines.append("  OBSERVE (acceptance only): " + ", ".join(record["observation_read"]))
         lines.append("")
     return "\n".join(lines) or "(No nodes.)"
 

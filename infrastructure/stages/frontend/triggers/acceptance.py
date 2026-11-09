@@ -5,6 +5,13 @@ import yaml
 from infrastructure.stages.requirements.tree import RequirementTree
 
 INSTRUCTIONS = '''Write requirement acceptance tests for ONE original requirement before its implementation.
+source_expectations is a model-free copy of original scenarios and external data, not
+generated API/UI expectations. Cover EVERY supplied source scenario and include its
+SCN ID verbatim in an executed test title. Assert actual Then outcomes, forbidden writes,
+isolation and lifecycle values; a matching title alone is not a business assertion.
+test_accounts supplies explicit SEED fixture credentials for real browser login. Do not
+copy credentials into production UI or invent a registration workflow. CREATED data
+must be created through the scenario operation; DERIVED data must follow real processing.
 Derive expected results from requirement and its Given/When/Then scenarios.
 Read project files as needed to understand test configuration, database initialization,
 fixtures, UI locators and API wiring. Source code and existing tests describe how to run
@@ -15,6 +22,10 @@ Only test_path is writable. Reading a file does not grant permission to modify i
 Write a small Playwright suite at test_path using the supplied test/expect/database
 fixture. Drive When actions through the real browser without mocks or injected state.
 Import test and expect from frontend/tests/e2e/support/context.ts with a relative .js import.
+For required export/download interactions, click the actual control and observe the
+browser download and its contents; a direct API call plus button visibility does not
+prove the frontend interaction. Direct unauthorized requests supplement hidden-control
+checks when server enforcement is required.
 Use UI IDs or accessible locators for actions. Preserve explicitly required names, labels
 and roles; do not learn different business expectations from current application code.
 Use concrete routes and object identities; :id and {id} are route patterns, not literal URLs.
@@ -29,6 +40,13 @@ For a When action requiring one API operation, also observe its relevant method/
 reject duplicate submissions when the requirement expects one operation. Start observing
 before the action, wait for its response and business completion, and exclude unrelated
 page-entry calls or explicitly required retries. Do not count all requests globally.
+For rapid repeated activation, do not start concurrent locator.click calls on a control
+that the first successful action may disable or remove: independent auto-wait loops can
+race and time out after a correct single submission. Use locator.dblclick() so Playwright
+scrolls to the control, checks actionability once and dispatches a real double-click.
+If raw mouse coordinates are necessary, scroll the control into view before measuring
+its position; DOM visibility alone does not imply that it is inside the viewport. Observe requests and persisted outcomes to verify exactly-once effects; do not
+require a submitting button to remain enabled or visible after successful navigation.
 There is no arbitrary test-count quota: cover the few important outcomes for this task.
 
 The database fixture restores requirement-defined startup data before each test. Reuse

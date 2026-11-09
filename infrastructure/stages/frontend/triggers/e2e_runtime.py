@@ -116,8 +116,9 @@ export { expect };
 
 def prepare_e2e(output, backend):
     """Write E2E configuration, real-server launchers, isolated database fixtures, and the npm test command."""
+    # String proxy shorthand rewrites Host, breaking the platform same-origin guard.
     sources = {CONFIG: CONFIG_SOURCE, RUNNER: RUNNER_SOURCE,
-        VITE_CONFIG: 'import { defineConfig, mergeConfig } from "vite";\nimport base from "./vite.config";\nexport default mergeConfig(base, defineConfig({ server: { proxy: { "/api": process.env.ARC_BACKEND_URL! } } }));\n',
+        VITE_CONFIG: 'import { defineConfig, mergeConfig } from "vite";\nimport base from "./vite.config";\nexport default mergeConfig(base, defineConfig({ server: { proxy: { "/api": { target: process.env.ARC_BACKEND_URL!, changeOrigin: false } } } }));\n',
         FIXTURE: FIXTURE_SOURCE}
     for relative, source in sources.items():
         save_text(output / relative, source)

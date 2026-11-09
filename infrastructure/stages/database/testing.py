@@ -7,6 +7,8 @@ import subprocess
 from tempfile import TemporaryDirectory
 
 from infrastructure.utils.processes import capture_process, npm_command
+from infrastructure.stages.requirements.data import load_data, startup_assertions
+from infrastructure.stages.backend.platform_files import identity_startup_assertions
 
 
 PROBE_SOURCE = r'''
@@ -19,6 +21,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const plan = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const Database = createRequire(join(process.cwd(), "package.json"))("better-sqlite3");
 const quote = name => '"' + name.replaceAll('"', '""') + '"';
+const affinity = value => {const type=value.toUpperCase();return type.includes('INT')?'INTEGER':/CHAR|CLOB|TEXT/.test(type)?'TEXT':!type||type.includes('BLOB')?'BLOB':/REAL|FLOA|DOUB/.test(type)?'REAL':'NUMERIC';};
 let phase = "setup", server;
 const completed = [];
 function inspect(filename, marker = false) {
@@ -29,8 +32,50 @@ function inspect(filename, marker = false) {
       const columns = db.prepare(`PRAGMA table_info(${quote(table)})`).all().map(row => row.name);
       if (!columns.length) throw new Error("Missing table: " + table);
       for (const field of fields) if (!columns.includes(field)) throw new Error("Missing column: " + table + "." + field);
+      const info=db.prepare(`PRAGMA table_info(${quote(table)})`).all();
+      const unique=db.prepare(`PRAGMA index_list(${quote(table)})`).all().filter(index=>index.unique)
+        .map(index=>db.prepare(`PRAGMA index_info(${quote(index.name)})`).all().map(column=>column.name).sort().join('|'));
+      const refs=db.prepare(`PRAGMA foreign_key_list(${quote(table)})`).all();
+      const design=plan.schema[table];
+      for(const [name,field] of Object.entries(design.fields)) {
+        const actual=info.find(column=>column.name===name);
+        if(field.sqlite_type&&affinity(actual.type)!==affinity(field.sqlite_type))throw new Error(`Storage affinity mismatch: ${table}.${name}`);
+        const nonnull=Boolean(actual.notnull)||(actual.pk>0&&actual.type.toUpperCase()==='INTEGER');
+        if(!field.nullable&&!nonnull)throw new Error(`Required field allows null: ${table}.${name}`);
+        if(field.primary_key&&!actual.pk)throw new Error(`Missing primary key: ${table}.${name}`);
+        if(field.unique&&!field.primary_key&&!unique.includes(name))throw new Error(`Missing unique constraint: ${table}.${name}`);
+        if(field.references) {
+          const [target,key]=field.references.split('.');
+          const matches=refs.some(ref=>{
+            if(ref.from!==name||ref.table!==target)return false;
+            if(ref.to===key)return true;
+            if(ref.to!=null)return false;
+            const primary=db.prepare(`PRAGMA table_info(${quote(target)})`).all().filter(column=>column.pk);
+            return primary.length===1&&primary[0].name===key;
+          });
+          if(!matches)throw new Error(`Missing foreign key: ${table}.${name}`);
+        }
+      }
+      for(const group of design.unique_constraints??[])if(!unique.includes([...group].sort().join('|')))throw new Error(`Missing composite unique: ${table}.${group.join(',')}`);
     }
     if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Foreign-key validation failed");
+    for (const account of plan.identity_accounts ?? []) {
+      const user=db.prepare('SELECT id FROM users WHERE username=?').get(account.username);
+      if(!user)throw new Error('Missing source identity: '+account.username);
+      const actual=db.prepare('SELECT r.role_id AS role,u.code AS unit FROM user_ou_roles r JOIN org_units u ON u.id=r.unit_id WHERE r.user_id=?').all(user.id);
+      const canonical=roles=>roles.map(r=>r.role+'@'+r.unit).sort().join('|');
+      if(canonical(actual)!==canonical(account.roles))throw new Error('Source identity memberships changed by startup seeds: '+account.username);
+    }
+    for (const record of plan.validation_data ?? []) {
+      const entries=Object.entries(record.locator);
+      const row=db.prepare(`SELECT * FROM ${quote(record.entity)} WHERE ${entries.map(([key])=>quote(key)+'=?').join(' AND ')}`).get(...entries.map(([,value])=>value));
+      if(record.lifecycle!=="SEED") {
+        if(row)throw new Error("Non-SEED validation record was preloaded: "+record.id);
+      } else {
+        if(!row)throw new Error("Missing source SEED record: "+record.id);
+        for(const [key,value] of Object.entries(record.fields))if(row[key]!==value)throw new Error("Source SEED value mismatch: "+record.id+"."+key);
+      }
+    }
     if (marker && db.prepare('SELECT value FROM "__arc_startup_probe"').get()?.value !== "preserve")
       throw new Error("Initialization changed existing data");
   } finally { db.close(); }
@@ -130,13 +175,27 @@ class DatabaseChecks:
 
     def run(self):
         try:
+            # The implementation agent must not bypass acceptance via tsconfig.noCheck
+            # or a replacement npm build script. Run the compiler-owned check first.
+            typed = capture_process([self.node, "node_modules/typescript/bin/tsc", "--noEmit",
+                "--noCheck", "false", "--strict", "true", "-p", "backend/tsconfig.json"],
+                cwd=self.output, timeout=600)
+            if typed["returncode"]:
+                return {**typed, "phase": "backend typecheck"}
             build = capture_process([*npm_command(), "run", "build", "--workspace", "@arc/backend"],
                 cwd=self.output, timeout=600)
             if build["returncode"]:
                 return {**build, "phase": "backend build"}
             with TemporaryDirectory(prefix="arc-db-check-") as temporary:
+                arc=self.output/".arc"
+                foundation=json.loads((arc/"backend_foundation.json").read_text()) if (arc/"backend_foundation.json").is_file() else {}
+                identity=identity_startup_assertions(json.loads((arc/"requirements.json").read_text()),
+                    json.loads((arc/"backend_evidence.json").read_text())) if foundation.get("enabled") else []
                 plan = {"directory": temporary, "database": str(self.output / "backend/data/app.db"),
                     "tables": {name: list(entity["fields"]) for name, entity in self.schema["entities"].items()},
+                    "schema":self.schema["entities"],
+                    "identity_accounts":identity,
+                    "validation_data":startup_assertions(load_data(self.output/".arc")),
                     "setup": [*npm_command(), "run", "db:init", "--workspace", "@arc/backend"]}
                 runner = Path(temporary) / "check-database.mjs"
                 arguments = Path(temporary) / "plan.json"

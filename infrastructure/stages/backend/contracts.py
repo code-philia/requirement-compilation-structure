@@ -1,5 +1,14 @@
 """Validate API-level bindings to shared permission, feature and workflow contracts."""
 
+# Infrastructure effects remain observable postconditions, but handlers cannot
+# write these compiler-owned tables and do not charge their fields as domain R/W.
+PLATFORM_EFFECT_TABLES = {"workflow_audit", "command_receipts"}
+
+
+def domain_effect_fields(transition):
+    return {f for effect in transition["effects"] for f in effect["fields"]
+        if f.split('.')[0] not in PLATFORM_EFFECT_TABLES}
+
 CONTRACT_INSTRUCTIONS = '''
 SHARED BACKEND CONTRACTS
 backend_foundation is the canonical reviewed security/workflow plan, not a suggestion.
@@ -11,8 +20,14 @@ Use Express colon path parameters, e.g. /api/orders/:id/approve, and one canonic
 method/path per operation. GET requests cannot mutate persisted data.
 Use mode=policy for all business resource access, including lists, reports, exports,
 printing, imports and nested/related records. mode=session is only for authenticated
-operations with no catalog business resource. Public login/session endpoints are fixed
-at POST /api/auth/login, GET /api/auth/me, POST /api/auth/logout; do not redefine them.
+operations with no catalog business resource.
+Record ownership/scope checks run BEFORE the handler and default to HTTP 403, including
+unknown ownership metadata. For a source/contract requiring nondisclosing HTTP 404, set
+security.record_denial_status=404; missing and forbidden records then share a generic
+404 message. Only 403/404 are supported, and operation-level permission failures remain
+403. Keep precondition/error branches consistent; handlers cannot intercept these checks.
+Public login/session endpoints are fixed at POST /api/auth/login, GET /api/auth/me,
+POST /api/auth/logout; do not redefine them.
 Reuse supplied platform API IDs unchanged; they already cover their infrastructure DB effects.
 The platform provides account/password auth only, persistent opaque sessions/CSRF, admin
 full permissions, Casbin domain policies, and normalized data boundaries. Never accept
@@ -36,6 +51,10 @@ optimistic state comparison after successful effects, and commits state/effects/
 one transaction. A failed response rolls back writes. Workflow APIs require Idempotency-Key;
 replays return the original response without executing effects again. Bind every machine
 guard to a P ID and every effect to a Q ID; cover their actual fields in read/write sets.
+For compiler-owned workflow_audit/command_receipts effects, retain the Q binding and
+verify the committed platform outcome, but omit those automatic fields from handler
+write obligations. Business stock/ledger fields and explicit assignee writes remain
+domain obligations. Never write the automatic audit/receipt tables in a handler.
 Use operation=bulk for unit-wide operations such as imports or reset without a single
 record selector; declare their exact primary action and permissions. Bulk mutations also
 require Idempotency-Key. Data reset must preserve protected identity/organization data.
@@ -109,6 +128,10 @@ def validate_backend_contracts(design, foundation, evidence, schema):
             if row.get("resource") not in resources or row.get("action") not in actions:
                 raise ValueError(f"{aid}: unknown resource/action binding")
         business_tables = {s.split('.')[0] for s in api["read"] + api["write"]} & resources
+        scoped_reads = {s.split('.')[0] for s in api["read"]} & resources
+        missing_scope = scoped_reads - {p["resource"] for p in perms}
+        if missing_scope:
+            raise ValueError(f"{aid}: business reads require a declared scoped permission for each resource: {sorted(missing_scope)}. Supporting FK lookups also need a source-permitted binding; do not grant new role permissions.")
         if business_tables and (security["mode"] != "policy" or not perms):
             raise ValueError(f"{aid}: business operations require policy authorization")
         if security["mode"] == "policy" and not perms:
@@ -127,6 +150,8 @@ def validate_backend_contracts(design, foundation, evidence, schema):
         if written_business and (security["operation"]=="read" or resource is None):
             raise ValueError(f"{aid}: business writes require a primary mutation permission")
         record_id = security.get("record_id")
+        if security.get("record_denial_status",403) not in {403,404} or ("record_denial_status" in security and (resource is None or record_id is None)):
+            raise ValueError(f"{aid}: record_denial_status must be 403/404 on a record-scoped API")
         if record_id is not None and (not isinstance(record_id, str) or not __import__('re').fullmatch(r'(params|body|query)\.[A-Za-z][A-Za-z0-9_]*', record_id)):
             raise ValueError(f"{aid}: invalid record selector")
         if security["operation"] in {"update", "delete", "command"} and business_tables and (record_id is None or resource is None):
@@ -145,7 +170,7 @@ def validate_backend_contracts(design, foundation, evidence, schema):
                 bindings = workflow.get(group, {})
                 if set(bindings) != {r["id"] for r in records} or not set(bindings.values()) <= available:
                     raise ValueError(f"{aid}: every workflow {group} must bind a canonical P/Q condition")
-            effect_fields = {f for effect in transition["effects"] for f in effect["fields"]} | {f"{machine['entity']}.{machine['state_field']}"}
+            effect_fields = domain_effect_fields(transition) | {f"{machine['entity']}.{machine['state_field']}"}
             if not effect_fields <= set(api["write"]):
                 raise ValueError(f"{aid}: workflow effects are missing from API write obligations: {sorted(effect_fields-set(api['write']))}")
         bound_machines={workflow["machine"]} if workflow else set()
@@ -158,7 +183,7 @@ def validate_backend_contracts(design, foundation, evidence, schema):
                 bindings=binding.get(key,{})
                 if set(bindings)!={r["id"] for r in records} or not set(bindings.values()) <= {r["id"] for r in conditions}:
                     raise ValueError(f"{aid}: related transition needs complete P/Q bindings")
-            required={f"{machine['entity']}.{machine['state_field']}"}|{f for e in transition["effects"] for f in e["fields"]}
+            required={f"{machine['entity']}.{machine['state_field']}"}|domain_effect_fields(transition)
             if not required <= set(api["write"]):raise ValueError(f"{aid}: missing related workflow write effects")
             bound_machines.add(binding["machine"])
         for symbol in set(api["write"]) & set(state_fields):

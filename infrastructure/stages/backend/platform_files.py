@@ -11,6 +11,26 @@ from infrastructure.utils.files import save_text, save_json
 
 VERSIONS = {"casbin": "5.51.1", "xstate": "5.33.3", "decimal.js": "10.6.0"}
 PLATFORM = Path(__file__).with_name("platform")
+IDENTITY_TABLES = frozenset({"users", "roles", "org_units", "user_ou_roles", "auth_sessions", "command_receipts", "platform_meta", "workflow_audit"})
+
+
+def identity_startup_assertions(raw, evidence):
+    """Exact source memberships for compiler-bootstrapped accounts; never infer roles."""
+    catalog = evidence["authorization"]["catalog"]
+    roots = [u["id"] for u in catalog["units"] if u.get("parent") is None]
+    if len(roots) != 1:
+        raise ValueError("Identity bootstrap requires one root organizational unit")
+    accounts = [dict(row["properties"]) for row in raw.get("data", [])
+        if row.get("entity") == "test account" and row.get("lifecycle") == "SEED"]
+    if not any(row.get("username") == "admin" for row in accounts):
+        accounts.insert(0, {"username":"admin", "roles":[{"role":"admin", "unit":roots[0]}]})
+    result = []
+    for account in accounts:
+        roles = list(account.get("roles", []))
+        if account["username"] == "admin" and not any(r.get("role") == "admin" for r in roles):
+            roles.append({"role":"admin", "unit":roots[0]})
+        result.append({"username":account["username"], "roles":roles})
+    return result
 
 
 def identifier(value):

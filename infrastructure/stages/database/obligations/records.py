@@ -10,6 +10,11 @@ def normalize_record(record):
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise ValueError(f'{mode} must be an array of qualified DB field strings')
         result[mode] = sorted(set(values))
+    if 'observation_read' in record:
+        values=record['observation_read']
+        if not isinstance(values,list) or any(not isinstance(value,str) for value in values):
+            raise ValueError('observation_read must be an array of qualified DB field strings')
+        result['observation_read']=sorted(set(values))
     return result
 
 
@@ -23,6 +28,9 @@ def normalize_inference(result, step_ids):
                 raise ValueError(f'{sid} has {mode} effects outside its own requirement: {outside}. '
                     'Review the requirement and scenario together. Exclude Given setup effects; '
                     'include all real scenario effects in the requirement. Do not add fields blindly.')
+        outside = set(step.get('observation_read',[])) - set(inferred['requirement']['read']) - set(inferred['requirement'].get('observation_read',[]))
+        if outside:
+            raise ValueError(f'{sid} has acceptance observations outside its requirement: {sorted(outside)}')
     return inferred
 
 
@@ -36,4 +44,4 @@ def check_symbols(records, schema):
     from infrastructure.stages.database.schema import check_related_fields
     for record in records:
         normalized = normalize_record(record)
-        check_related_fields(schema, normalized['read'] + normalized['write'])
+        check_related_fields(schema, normalized['read'] + normalized['write'] + normalized.get('observation_read',[]))

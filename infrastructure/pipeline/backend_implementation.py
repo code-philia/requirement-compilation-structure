@@ -1,6 +1,8 @@
 """Step 06: implement backend APIs against real-server HTTP acceptance suites."""
 
 import json
+import hashlib
+import os
 from pathlib import Path
 
 from infrastructure.shared.agent.tools import FileTools
@@ -17,6 +19,7 @@ from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.shared.project.git import checkpoint
+from infrastructure.stages.requirements.acceptance import test_accounts
 
 
 TEST_INSTRUCTIONS = """Write one HTTP acceptance suite for task.api before implementing it.
@@ -55,6 +58,14 @@ fixture arguments or password encodings. Initialization loads db/seeds/ENTITY.sq
 existing prerequisites instead of assuming empty tables or duplicating identities. Arrange
 scenario-specific absence/conflicting states in this isolated database. Do not invoke
 another requirement's registration/creation API to manufacture Given data.
+Preserve validation_data's exact business literals in Given fixtures, especially status,
+category and type values also produced by other APIs. Do not translate their stored codes
+or reuse a shared seed value that conflicts with the original source. If shared startup
+data contradicts the source, request an upstream revision rather than teaching the
+implementation to accept that erroneous fixture as the only valid business value.
+Open independent_acceptance_findings are source-backed counterexamples. Include a
+regression for the reported initial state and expected effect when relevant to this API;
+do not reproduce the same fixture assumption that concealed the failure.
 
 Within max_tests cover meaningful success and critical requirement-defined rejection.
 Assert relevant persisted results/forbidden writes with SQL where needed; HTTP is the
@@ -146,6 +157,11 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         print("No Backend API Primitives require implementation; no tests or model calls were run.")
         return report
     checks = BackendChecks(output)
+    fingerprint = lambda api: hashlib.sha256(json.dumps(api,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    fingerprints = {aid:fingerprint(api) for aid,api in contracts["apis"].items()}
+    previous = read_artifact(arc_dir,"backend_tdd.json") if (arc_dir/"backend_tdd.json").is_file() else {}
+    previous_contracts = read_artifact(arc_dir,"backend_tdd_contracts.json") if (arc_dir/"backend_tdd_contracts.json").is_file() else {}
+    reusable = {aid for aid in previous.get("green",{}) if previous_contracts.get(aid)==fingerprints.get(aid)} if os.getenv("ARC_REUSE_ACCEPTED_BACKEND_IMPLEMENTATIONS")=="1" else set()
     model = TextModel() if contracts["apis"] else None
     owners = {}
     for aid in contracts["apis"]:
@@ -153,12 +169,24 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
         if ids:
             owners[aid] = ids
     targets = {aid: test_path(ids[0], aid) for aid, ids in owners.items()}
+    reusable = {aid for aid in reusable if aid in targets and (output/targets[aid]).is_file()}
+    if reusable:
+        reused_files = [targets[aid] for aid in sorted(reusable)]
+        typed = checks.typecheck(reused_files)
+        if typed["returncode"]:raise ValueError(typed["output"])
+        require_green(checks.tests(reused_files))
     report = {"status": "RUNNING", "requirements": {}, "tests": {}, "red": {}, "green": {}, "agents": {}}
+    report["green"] = {aid:previous["green"][aid] for aid in reusable}
+    report["apis"] = {aid:{"status":"GREEN","api":aid,"reused_after_real_regression":True} for aid in reusable}
+    for aid in reusable:
+        for owner in owners[aid]:
+            report["tests"].setdefault(owner,{})[aid] = targets[aid]
+    save_json(arc_dir/"backend_tdd_contracts.json",fingerprints)
     # Publish a current status before work; an old GREEN is never reused as proof.
     save_json(arc_dir / "backend_tdd.json", report)
     try:
         files_by_api = {aid: [relative] for aid, relative in targets.items()}
-        accepted, attempted = [], set()
+        accepted, attempted = sorted(reusable), set(reusable)
         for requirement_number, rid in enumerate(tree.leaves, 1):
             ids = contracts["requirements"].get(rid, [])
             pending = [aid for aid in ids if aid not in attempted and aid not in builtin_ids]
@@ -206,6 +234,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         return {"typecheck": compiled, "tests": result, "status": status}
 
                     context = {
+                        "test_accounts":test_accounts(read_artifact(arc_dir,"requirements.json")),
                         "api_id": aid, "api": api,
                         "requirement": requirement_context(tree, rid),
                         "db_schema": related_schema(schema, [api]), "test_path": relative,
@@ -220,8 +249,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                     for owner in api_owners:
                         report["tests"].setdefault(owner, {})[aid] = targets[aid]
                     report["agents"][f"tests:{aid}"] = {"turns": agent["turns"]}
-                    save_json(arc_dir / "backend_tdd.json", report)
                     entry["status"] = "IMPLEMENTING"
+                    save_json(arc_dir / "backend_tdd.json", report)
                     api = contracts["apis"][aid]
                     console.show(f"{aid} | Implementation context", (
                         json.dumps(api, ensure_ascii=False, indent=2)

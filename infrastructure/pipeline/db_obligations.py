@@ -11,6 +11,7 @@ from infrastructure.utils.presentation.formatting import format_schema
 from infrastructure.utils.presentation.formatting import format_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.backend.evidence import load_evidence, scoped_evidence
+from infrastructure.stages.requirements.data import load_data, data_context, DATA_INSTRUCTIONS
 from infrastructure.utils.files import read_artifact
 from infrastructure.utils.files import save_json
 from infrastructure.shared.agent.proposals import propose_json
@@ -21,11 +22,11 @@ from infrastructure.shared.agent.discovery import ContextIndex
 # --- Extension point 03A: obligation inference policy --------------------------
 # Rewrite how requirement text maps to reads/writes, especially failure paths,
 # fixture setup, and generated keys. Records are normalized for set operations.
-INSTRUCTIONS = """Infer this requirement's database reads and writes over the supplied related_schema.
+INSTRUCTIONS = DATA_INSTRUCTIONS + """Infer this requirement's database reads and writes over the supplied related_schema.
 Return:
 {
-  "requirement": {"read": ["Entity.field"], "write": ["Entity.field"]},
-  "steps": {"STEP-ID": {"read": ["Entity.field"], "write": ["Entity.field"]}}
+  "requirement": {"read": ["Entity.field"], "write": ["Entity.field"], "observation_read": ["Entity.field"]},
+  "steps": {"STEP-ID": {"read": ["Entity.field"], "write": ["Entity.field"], "observation_read": ["Entity.field"]}}
 }
 "read" and "write" are separate fields containing arrays of qualified DB field names.
 Use [] when a set is empty. Include the supplied step IDs; use steps={} when there
@@ -48,7 +49,18 @@ Given fixtures describe existing state, not writes performed by the behavior und
 test. This includes prerequisite actions described in Given, even when those actions
 create records through the UI. Do not charge their writes to the current When action.
 Rejection and instructions to leave data unchanged do not imply writes.
+read describes data needed by the application behavior, not SQL used only by an acceptance
+oracle to prove a Then invariant. Put acceptance-only inspections of unchanged records,
+absence, audit counts or forbidden effects in observation_read. They remain test obligations
+but do not require a business API/Trigger call. User-visible queries and actual guard inputs
+remain read; do not reclassify a real business lookup merely to eliminate a coverage error.
 Include lookup, filter and join keys in reads, and persisted generated keys in writes.
+For source-defined derived/aggregate records, consider the first execution with no
+existing aggregate row. If absence represents an initial zero/empty state, the operation
+must be able to materialize that row: include its generated primary key, association
+keys and required fields in possible writes. Do not assume a stock/balance/counter row
+has been seeded merely because later operations update it. Keep this branch distinct
+from Given fixtures and from a source-required missing-record rejection.
 A field can occur in both arrays. Read/write sets describe possible behavior across
 branches, not effects required on every invocation. Related fields are candidates;
 there is no need to classify every supplied field. UI-only state has no DB effect.
@@ -66,6 +78,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
     if top_k < 1:
         raise ValueError("--top-k must be positive")
     tree = RequirementTree(json.loads((arc_dir / "requirements.json").read_text(encoding="utf-8-sig")))
+    tree.validation_data = load_data(arc_dir)
     schema = json.loads((arc_dir / "db_schema.json").read_text(encoding="utf-8-sig"))
     evidence = load_evidence(arc_dir)
     foundation = read_artifact(arc_dir,"backend_foundation.json") if (arc_dir/"backend_foundation.json").is_file() else {"enabled":False}
@@ -108,6 +121,7 @@ def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max
             # for model correction rather than silently expanding its records.
             request = {
                 "requirement": requirement,
+                "validation_data": data_context(tree.validation_data,rid),
                 "backend_evidence": scoped_evidence(evidence,rid),
                 "backend_foundation": foundation,
                 "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],

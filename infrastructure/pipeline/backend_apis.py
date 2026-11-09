@@ -1,6 +1,7 @@
 """Step 05: design complete APIs with interfaces, obligations and P/Q."""
 
 import json
+import os
 from pathlib import Path
 
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
@@ -140,10 +141,25 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
     evidence = getattr(tree,"backend_evidence",{})
     # Parents organize requirements; they do not receive APIs or coverage checks.
     design = {"apis": builtin_apis(schema) if foundation.get("enabled") else {}, "requirements": {rid: [] for rid in tree.requirements if tree.children[rid]}}
+    if os.getenv("ARC_REUSE_ACCEPTED_BACKEND_APIS") == "1" and (arc_dir/"backend_apis.json").is_file():
+        from infrastructure.utils.files import read_artifact
+        existing = read_artifact(arc_dir,"backend_apis.json")
+        if not set(existing["requirements"]) <= set(tree.requirements):
+            raise ValueError("Cannot resume APIs for a different requirement tree")
+        finalize_backend_contracts(existing,foundation)
+        check_symbols(existing["apis"].values(),schema)
+        validate_design(existing,obligations,complete=False,tree=tree)
+        validate_backend_contracts(existing,foundation,evidence,schema)
+        validate_process_coverage(existing,foundation,evidence)
+        design = existing
+        save_json(arc_dir/"backend_api_resume.json",{"validated_requirements":list(existing["requirements"]),"mode":"explicit_source_reviewed_resume"})
     # --- Extension point 05A: leaf order and reusable API discovery ------------
     failures = TaskFailures(arc_dir, "05_design_backend_apis", console)
     save_json(arc_dir / "backend_apis.json", design)
     for number, rid in enumerate(tree.leaves, 1):
+        if rid in design["requirements"]:
+            console.show("Reuse validated API design "+rid,"Previously accepted contracts revalidated against current schema, obligations and foundation.")
+            continue
         with failures.task(rid):
             context = requirement_context(tree, rid)
             required = obligations["requirements"][rid]

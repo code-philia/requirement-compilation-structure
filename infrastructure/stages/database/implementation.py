@@ -15,6 +15,8 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.backend.context import requirement_context
 from infrastructure.utils.files import read_artifact, save_json, save_text
 from infrastructure.stages.database.runtime import seed_source
+from infrastructure.stages.requirements.data import load_data, publish_seed_data, DATA_INSTRUCTIONS
+from infrastructure.stages.backend.platform_files import IDENTITY_TABLES
 
 
 SEED_PATH = "backend/src/db/seed.ts"
@@ -26,8 +28,11 @@ WIRING = (
     "backend/scripts/copy-db.mjs", "package.json", "backend/package.json", "backend/tsconfig.json",
 )
 
-SEED_INSTRUCTIONS = '''If compiler platform bootstrap exists, users, roles, org_units and user_ou_roles are
+SEED_INSTRUCTIONS = DATA_INSTRUCTIONS + '''If compiler platform bootstrap exists, users, roles, org_units and user_ou_roles are
 already bootstrapped from source accounts. Preserve them; do not duplicate/reset identities.
+The compiler-owned identity/session/audit seed files are read-only. Do not add team
+memberships, mirror roles across units or infer authorization from a scenario's setup.
+Fixture variations belong in isolated test setup, never the shared application seed.
 Business prerequisite rows still belong in their canonical per-table insertion files.
 For explicit multi-unit or ownership prerequisites, maintain record_access rows with
 correct resource/record_id/unit_id/owner_id/assignee_id; never assign every record to
@@ -105,9 +110,15 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
         details={"insertion_order": order, "insert_files": insert_paths})
 
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
+    tree.validation_data = load_data(arc_dir)
+    from infrastructure.stages.backend.evidence import load_evidence
+    tree.backend_evidence = load_evidence(arc_dir)
+    tree.backend_foundation = read_artifact(arc_dir,"backend_foundation.json") if (arc_dir/"backend_foundation.json").is_file() else {"enabled":False}
+    publish_seed_data(output, schema, tree.validation_data)
     dependencies = table_dependencies(schema)
-    allowed = set(insert_paths.values())
-    readable = allowed | {f"backend/src/db/tables/{name}.sql" for name in order}
+    readable = set(insert_paths.values()) | {f"backend/src/db/tables/{name}.sql" for name in order}
+    protected_seeds = {insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths} if tree.backend_foundation.get("enabled") else set()
+    allowed = set(insert_paths.values()) - protected_seeds
     for rid in tree.leaves:
         requirement = requirement_context(tree, rid)
         if not requirement["description"] and not requirement["steps"]:
@@ -129,6 +140,7 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
             files = FileTools(output, ["backend/src/db"], requirements=[rid], stage="database",
                 files=references, writable=allowed, readable=readable)
             task = {"requirement": requirement, "entities": entities, "table_names": order,
+                "reserved_created_locators": {key:record["locator"] for key,record in tree.validation_data["records"].items() if record["lifecycle"] != "SEED"},
                 "insert_files": {name: insert_paths[name] for name in sorted(names)}}
 
             def generated():
@@ -209,7 +221,10 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
     sql_paths = {name: f"backend/src/db/tables/{name}.sql" for name in schema["entities"]}
     insert_paths = {name: f"backend/src/db/seeds/{name}.sql" for name in schema["entities"]}
     allowed = {*WIRING, *sql_paths.values(), *insert_paths.values()}
-    protected = {"backend/src/app.ts", "backend/src/api/register.ts", "backend/src/db/initialize.ts", "backend/src/db/seed.ts"} if (output / "backend/src/platform/settings.ts").is_file() else set()
+    protected = {"backend/src/app.ts", "backend/src/api/register.ts", "backend/src/db/initialize.ts", "backend/src/db/seed.ts",
+        "backend/tsconfig.json", "backend/package.json", "package.json"} if (output / "backend/src/platform/settings.ts").is_file() else set()
+    if protected:
+        protected.update(insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths)
     workspace = FileTools(output, ["backend", "package.json"], requirements=list(schema.get("requirements", {})),
         stage="database", files=WIRING, writable=allowed-protected, readable=allowed)
     task = {"table_order": [name for group in implementation_groups(schema) for name in group],

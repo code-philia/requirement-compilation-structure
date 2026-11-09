@@ -20,6 +20,8 @@ from infrastructure.stages.backend.runtime import api_test_paths
 from infrastructure.stages.backend.testing import BackendChecks, require_green as require_backend_green
 from infrastructure.stages.frontend.triggers.design import api_ids, trigger_obligations
 from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, model_context
+from infrastructure.stages.requirements.acceptance import source_expectations, test_accounts, require_scenario_coverage
+from infrastructure.utils.files import read_artifact
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.utils.files import save_json
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
@@ -46,6 +48,10 @@ def scenario_context(ui, design, rid):
 
 def editable_runtime_path(output, path):
     """Allow evidence-driven database runtime repairs alongside application repairs."""
+    if path == "backend/src/db/bound-data.ts":
+        return False
+    if (output/"backend/src/platform/settings.ts").is_file() and path in {"backend/src/db/initialize.ts","backend/src/db/seed.ts"}:
+        return False
     if "/tests/" in path:
         return False
     if editable_application_path(output, path):
@@ -136,7 +142,9 @@ only the minimal behavior needed for this requirement and explain it in diagnosi
 Preserve selectors and the presentation-test adapter in frontend/src/ui-runtime.ts.
 presentationData exposes declared values to display tests without owning application state;
 isPresentationTest identifies explicit display-only previews. Keep their data/effects
-isolated from real API loading. Normal browser E2E must use real APIs and state; never
+isolated from real API loading, including ancestor shells and shared session providers.
+An explicit child-page presentation preview must not trigger an ancestor session redirect
+or overwrite the child's published display state. Normal browser E2E must use real APIs and state; never
 recognize its fixtures, fabricate success or hardcode expected responses.
 
 Use task.application_entrypoints for application integration and task.backend_entrypoints
@@ -168,6 +176,9 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     integrate and repair the current requirement before advancing. Regress
     accepted requirement scenarios, build the app, and update the caller's report."""
     output = arc_dir.parent.resolve()
+    original_source = read_artifact(arc_dir,"requirements.json")
+    oracle = {rid:source_expectations(original_source,rid) for rid in tree.leaves}
+    save_json(arc_dir/"acceptance_evidence.json",oracle)
     prepare_frontend(output)
     prepare_e2e(output, backend)
     console.show("E2E preparation | Dependencies", "Install workspace dependencies and Chromium. Each browser run owns a new real test database; production data is not used.")
@@ -267,9 +278,12 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                     behavior = checks.tests([relative])
                 except (ValueError, RuntimeError) as error:
                     behavior = {"returncode": 1, "output": str(error), "errors": [str(error)]}
+                if behavior.get("cases"):
+                    require_scenario_coverage(behavior,oracle[rid])
                 return {"typecheck": compiled, "behavior": behavior, "status": test_run_status(behavior)}
 
-            test_context = {**model_context(context), "schema": related_schema(schema, context["backend_apis"].values()), "test_path": relative}
+            test_context = {**model_context(context), "schema": related_schema(schema, context["backend_apis"].values()), "test_path": relative,
+                "source_expectations":oracle[rid], "test_accounts":test_accounts(original_source)}
             test_workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True, references=arco_references(),
                 writable=[relative], files=[relative, "frontend/src/ui-runtime.ts", CONFIG, FIXTURE, "backend/tests/support/context.ts",
                     *APPLICATION_ENTRYPOINTS,
@@ -332,6 +346,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                         require_backend_green(result["backend_tests"])
                     if test_run_status(result["e2e"]) != "GREEN":
                         raise ValueError("Requirement acceptance requires passing, unskipped and stable results")
+                    require_scenario_coverage(result["e2e"],oracle[rid])
                     if "ui" in result:
                         require_green(result["ui"])
                 except ValueError as error:

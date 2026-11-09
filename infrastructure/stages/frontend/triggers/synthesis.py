@@ -51,6 +51,8 @@ def synthesize_triggers(arc_dir, ui, tree, backend, contexts, model, console, ma
                 "step_obligations": {sid: obligations["steps"][sid] for sid in tree.own_steps[rid]},
                 "shared_conventions": select_conventions(conventions, requirements=[rid]),
                 "existing_triggers": existing, "backend_apis": {aid: backend["apis"][aid] for aid in aids}}
+            request["shared_lifecycle_triggers"] = {tid:trigger for tid,trigger in result["triggers"].items()
+                if any(backend["apis"][aid].get("platform_builtin") for aid in api_ids(trigger))}
             def accept(proposal):
                 for sid in tree.own_steps[rid]:
                     proposal["step_triggers"][sid]

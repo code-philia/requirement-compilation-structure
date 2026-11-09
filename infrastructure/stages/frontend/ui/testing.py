@@ -17,6 +17,19 @@ from infrastructure.utils.processes import capture_process, npm_command
 KEY_TYPES = {"page", "form", "input", "checkbox", "select", "button", "heading", "link", "list", "image", "alert", "table", "text"}
 
 
+def display_visible(design, uid, state):
+    """Table descendants repeat per record; an empty table has no row controls."""
+    if not visible(design, uid, state):return False
+    current = design["elements"][uid].get("parent")
+    while current in design["elements"]:
+        parent = design["elements"][current]
+        if parent.get("type") == "table":
+            arrays = [item["var"] for item in parent.get("data", []) if item.get("dtype") == "array"]
+            if arrays and all(not state.get(name) for name in arrays):return False
+        current = parent.get("parent")
+    return True
+
+
 def presentation_run_status(result):
     """Repair existing page runtime failures; only assertion failures establish valid RED."""
     if result["returncode"] == 0:
@@ -87,7 +100,7 @@ def existence_suite(design: dict, pid: str) -> str:
             if kind not in KEY_TYPES:
                 continue
             locator = f"page.getByTestId({json.dumps(uid)})"
-            shown = visible(design, uid, state)
+            shown = display_visible(design, uid, state)
             lines.append(f"  await expect({locator}){'' if shown else '.not'}.toBeVisible();")
         lines.extend([
             '  await expect.poll(() => page.evaluate(({ pageId, keys }) => {',
@@ -106,7 +119,7 @@ def existence_suite(design: dict, pid: str) -> str:
 
 def require_green(result: dict) -> None:
     """Require passing actual browser assertions with no reported runtime errors."""
-    if result["returncode"] or result.get("errors") or not result.get("passed") or result.get("failed"):
+    if result["returncode"] or result.get("errors") or not result.get("passed") or result.get("failed") or result.get("skipped") or result.get("flaky") or result.get("expected_failures") or result.get("failures"):
         raise CheckFailure("UI checks are not GREEN", result)
 
 
@@ -121,7 +134,7 @@ def require_red(result: dict) -> None:
         raise ValueError(f"Expected missing-component assertion RED, not infrastructure/runtime failure: {result}")
 
 
-def parse_playwright_result(result: dict, include_files: bool = False) -> dict:
+def parse_playwright_result(result: dict, include_files: bool = False, output: Path | None = None) -> dict:
     """Parse the Playwright JSON reporter into counts, failures, runtime errors, and optional per-file totals."""
     try:
         report = json.loads(result.pop("stdout"))
@@ -129,18 +142,35 @@ def parse_playwright_result(result: dict, include_files: bool = False) -> dict:
         raise ValueError(f"Playwright did not return its JSON report: {result['output']}") from error
     failures = []
     files = {}
+    cases = []
+    expected_failures = []
+    contexts = []
 
-    def visit(suite):
+    def visit(suite, parents=()):
         """Accumulate nested Playwright suite/spec results into the normalized browser-check report."""
+        titles = (*parents,suite.get("title",""))
         for spec in suite.get("specs", []):
             filename = spec.get("file", suite.get("file", ""))
             files[filename] = files.get(filename, 0) + len(spec.get("tests", []))
             for test in spec.get("tests", []):
+                cases.append({"title":" ".join((*titles,spec.get("title",""))),"file":filename,"status":test.get("status")})
+                if test.get("expectedStatus","passed") != "passed":
+                    expected_failures.append(spec.get("title",""))
                 for run in test.get("results", []):
                     if run.get("status") not in {"passed", "skipped"}:
                         failures.append("\n".join(item.get("message", "") for item in run.get("errors", [])) + "\nTest file: " + filename)
+                        for attachment in run.get("attachments",[]):
+                            if output is None or len(contexts)>=3 or not attachment.get("path"):continue
+                            path=Path(attachment["path"])
+                            if not path.is_absolute():path=output/path
+                            if path.suffix.lower() not in {".md",".txt"} or path.is_symlink():continue
+                            resolved=path.resolve()
+                            if not any(resolved.is_relative_to(root.resolve()) for root in (output/"frontend/test-results",output/"test-results")):continue
+                            if resolved.is_file():
+                                with resolved.open(encoding="utf-8",errors="replace") as stream:content=stream.read(6000)
+                                contexts.append({"path":resolved.relative_to(output.resolve()).as_posix(),"content":content})
         for child in suite.get("suites", []):
-            visit(child)
+            visit(child,titles)
 
     for suite in report.get("suites", []):
         visit(suite)
@@ -150,8 +180,13 @@ def parse_playwright_result(result: dict, include_files: bool = False) -> dict:
     result.update({"passed": stats.get("expected", 0), "failed": stats.get("unexpected", 0),
         "skipped": stats.get("skipped", 0), "flaky": stats.get("flaky", 0),
         "errors": report.get("errors", []), "failures": failures})
+    if expected_failures:
+        result["expected_failures"] = expected_failures
     if include_files:
         result["files"] = files
+        result["cases"] = cases
+    if contexts:
+        result["failure_contexts"] = contexts
     result["output"] = json.dumps({key: value for key, value in result.items() if key != "output"}, ensure_ascii=False, indent=2)[-24000:]
     return result
 
@@ -193,7 +228,7 @@ class FrontendChecks:
             path = Path(config.name)
             json.dump({"extends": "./tsconfig.json", "compilerOptions": {"types": ["vite/client", "node"], "forceConsistentCasingInFileNames": True}, "include": includes}, config)
         try:
-            result = self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "-p", str(path)])
+            result = self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "--noCheck", "false", "--strict", "true", "-p", str(path)])
             result.pop("stdout", None)
             return result
         finally:
@@ -208,7 +243,7 @@ class FrontendChecks:
             port = listener.getsockname()[1]
         env = {**os.environ, "ARC_UI_PORT": str(port)}
         result = self.execute(["node_modules/@playwright/test/cli.js", "test", "--config", "frontend/playwright.ui.config.ts", *files], env=env)
-        return parse_playwright_result(result)
+        return parse_playwright_result(result,output=self.output)
 
     def build(self) -> dict:
         """Run the generated workspace's frontend and backend build command and return the captured result."""

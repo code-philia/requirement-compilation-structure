@@ -15,6 +15,9 @@ elements maps ELEMENT IDs to {type, parent, mode, data, prop}. A page root has t
 "page" and parent=null. Other elements reference a parent ELEMENT ID. Use ordinary types:
 container, form, input, checkbox, select, button, text, heading, link, list, item, image,
 alert or table. mode is an array containing user_read and/or user_write, or [].
+Controls parented under a table repeat per business row and are absent when its array
+data is empty. Put table-level toolbars/actions outside the table subtree. Do not require
+a row action to appear without a record. Preserve record identity in row interactions.
 
 data is an array of variable declarations: {var, dtype, constraints}.
 var is the frontend variable name; dtype is string, integer, number, boolean, array,

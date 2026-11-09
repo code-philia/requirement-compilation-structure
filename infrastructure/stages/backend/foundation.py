@@ -25,8 +25,11 @@ Do not implement business code or redesign ER. Only a compiler-generated relatio
 }
 All keys are required. Empty collections are allowed when not supported by evidence.
 Normalize tenant/team boundaries from prose/scenarios separately from Casbin scope.
-'all' does not remove a source-required tenant boundary. Do not equate every team_member
-with a demo account. Keep feature entitlements separate from entity resource permissions.
+'all' does not remove a source-required tenant boundary.
+Administrator cross-unit visibility is already provided by the platform's admin bypass;
+it is NOT evidence for granting ordinary members unit_tree access. Use unit for own-team
+isolation unless source requirements explicitly grant access to descendant units.
+Do not equate every team_member with a demo account. Keep feature entitlements separate from entity resource permissions.
 Source CSV remains immutable. additional_permissions are explicit, traceable effective
 policy supplements only when prose/scenarios require them. Never narrow administrator
 permissions. Missing permission defaults to deny. Do not invent organizational roles.
@@ -40,6 +43,11 @@ independent effects both required by source scenarios. Distinguish creating adju
 records from applying their inventory effects; never double-apply them. State conversions,
 all effects and audit are one transaction; retries must not apply effects again. Describe
 compensation/reversal using original movements, not merely a status change.
+When a source defines missing derived/aggregate data as zero/empty, effects must include
+first-use initialization and its primary/association/required fields before applying the
+change. Do not turn this valid initial state into an invented rejection or rely on
+startup fixtures for every future business key. Include both initialization and update
+branches without granting an unrelated user-facing create permission.
 
 Use canonical schema fields exactly. Effects select fields that exist; if a business
 concept is absent from ER, record the gap in decisions rather than fabricating columns.
@@ -190,6 +198,8 @@ def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
     evidence = compile_evidence(raw, input_dir)
     save_json(arc_dir / "backend_evidence.json", evidence)
     if not evidence["enabled"]:
+        from infrastructure.stages.requirements.data import compile_data
+        save_json(arc_dir / "data_bindings.json", compile_data(raw, read_artifact(arc_dir, "db_schema.json")))
         save_json(arc_dir / "backend_foundation.json", {"enabled": False})
         return {"status": "GREEN", "enabled": False}
     if not evidence["authorization"]:
@@ -227,6 +237,8 @@ def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
             schema["requirements"][rid] = sorted(set(fields) | infrastructure_fields)
     save_json(arc_dir / "db_schema.json", schema)
     save_json(arc_dir / "backend_foundation.json", plan)
+    from infrastructure.stages.requirements.data import compile_data
+    save_json(arc_dir / "data_bindings.json", compile_data(raw, schema))
     from infrastructure.stages.backend.platform_files import publish_platform
     publish_platform(arc_dir.parent, evidence, plan, schema, raw)
     console.show("Backend shared semantics", json.dumps({"boundary": plan["default_boundary"], "machines": list(plan["machines"]), "decisions": plan["decisions"]}, ensure_ascii=False, indent=2))

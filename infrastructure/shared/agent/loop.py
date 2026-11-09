@@ -4,6 +4,7 @@ import json
 
 from infrastructure.shared.agent.conventions import task_conventions
 from infrastructure.shared.agent.feedback import compact_feedback
+from infrastructure.shared.agent.repairs import UpstreamRepairRequired
 
 from infrastructure.shared.agent.tools import FileTools, FileToolError
 from infrastructure.shared.agent.tools.protocol import FILE_TOOL_RULES
@@ -140,6 +141,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             checkpoint(files.output, task=label, action=f"Accept edit round {turn}",
                 details={"round": turn, "checks": checks})
             return {"turns": turn, "checks": checks, "files": sorted(files.changed_paths)}
+        except UpstreamRepairRequired:
+            raise
         except (*RESPONSE_ERRORS, RuntimeError, OSError) as error:
             message = str(error)
             phase = "acceptance" if checking else "tool_protocol"

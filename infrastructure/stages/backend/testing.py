@@ -40,7 +40,7 @@ class BackendChecks:
     def typecheck(self, files: list[str] | None = None) -> dict:
         """Compile selected backend tests with TypeScript, using and cleaning a temporary test configuration."""
         if files is None:
-            return self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "-p", "backend/tsconfig.test.json"])
+            return self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "--noCheck", "false", "--strict", "true", "-p", "backend/tsconfig.test.json"])
         # Compile the complete real-server source tree and only the selected suites.
         includes = ["src/**/*.ts"]
         for relative in dict.fromkeys(files):
@@ -52,7 +52,7 @@ class BackendChecks:
             temporary = Path(config.name)
             json.dump({"extends": "./tsconfig.test.json", "compilerOptions": {"forceConsistentCasingInFileNames": True}, "files": [], "include": includes}, config)
         try:
-            return self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "-p", str(temporary)])
+            return self.execute(["node_modules/typescript/bin/tsc", "--noEmit", "--noCheck", "false", "--strict", "true", "-p", str(temporary)])
         finally:
             temporary.unlink(missing_ok=True)
 

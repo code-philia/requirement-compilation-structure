@@ -2,6 +2,13 @@
 
 INSTRUCTIONS = """Design complete frontend triggers for the supplied requirement using ui, backend_apis
 and existing_triggers. Return {triggers:{}, requirement_triggers:[], step_triggers:{}}.
+read/write are application capabilities; observation_read is acceptance-only evidence,
+not a reason to add API calls. Step associations must reflect events/commands actually
+in that scenario. Never associate an unrelated mutation just to fill a read coverage gap.
+Reuse existing shared authentication/lifecycle triggers when a scenario logs in or out
+on another page. shared_lifecycle_triggers provides accepted examples; retrieve missing
+context if necessary. Do not add login to a data-page mount without credential controls;
+restore the session with me/access-context and navigate to the actual login page on 401.
 triggers maps trigger IDs to COMPLETE new or changed records with these separate fields:
 - source: the emitting UI ELEMENT ID.
 - event: the interaction or lifecycle event, such as mount, click, change or submit; implementation uses the actual framework.

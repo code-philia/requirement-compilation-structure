@@ -7,12 +7,24 @@ from infrastructure.utils.files import read_artifact
 
 from infrastructure.stages.database.obligations.records import normalize_obligations, check_symbols
 from infrastructure.stages.requirements.tree import RequirementTree
+from infrastructure.stages.requirements.data import load_data, data_context
 
 
 def load_context(arc_dir: Path):
     """Load the requirement tree, schema, and normalized obligations."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     tree.backend_evidence = load_evidence(arc_dir)
+    tree.validation_data = load_data(arc_dir)
+    findings_path = arc_dir / "acceptance_findings.json"
+    tree.acceptance_findings = []
+    if findings_path.is_file():
+        findings = read_artifact(arc_dir, findings_path.name)
+        if findings.get("source_sha256") != tree.validation_data["source_sha256"]:
+            raise ValueError("Independent acceptance findings belong to another source; review before reusing")
+        for item in findings.get("items", []):
+            if not item.get("requirements") or not set(item["requirements"]) <= set(tree.requirements) or not item.get("source_refs"):
+                raise ValueError("Independent acceptance findings need known requirements and source references")
+            if item.get("status") == "OPEN":tree.acceptance_findings.append(item)
     foundation_path = arc_dir / "backend_foundation.json"
     tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled":False}
     schema = read_artifact(arc_dir, "db_schema.json")
@@ -24,6 +36,8 @@ def load_context(arc_dir: Path):
 def requirement_context(tree, rid: str) -> dict:
     """Return one requirement with its own structured steps and their concatenated teaching/model context."""
     return {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
+        "validation_data": data_context(getattr(tree,"validation_data",{}),rid),
+        "independent_acceptance_findings": [item for item in getattr(tree,"acceptance_findings",[]) if rid in item["requirements"]],
         "backend_evidence": scoped_evidence(getattr(tree,"backend_evidence",{}),rid),
         "backend_foundation": getattr(tree,"backend_foundation",{"enabled":False})}
 
