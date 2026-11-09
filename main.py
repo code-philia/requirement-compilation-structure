@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 import sys
 
-from infrastructure.compiler import Compiler, PIPELINE
+from infrastructure.compiler import Compiler, PIPELINE, STAGE_MAP
 from infrastructure.utils.cli import resolve_directories
 from infrastructure.utils.presentation.logging import configure_console
 from infrastructure.utils.presentation.stages import stage_label
@@ -24,7 +24,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Show detailed model I/O and save per-call prompt/response logs; usage and timing are always shown")
     parser.add_argument("--port", type=int, default=3000,
         help="Default generated backend port and frontend API proxy target (default: 3000)")
-    parser.add_argument("--stage", choices=[name for name, _, _ in PIPELINE], metavar="STAGE",
+    parser.add_argument("--stage", choices=list(STAGE_MAP), metavar="STAGE",
         help="Run one stage by its full name (e.g. 06_implement_backend_tdd); omit for the full pipeline")
     parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
     args = parser.parse_args(argv)
@@ -56,10 +56,10 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(130)
     except Exception as error:
         print(f"Compilation failed at {compiler.current_stage or 'startup'}: {error}", file=sys.stderr)
-        raise SystemExit(0)
+        raise SystemExit(1)
     if compiler.report["status"] == "COMPLETED_WITH_FAILURES":
-        print(f"All passes completed. Report: {compiler.arc_dir / 'compilation.json'}", file=sys.stderr)
-        raise SystemExit(0)
+        print(f"Compilation stopped after a failed pass. Report: {compiler.arc_dir / 'compilation.json'}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

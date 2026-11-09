@@ -7,14 +7,10 @@ from infrastructure.pipeline.project_initialization import project_initializatio
 from infrastructure.pipeline.requirements import explore_requirement
 from infrastructure.pipeline.db_schema import build_db_schema
 from infrastructure.stages.backend.foundation import design_backend_foundation
-from infrastructure.pipeline.db_obligations import infer_db_obligations
 from infrastructure.pipeline.database import implement_db
-from infrastructure.pipeline.backend_apis import design_backend_apis
+from infrastructure.pipeline.backend_apis import design_backend_joint
 from infrastructure.pipeline.backend_implementation import implement_backend_tdd
-from infrastructure.pipeline.ui_design import design_frontend_ui
-from infrastructure.pipeline.ui_implementation import implement_frontend_ui
-from infrastructure.pipeline.frontend_triggers import design_frontend_triggers
-from infrastructure.pipeline.frontend_implementation import implement_frontend_triggers
+from infrastructure.pipeline.frontend_joint import design_frontend_joint, implement_frontend_joint
 from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
@@ -27,15 +23,14 @@ PIPELINE = (
     ("01_explore_requirement", explore_requirement, "requirements"),
     ("02_build_db_schema", build_db_schema, "db_schema"),
     ("02_design_backend_foundation", design_backend_foundation, "backend_foundation"),
-    ("03_infer_db_obligations", infer_db_obligations, "db_obligations"),
+    ("05_design_backend_joint", design_backend_joint, "backend_apis"),
     ("04_implement_db", implement_db, "db_implementations"),
-    ("05_design_backend_apis", design_backend_apis, "backend_apis"),
     ("06_implement_backend_tdd", implement_backend_tdd, "backend_checks"),
-    ("07_design_ui", design_frontend_ui, "ui_design"),
-    ("08_implement_ui", implement_frontend_ui, "ui_checks"),
-    ("09_design_frontend_triggers", design_frontend_triggers, "frontend_triggers"),
-    ("10_implement_frontend_tdd", implement_frontend_triggers, "frontend_e2e"),
+    ("07_design_frontend_joint", design_frontend_joint, "frontend_design"),
+    ("10_implement_frontend_joint", implement_frontend_joint, "frontend_e2e"),
 )
+STAGE_MAP = {name: (name, function, artifact) for name, function, artifact in PIPELINE}
+
 
 class Compiler:
     """Own shared paths, configuration, and results for one compilation."""
@@ -55,7 +50,7 @@ class Compiler:
         self.report = {"status": "NOT_STARTED", "stages": {}}
 
     def _run(self, stage: str, function, *arguments, **options):
-        """Attempt every pass; keep failures explicit without aborting later passes."""
+        """Run a pass and preserve explicit failures for the pipeline stop gate."""
         self.current_stage = stage
         stage_event = begin_stage(stage)
         self.report["stages"][stage] = {"status": "RUNNING", "started_at": timestamp()}
@@ -77,8 +72,8 @@ class Compiler:
                 "error_type": type(error).__name__, "traceback": traceback.format_exc()}
             if getattr(error, "failures", None):
                 result.update(status="COMPLETED_WITH_FAILURES", failures=error.failures)
-            show_panel("[FAILED; continuing] " + stage,
-                result["error"] + "\nAccepted artifacts remain available. Attempt the next pass.", tone="error")
+            show_panel("[FAILED] " + stage,
+                result["error"] + "\nAccepted artifacts remain available. Dependent passes will not run.", tone="error")
         except BaseException:
             finish_stage(stage_event, "FAILED")
             raise
@@ -97,13 +92,9 @@ class Compiler:
         """Execute every pass, or only the selected pass using existing artifacts."""
         passes = PIPELINE
         if stage is not None:
-            passes = ()
-            for entry in PIPELINE:
-                if entry[0] == stage:
-                    passes = (entry,)
-                    break
-            if not passes:
-                raise ValueError(f"Unknown stage: {stage}. Use a full stage name such as 06_implement_backend_tdd.")
+            if stage not in STAGE_MAP:
+                raise ValueError(f"Unknown stage: {stage}")
+            passes = (STAGE_MAP[stage],)
         self.artifacts.clear()
         self.report = {"status": "RUNNING", "stages": {}}
         show_panel("Requirement compiler | Pipeline",
@@ -118,12 +109,14 @@ class Compiler:
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
                 elif function is build_db_schema:
                     result = self._run(name, function, self.arc_dir, input_dir=self.input_dir, pause=self.pause)
-                elif function in (explore_requirement, design_frontend_ui, implement_frontend_ui,
-                        design_frontend_triggers, implement_frontend_triggers):
+                elif function in (explore_requirement, design_frontend_joint, implement_frontend_joint):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
                 else:
                     result = self._run(name, function, self.arc_dir, pause=self.pause)
                 self.artifacts[artifact] = result
+                if self.report["stages"][name]["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}:
+                    # No downstream generation from stale or partially accepted designs.
+                    break
             self.current_stage = None
             incomplete = [name for name, result in self.report["stages"].items()
                 if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]

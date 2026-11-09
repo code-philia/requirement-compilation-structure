@@ -14,7 +14,7 @@ from infrastructure.shared.agent.recovery import implementation_task, final_chec
 from infrastructure.stages.frontend.triggers.e2e_runtime import CONFIG, FIXTURE, prepare_e2e
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, test_path
 from infrastructure.stages.frontend.ui.runtime import APPLICATION_ENTRYPOINTS, prepare_frontend
-from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
+from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, existence_suite, test_path as ui_test_path
 from infrastructure.stages.backend.context import related_schema
 from infrastructure.stages.backend.runtime import api_test_paths
 from infrastructure.stages.backend.testing import BackendChecks, require_green as require_backend_green
@@ -23,8 +23,8 @@ from infrastructure.stages.frontend.triggers.scope import TriggerCheckFailure, m
 from infrastructure.stages.requirements.acceptance import source_expectations, test_accounts, require_scenario_coverage
 from infrastructure.utils.files import read_artifact
 from infrastructure.shared.project.dependencies import install_dependencies
-from infrastructure.utils.files import save_json
-from infrastructure.stages.frontend.ui.design import page_context, page_elements
+from infrastructure.utils.files import save_json, save_text
+from infrastructure.stages.frontend.ui.design import page_context, page_elements, requirement_ui
 from infrastructure.shared.project.git import checkpoint
 from infrastructure.stages.frontend.arco import IMPLEMENT_INSTRUCTIONS as ARCO_IMPLEMENT_INSTRUCTIONS, ACCEPTANCE_INSTRUCTIONS, stack_context, REFERENCE_PATH, PROVIDER_PATH, validate_component_types, arco_references
 from infrastructure.stages.frontend.arco_knowledge import retrieve_components, record_retrieval
@@ -169,7 +169,7 @@ If a necessary correction is outside tool scope, explain the exact blocker in di
 
 
 def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts,
-        model, console, report, max_turns=10):
+        model, console, report, max_turns=10, *, joint_ui=False):
     """Implement design one requirement at a time through real-app E2E TDD.
 
     Prepare dependencies/runtime, generate initial requirement acceptance tests, then
@@ -192,7 +192,7 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     ui_checks = FrontendChecks(output)
     report["status"] = "IMPLEMENTING"
     save_json(arc_dir / "frontend_e2e.json", report)
-    baseline_files = [ui_test_path(pid) for pid in ui["pages"]
+    baseline_files = [] if joint_ui else [ui_test_path(pid) for pid in ui["pages"]
         if (output / ui_test_path(pid)).is_file()]
 
     def baseline_gate():
@@ -242,14 +242,22 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
         context = scenario_context(ui, design, rid)
         pages = context["page_subtrees"]
         if not pages:
-            report["requirements"][rid] = {"status": "FAILED", "triggers": sorted(tids),
-                "error": "No UI interface available for requirement acceptance; not verified"}
+            report["requirements"][rid] = {"status": "NO_UI" if joint_ui and not tids else "FAILED", "triggers": sorted(tids),
+                "error": "No direct UI; backend acceptance owns this requirement" if joint_ui and not tids
+                    else "No UI interface available for requirement acceptance; not verified"}
             save_json(arc_dir / "frontend_e2e.json", report)
-            console.show(label + " | FAILED; continuing", report["requirements"][rid]["error"])
+            console.show(label + " | " + report["requirements"][rid]["status"], report["requirements"][rid]["error"])
             continue
         targets = tids
         relative = test_path(rid)
-        ui_files = [ui_test_path(pid) for pid in pages if (output / ui_test_path(pid)).is_file()]
+        if joint_ui:
+            cumulative = requirement_ui(ui, [*accepted, rid])
+            context["page_subtrees"] = {pid: page_context(cumulative, pid) for pid in pages if pid in cumulative["pages"]}
+            for pid in cumulative["pages"]:
+                save_text(output / ui_test_path(pid), existence_suite(cumulative, pid))
+            ui_files = [ui_test_path(pid) for pid in cumulative["pages"]]
+        else:
+            ui_files = [ui_test_path(pid) for pid in pages if (output / ui_test_path(pid)).is_file()]
         called = {aid for trigger in context["triggers"].values() for aid in api_ids(trigger)}
         context["obligations"] = {tid: trigger_obligations(trigger, backend) for tid, trigger in context["triggers"].items()}
         context.update({"requirement": contexts[rid],
@@ -367,6 +375,9 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 "component_knowledge":components,
                 "frontend_stack": stack_context(ui["elements"]),
                 "application_entrypoints": list(APPLICATION_ENTRYPOINTS),
+                "implementation_mode": "joint_ui_and_interactions" if joint_ui else "interactions",
+                "visual_references": {iid: images[iid] for page in pages.values()
+                    for iid in page.get("images", []) if iid in images},
                 "backend_entrypoints": {"registry": "backend/src/api/register.ts",
                     "app": "backend/src/app.ts", "server": "backend/src/server.ts"}}
             workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True, references=arco_references(),
@@ -381,7 +392,14 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 except (ValueError, RuntimeError) as error:
                     current = getattr(error, "feedback", {"error": str(error)})
             if agent is None:
-                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS + ARCO_IMPLEMENT_INSTRUCTIONS, task, workspace,
+                joint_rules = ("\nBuild the UI and its interactions together: there is no earlier page implementation stage. "
+                    "Use page_subtrees, original source scenarios and visual references to create components, routes, "
+                    "forms and API integration in the same edit batch. Preserve original labels and stable data-testid "
+                    "selectors. Bind presentationData to declared page state for display-only checks, including "
+                    "ancestor-shell isolation; do not seed production data from screenshots. Implement the entire "
+                    "current slice, preserving previously accepted slices. Empty tables have no row actions."
+                    if joint_ui else "")
+                agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS + ARCO_IMPLEMENT_INSTRUCTIONS + joint_rules, task, workspace,
                     implementation_gate, max_turns, console, label + " / Interaction Implementation",
                     feedback=current)
             accepted.append(rid)

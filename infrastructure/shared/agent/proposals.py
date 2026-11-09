@@ -45,6 +45,10 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
         instructions += "\n\n" + DISCOVERY_RULES
         request["context_kinds"] = list(context_index.records())
     discovery = DiscoverySession(context_index) if context_index is not None else None
+    context_queries = 0
+    instructions += ("\nUse supplied evidence first. Normally query at most twice, only for named missing facts. "
+        "Once the contract and evidence suffice, produce the complete proposal immediately. "
+        "At most four context queries are allowed for this entire proposal task; reuse retained records.")
     for attempt in range(1, max_attempts + 1):
         progress = f"{attempt}/{max_attempts}"
         console.show(f"{label} | Model proposal {progress}", "Generate the proposal; response-reading and obligation errors receive repair feedback.")
@@ -58,6 +62,9 @@ def propose_json(model, instructions, request, accept, console, label, max_attem
                     prompt += "\nRepair details:\n" + json.dumps(correction["details"], ensure_ascii=False, indent=2)
             response = model.generate_json(prompt, request)
             while context_index is not None and isinstance(response, dict) and "context_request" in response:
+                if context_queries >= 4:
+                    raise ValueError("Context query budget exhausted. Produce the design from supplied/retained evidence; do not query again.")
+                context_queries += 1
                 query = response["context_request"]
                 console.show(label + " | Context query", json.dumps(query, ensure_ascii=False))
                 request["context_result"] = discovery.resolve(query)

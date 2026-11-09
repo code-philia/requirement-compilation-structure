@@ -1,11 +1,12 @@
 """Step 05: design complete APIs with interfaces, obligations and P/Q."""
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
 
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
-from infrastructure.stages.database.obligations.records import check_symbols
+from infrastructure.stages.database.obligations.records import check_symbols, normalize_inference
 from infrastructure.stages.backend.primitives import apply_decomposition, validate_design
 from infrastructure.stages.backend.contracts import CONTRACT_INSTRUCTIONS, validate_backend_contracts, builtin_apis, validate_process_coverage, finalize_backend_contracts
 from infrastructure.stages.backend.platform_files import publish_routes
@@ -131,8 +132,8 @@ Return only API definitions and requirement associations.
 """
 
 
-def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10) -> dict:
-    tree, schema, obligations = load_context(arc_dir)
+def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10, *, joint_obligations=False) -> dict:
+    tree, schema, obligations = load_context(arc_dir, infer_obligations=joint_obligations)
     if top_k < 1:
         raise ValueError("--top-k must be positive")
     console, retriever, model = DemoConsole(pause), ApiRetriever(), TextModel()
@@ -141,7 +142,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
     evidence = getattr(tree,"backend_evidence",{})
     # Parents organize requirements; they do not receive APIs or coverage checks.
     design = {"apis": builtin_apis(schema) if foundation.get("enabled") else {}, "requirements": {rid: [] for rid in tree.requirements if tree.children[rid]}}
-    if os.getenv("ARC_REUSE_ACCEPTED_BACKEND_APIS") == "1" and (arc_dir/"backend_apis.json").is_file():
+    if not joint_obligations and os.getenv("ARC_REUSE_ACCEPTED_BACKEND_APIS") == "1" and (arc_dir/"backend_apis.json").is_file():
         from infrastructure.utils.files import read_artifact
         existing = read_artifact(arc_dir,"backend_apis.json")
         if not set(existing["requirements"]) <= set(tree.requirements):
@@ -188,6 +189,24 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 "fields": {field: value for field, value in entity["fields"].items() if f"{name}.{field}" in related}}
                 for name, entity in schema["entities"].items()
                 if any(symbol.startswith(name + ".") for symbol in related)}
+            if joint_obligations:
+                from infrastructure.stages.database.schema import check_related_fields
+                source_fields = schema["requirements"].get(rid)
+                check_related_fields(schema, source_fields)
+                related.update(source_fields)
+                # Complete definitions for source-associated tables plus FK dependencies,
+                # not the entire system schema repeated for every requirement.
+                names = {symbol.split(".", 1)[0] for symbol in related}
+                pending = list(names)
+                while pending:
+                    for field in schema["entities"][pending.pop()]["fields"].values():
+                        reference = field.get("references")
+                        if reference and reference.split(".", 1)[0] not in names:
+                            target = reference.split(".", 1)[0]
+                            names.add(target)
+                            pending.append(target)
+                related_schema = {name: entity for name, entity in schema["entities"].items() if name in names}
+                related = {f"{name}.{field}" for name, entity in related_schema.items() for field in entity["fields"]}
             request = {
                 "requirement": context, "obligations": required, "step_obligations": step_obligations,
                 "backend_foundation": foundation,
@@ -196,9 +215,18 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                 "shared_conventions": select_conventions(conventions, fields=related, requirements=[rid]),
                 "retrieved_apis": retrieved["apis"], "api_inventory": list(retrieved["apis"]),
             }
+            if joint_obligations:
+                request.pop("obligations")
+                request.pop("step_obligations")
             def accept(response):
-                nonlocal conventions
-                updated = apply_decomposition(design, response, rid, obligations, tree=tree)
+                nonlocal conventions, obligations
+                candidate_obligations = deepcopy(obligations)
+                if joint_obligations:
+                    inferred = normalize_inference(response["obligations"], tree.own_steps[rid])
+                    check_symbols([inferred["requirement"], *inferred["steps"].values()], schema)
+                    candidate_obligations["requirements"][rid] = inferred["requirement"]
+                    candidate_obligations["steps"].update(inferred["steps"])
+                updated = apply_decomposition(design, response, rid, candidate_obligations, tree=tree)
                 finalize_backend_contracts(updated,foundation)
                 check_symbols(updated["apis"].values(), schema)
                 validate_backend_contracts(updated,foundation,evidence,schema)
@@ -213,12 +241,24 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                     format_apis(selected) + "\nRequired direct obligations:\n" + format_obligations({rid: required})
                     + "\nAssigned API obligation union:\n" + format_obligations({rid: union(selected.values())}))
                 conventions = revised
+                obligations = candidate_obligations
                 return updated
 
-            updated, _ = propose_json(model, INSTRUCTIONS + "\n\n" + CONVENTION_RULES + (CONTRACT_INSTRUCTIONS if foundation.get("enabled") else ""), request, accept, console,
+            joint_rules = ""
+            if joint_obligations:
+                from infrastructure.pipeline.db_obligations import INSTRUCTIONS as EFFECT_RULES
+                joint_rules = ("\nJoint output: return apis, requirement_apis, conventions (if needed), and obligations. "
+                    "Retrieve additional schema definitions only for a specific missing source-required effect. "
+                    "obligations contains {requirement:{read:[],write:[],observation_read:[]},steps:{STEP_ID:{read:[],write:[],observation_read:[]}}}. "
+                    "Infer these independently from original scenarios, then design APIs satisfying them in this SAME response. "
+                    "Never derive obligations merely by copying your API union or omit source behavior to make coverage pass. "
+                    "The following effect rules apply ONLY inside obligations, not as the root response:\n" + EFFECT_RULES)
+            updated, _ = propose_json(model, INSTRUCTIONS + joint_rules + "\n\n" + CONVENTION_RULES + (CONTRACT_INSTRUCTIONS if foundation.get("enabled") else ""), request, accept, console,
                 f"Backend API design {rid}", max_attempts, context_index=ContextIndex(lambda: {"convention": conventions, "api": design["apis"], "schema": schema["entities"], "requirement": {key: requirement_context(tree, key) for key in tree.leaves}}))
             design = updated
             save_json(arc_dir / "backend_apis.json", design)
+            if joint_obligations:
+                save_json(arc_dir / "db_obligations.json", obligations)
             publish_routes(arc_dir.parent,design,foundation)
             save_json(arc_dir / "shared_conventions.json", conventions)
             console.artifact("backend_apis", design, f"{label} | Accepted APIs")
@@ -231,5 +271,12 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
     validate_process_coverage(design,foundation,evidence)
     publish_routes(arc_dir.parent,design,foundation)
     save_json(arc_dir / "backend_apis.json", design)
+    if joint_obligations:
+        save_json(arc_dir / "db_obligations.json", obligations)
     print(f"Backend API Primitives saved: {arc_dir / 'backend_apis.json'}", flush=True)
     return design
+
+
+def design_backend_joint(arc_dir: Path, pause: bool = False) -> dict:
+    """One model proposal per leaf for API contracts and source-based effects."""
+    return design_backend_apis(arc_dir, pause=pause, joint_obligations=True)

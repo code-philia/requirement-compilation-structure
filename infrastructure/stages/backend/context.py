@@ -10,7 +10,7 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.requirements.data import load_data, data_context
 
 
-def load_context(arc_dir: Path):
+def load_context(arc_dir: Path, *, infer_obligations=False):
     """Load the requirement tree, schema, and normalized obligations."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     tree.backend_evidence = load_evidence(arc_dir)
@@ -28,7 +28,9 @@ def load_context(arc_dir: Path):
     foundation_path = arc_dir / "backend_foundation.json"
     tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled":False}
     schema = read_artifact(arc_dir, "db_schema.json")
-    obligations = normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree)
+    obligations = ({"requirements": {rid: {"read": [], "write": []} for rid in tree.requirements},
+        "steps": {sid: {"read": [], "write": []} for sid in tree.steps}} if infer_obligations
+        else normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree))
     check_symbols([*obligations["requirements"].values(), *obligations["steps"].values()], schema)
     return tree, schema, obligations
 

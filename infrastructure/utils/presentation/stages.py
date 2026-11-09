@@ -17,6 +17,13 @@ STAGES = {
 
 def stage_label(script: str) -> str:
     """Show the pipeline stage number and its purpose."""
+    joint = {
+        "05_design_backend_joint": "Design backend APIs and source obligations together",
+        "07_design_frontend_joint": "Design UI and interactions together",
+        "10_implement_frontend_joint": "Implement UI and interactions with independent acceptance",
+    }
+    if script in joint:
+        return f"Stage {script[:2]} | {joint[script]}"
     if script == "02_design_backend_foundation":
         return "Stage 02B | Normalize backend permissions and workflows"
     number = script[:2]

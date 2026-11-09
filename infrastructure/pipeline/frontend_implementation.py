@@ -10,7 +10,7 @@ from infrastructure.utils.files import save_json
 
 
 def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = False,
-        max_turns: int = 10) -> dict:
+        max_turns: int = 10, *, joint_ui=False) -> dict:
     if max_turns < 1:
         raise ValueError("--max-turns must be positive")
     tree, schema, backend, ui, interactions, images, contexts = load_e2e_context(arc_dir, input_dir)
@@ -25,7 +25,7 @@ def implement_frontend_triggers(input_dir: Path, arc_dir: Path, pause: bool = Fa
             return report
         model = TextModel()
         result = run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,
-            contexts, model, DemoConsole(pause), report, max_turns)
+            contexts, model, DemoConsole(pause), report, max_turns, joint_ui=joint_ui)
         save_json(arc_dir / "frontend_e2e.json", result)
         print(f"Frontend requirement acceptance {result['status']}: {result['summary']}\nReport: {arc_dir / 'frontend_e2e.json'}", flush=True)
         return result
