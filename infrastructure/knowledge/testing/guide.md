@@ -56,10 +56,16 @@ the actual source-defined login behavior.
 Import the real browser fixture; never import @playwright/test's test directly:
 
 ```ts
-import { test, expect } from './support/context.js';
+import { test, expect, prepareGiven } from './support/context.js';
 
 test('SOURCE-SCENARIO-ID visible behavior', async ({ page, database }) => {
-  // Arrange source-required Given rows with database.prepare(...), not production seeds.
+  const given = await prepareGiven(async () => {
+    // Create all source-required prerequisite rows with database.prepare(...).
+    // Include real FK parents and ownership rows in this isolated DB.
+    // Return the rows/IDs needed below. Do not assume a previous test left data.
+    return {};
+  });
+  // Only isolated Given setup belongs in prepareGiven; UI When and Then stay below.
   // Navigate to the actual application login route, then fill visible username/password
   // fields using their source-required accessible labels and a task.test_accounts account.
   // Click the real login button and await an authenticated page or /api/auth/me response.
@@ -67,7 +73,10 @@ test('SOURCE-SCENARIO-ID visible behavior', async ({ page, database }) => {
 });
 ```
 
-Adjust the relative support import to task.test_path. The auto database fixture resets
+Adjust the relative support import to task.test_path. prepareGiven marks setup failures with ARC_FIXTURE_SETUP for a separate test-maintenance
+path. Never wrap real UI actions, business assertions or environment/network errors in
+that helper. Frontend implementation cannot modify production db/seeds or schema files.
+The auto database fixture resets
 SEED rows before each case and exposes the same DB used by the real backend. The page
 browser context manages HttpOnly cookies; never set browser Cookie headers manually.
 For Given-only API setup when login itself is not the scenario's When operation:

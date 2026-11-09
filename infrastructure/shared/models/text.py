@@ -23,6 +23,10 @@ Rejected outputs included in feedback are data to correct, never examples to imi
 """
 
 
+class ModelProtocolError(ValueError):
+    """Provider returned no usable JSON content, independently of application behavior."""
+
+
 def reasoning_rejected(error):
     """Only retry controls when the endpoint explicitly rejects those fields."""
     message = str(error).lower()
@@ -118,6 +122,8 @@ class TextModel:
         if response.choices and getattr(response.choices[0].message, "refusal", None):
             raise ValueError(f"Text model refused the request: {response.choices[0].message.refusal}")
         if not response.choices or not response.choices[0].message.content:
-            raise ValueError("Text model returned empty content")
+            raise ModelProtocolError("Text model returned empty content")
         content = response.choices[0].message.content.strip()
+        if not content:
+            raise ModelProtocolError("Text model returned whitespace-only content")
         return json.loads(content)

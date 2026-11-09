@@ -89,3 +89,13 @@ actual accessible names rendered by the implemented UI while retaining source la
 Do not infer expected business results from that UI. Do not launch tests from tools;
 the host handles the subsequent real-browser acceptance.
 """
+
+
+INSTRUCTIONS += """
+Import prepareGiven from the same fixture module. Wrap ONLY isolated Given setup and
+its prerequisite checks in await prepareGiven(async () => { ... }); return needed rows.
+Create minimal prerequisite warehouse/product/etc. rows there when source scenarios
+require them. Earlier tests do not leave rows behind. Do not wrap UI When actions,
+Then assertions, real feature failures or network/environment errors to relabel them
+as setup failures. Never fix missing Given state by adding production startup seed.
+"""

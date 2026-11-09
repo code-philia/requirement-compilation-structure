@@ -81,6 +81,10 @@ import { basename, dirname } from "node:path";
 import { createDatabaseClient } from "../../../../backend/src/db/client.js";
 import { initializeDatabase } from "../../../../backend/src/db/initialize.js";
 export { fixturePasswordHash } from "../../../../backend/tests/support/context.js";
+export async function prepareGiven<T>(setup: () => T | Promise<T>): Promise<T> {
+  try { return await setup(); }
+  catch (error) { throw new Error("ARC_FIXTURE_SETUP: " + (error instanceof Error ? error.message : String(error)), { cause: error }); }
+}
 export const test = base.extend<{ database: Database.Database; applicationErrors: void }>({
   database: [async ({}, use) => {
     const path = process.env.ARC_E2E_DB_FILE;

@@ -7,9 +7,11 @@ repairs cannot edit tests. Finish one requirement before advancing, then run fin
 import json
 
 from infrastructure.shared.agent.files import editable_application_path
-from infrastructure.shared.agent.loop import run_file_agent
+from infrastructure.shared.agent.feedback import TestSetupRequired
+from infrastructure.stages.frontend.triggers.diagnosis import fixture_failure, diagnose, source_coverage
+from infrastructure.shared.agent.loop import run_file_agent, RepairStalled
 from infrastructure.shared.agent.tools import FileTools
-from infrastructure.stages.frontend.triggers.acceptance import INSTRUCTIONS as TEST_INSTRUCTIONS
+from infrastructure.stages.frontend.triggers.acceptance import INSTRUCTIONS as TEST_INSTRUCTIONS, REVIEW_INSTRUCTIONS
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.stages.frontend.triggers.e2e_runtime import CONFIG, FIXTURE, prepare_e2e
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, test_path
@@ -52,17 +54,10 @@ def scenario_context(ui, design, rid):
 
 
 def editable_runtime_path(output, path):
-    """Allow evidence-driven database runtime repairs alongside application repairs."""
-    if path == "backend/src/db/bound-data.ts":
+    """Application repairs cannot mutate database baselines or test infrastructure."""
+    if path.startswith('backend/src/db/') or '/tests/' in path:
         return False
-    if (output/"backend/src/platform/settings.ts").is_file() and path in {"backend/src/db/initialize.ts","backend/src/db/seed.ts"}:
-        return False
-    if "/tests/" in path:
-        return False
-    if editable_application_path(output, path):
-        return True
-    return (path.startswith("backend/src/db/") and path.endswith((".ts", ".sql"))
-        and (output / path).is_file())
+    return editable_application_path(output, path)
 
 
 def test_run_status(result):
@@ -156,7 +151,9 @@ Use task.application_entrypoints for application integration and task.backend_en
 when backend wiring repairs are necessary. Only application sources are writable during
 implementation. All test suites, original designs and shared test tools are read-only. A test mismatch must be reported
 with original requirement evidence for a separate test review.
-When startup evidence points into existing database runtime/SQL, repair those files too.
+Database runtime/DDL/seed files are read-only here. Request an upstream database repair
+when actual startup evidence requires it. Missing scenario Given data belongs in the
+current isolated test fixture, never production seeds.
 Preserve the declared schema, constraints, previous tables and requirement-defined seed
 data; correct their executable implementation rather than removing required guarantees.
 Do not edit generated tests to repair application failures or change expected behavior.
@@ -404,6 +401,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             def implementation_gate():
                 """Require real implementations, compilation and stable requirement acceptance."""
                 result = implementation_checks()
+                if fixture_failure(result.get('e2e')):
+                    raise TestSetupRequired('Isolated Given setup needs test maintenance; production seed is protected', result)
                 try:
                     for kind in ("typecheck", "backend_typecheck"):
                         if result.get(kind) and result[kind]["returncode"]:
@@ -423,28 +422,81 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             repair_turns = 0
             # Current behavior first; only after it passes run cumulative regression.
             # A regression failure repairs with the cumulative gate until stable.
+            maintenance_count = 0
             for cumulative_check in (False, True):
                 if cumulative_check and not accepted:
-                    break  # The current suite already covers the complete set.
-                try:
-                    verified = implementation_gate()
-                except (ValueError, RuntimeError) as error:
-                    repaired = run_file_agent(model, rules, task, workspace, implementation_gate,
-                        max_turns, console, label + (' / Regression repair' if cumulative_check else ' / Behavior repair'),
-                        feedback=getattr(error, 'feedback', {'error': str(error)}))
-                    repair_turns += repaired['turns']
-                    verified = repaired['checks']
+                    break
+                while True:
+                    try:
+                        try:
+                            verified = implementation_gate()
+                        except TestSetupRequired:
+                            raise
+                        except (ValueError, RuntimeError) as error:
+                            repaired = run_file_agent(model, rules, task, workspace, implementation_gate,
+                                max_turns, console, label + (' / Regression repair' if cumulative_check else ' / Behavior repair'),
+                                feedback=getattr(error, 'feedback', {'error': str(error)}))
+                            repair_turns += repaired['turns']
+                            verified = repaired['checks']
+                        break
+                    except (TestSetupRequired, RepairStalled) as error:
+                        feedback = getattr(error, 'feedback', {'error': str(error)})
+                        decision = ({'cause': 'test_setup', 'source_refs': [rid],
+                            'reason': 'Explicit ARC_FIXTURE_SETUP failure before the feature action',
+                            'repair': 'Create required isolated Given state in the current test, preserving original When/Then'}
+                            if isinstance(error, TestSetupRequired) else diagnose(model, oracle[rid], feedback))
+                        report['requirements'][rid].setdefault('diagnoses', []).append(decision)
+                        save_json(arc_dir / 'frontend_e2e.json', report)
+                        if maintenance_count or decision.get('cause') not in {'test_setup', 'test_mismatch'}:
+                            raise
+                        maintenance_count += 1
+                        def maintenance_gate():
+                            compiled = generation_checks_for_maintenance()
+                            behavior = checks.tests([relative])
+                            if fixture_failure(behavior):
+                                raise TriggerCheckFailure('Given setup still fails', {'e2e': behavior})
+                            # Compilation and setup are maintenance acceptance. Business
+                            # assertions stay RED and are repaired in application code next.
+                            require_scenario_coverage(behavior, oracle[rid])
+                            return {'typecheck': compiled, 'behavior': behavior}
+                        def generation_checks_for_maintenance():
+                            compiled = checks.typecheck([relative], full_source=False)
+                            if compiled['returncode']:
+                                raise TriggerCheckFailure('Test maintenance compilation failed', compiled)
+                            return compiled
+                        maintenance = run_file_agent(model, REVIEW_INSTRUCTIONS + source_ui_rules +
+                            '\nRepair ONLY the evidenced isolated Given/test mismatch. Preserve all original '
+                            'scenario IDs, When UI actions, Then assertions and denial/ownership coverage. '
+                            'Never touch production seeds or move When/Then into prepareGiven. '
+                            'A business assertion RED after correct setup is expected; stop editing the test.',
+                            {**test_context, 'diagnosis': decision}, test_workspace, maintenance_gate,
+                            min(3, max_turns), console, label + ' / Source-cited test maintenance', feedback=feedback)
+                        report['requirements'][rid]['test_maintenance_turns'] = maintenance['turns']
+                        # One return to real implementation/acceptance; no review loop on every RED.
             agent = {'turns': initial['turns'] + repair_turns, 'checks': verified}
             accepted.append(rid)
             reused = tids & implemented
             implemented.update(targets)
             result = agent["checks"]["e2e"]
             report["requirements"][rid].update({"status": "GREEN", "implementation_turns": agent["turns"],
-                "steps": list(steps), "passed": result["passed"], "reused_triggers": sorted(reused)})
+                "steps": list(steps), "passed": result["passed"], "reused_triggers": sorted(reused),
+                "dependency_status": {dep: report['requirements'].get(dep, {}).get('status', 'UNKNOWN')
+                    for dep in (original_source_requirement_dependencies(original_source, rid) or [])},
+                "verification_scope": "isolated_scenarios_with_cumulative_regression"})
             save_json(arc_dir / "frontend_e2e.json", report)
             console.show(label + " | GREEN", result["output"])
         save_json(arc_dir / "frontend_e2e.json", report)
     return verify_frontend(arc_dir, tree, backend, ui, console, report)
+
+
+def original_source_requirement_dependencies(raw, rid):
+    if raw.get('id') == rid:
+        return raw.get('dependencies', [])
+    for child in raw.get('children', []) or []:
+        found = original_source_requirement_dependencies(child, rid)
+        if found is not None:
+            return found
+    return None
 
 
 def verify_frontend(arc_dir, tree, backend, ui, console, report):
@@ -468,13 +520,36 @@ def verify_frontend(arc_dir, tree, backend, ui, console, report):
         backend_typecheck=(api_checks.typecheck, None),
         backend_tests=(lambda: api_checks.tests(api_files), require_backend_green if api_files else None),
         build=(checks.build, None)))
+    raw = read_artifact(arc_dir, 'requirements.json')
+    executed = verification.get('e2e', {}).get('result') or {}
+    coverage = source_coverage(tree, raw, report, output, test_path, executed)
+    verification['source_coverage'] = coverage
+    failed_requirements = [rid for rid in tree.leaves
+        if report['requirements'].get(rid, {}).get('status') not in {'GREEN', 'NO_UI'}]
+    verification['requirement_completion'] = {'status': 'FAILED' if failed_requirements else 'GREEN',
+        'failed_requirements': failed_requirements}
+    incomplete_dependencies = [
+        {'requirement': rid, 'dependency': dep,
+         'dependency_status': report['requirements'].get(dep, {}).get('status', 'UNKNOWN')}
+        for rid in tree.leaves if report['requirements'].get(rid, {}).get('status') == 'GREEN'
+        for dep in (original_source_requirement_dependencies(raw, rid) or [])
+        if dep in tree.leaves and report['requirements'].get(dep, {}).get('status') not in {'GREEN', 'NO_UI'}]
+    verification['dependency_chain'] = {'status': 'FAILED' if incomplete_dependencies else 'GREEN',
+        'unverified_edges': incomplete_dependencies,
+        'policy': 'An isolated scenario pass does not certify a failed dependency implementation.'}
     final = verification.get("e2e", {}).get("result") or {}
     ui_final = verification.get("ui", {}).get("result") or {}
     accepted = [rid for rid in tree.leaves if report["requirements"].get(rid, {}).get("status") == "GREEN"]
     implemented = {tid for rid in accepted for tid in report["requirements"][rid].get("target_triggers", [])}
     report["summary"] = {"requirements": len(accepted), "triggers": len(implemented),
         "e2e_tests": final.get("passed", 0), "ui_tests": ui_final.get("passed", 0),
-        "failed": final.get("failed", 0) + ui_final.get("failed", 0)}
+        "failed": max(len(failed_requirements), len(coverage['missing_requirements']),
+                      int(bool(coverage['missing_scenarios'])), final.get("failed", 0) + ui_final.get("failed", 0)),
+        "failed_requirements": len(failed_requirements),
+        "failed_tests": final.get("failed", 0) + ui_final.get("failed", 0),
+        "missing_scenarios": len(coverage['missing_scenarios']),
+        "missing_test_requirements": len(coverage['missing_requirements']),
+        "unverified_dependency_edges": len(incomplete_dependencies)}
     complete_report(report, report["requirements"].values(), verification)
     save_json(arc_dir / "frontend_e2e.json", report)
     return report

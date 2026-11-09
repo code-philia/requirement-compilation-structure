@@ -3,10 +3,12 @@
 import json
 import re
 
+from infrastructure.shared.models.text import ModelProtocolError
+
 from infrastructure.shared.agent.conventions import task_conventions
 from infrastructure.shared.agent.testing_reference import testing_reference
 from infrastructure.shared.agent.context import implementation_context
-from infrastructure.shared.agent.feedback import compact_feedback
+from infrastructure.shared.agent.feedback import compact_feedback, failure_signature, TestSetupRequired
 from infrastructure.shared.agent.repairs import UpstreamRepairRequired
 
 from infrastructure.shared.agent.tools import FileTools, FileToolError
@@ -23,6 +25,14 @@ class AgentExhausted(ValueError):
         super().__init__(f"Agent exhausted {turns} rounds for {label}")
         self.turns = turns
         self.feedback = feedback
+
+
+class ProtocolExhausted(AgentExhausted):
+    """A bounded response-format retry failed before implementation checks ran."""
+
+
+class RepairStalled(AgentExhausted):
+    """Repeated actual failures need diagnosis instead of the same implementation loop."""
 
 
 def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
@@ -46,6 +56,9 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
         "round": None, "stale": False, "checks": initial}
     feedback = []
     context_batches = 0
+    last_failure, same_failure = None, 0
+    last_tool_failure, same_tool_failure = None, 0
+    protocol_retries = 0
     for turn in range(1, max_turns + 1):
         console.show(f"{label} | Edit round {turn}/{max_turns}",
             "Generate file edits, then run the stage's compilation and test acceptance checks.")
@@ -110,7 +123,30 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     request["context_result"] = context_result
                 rules = instructions + "\n\n" + FILE_TOOL_RULES
                 rules += "\nImplementation uses the supplied requirement, design, scope and related files. Semantic queries are not available."
-                return model.generate_json(rules, request)
+                nonlocal protocol_retries
+                for protocol_attempt in range(3):
+                    try:
+                        proposal = model.generate_json(rules, request)
+                        if isinstance(proposal, list) and proposal and all(
+                                isinstance(call, dict) and call.get('tool') in files.tool_registry for call in proposal):
+                            proposal = {'tool_calls': proposal}
+                        if not isinstance(proposal, dict) or not isinstance(proposal.get('tool_calls'), list):
+                            if not isinstance(proposal, dict) or 'context_request' not in proposal:
+                                raise ModelProtocolError('Return one object containing a tool_calls array')
+                        return proposal
+                    except (json.JSONDecodeError, ModelProtocolError) as error:
+                        protocol_retries += 1
+                        console.show(label + ' | Response protocol retry',
+                            f'{protocol_attempt + 1}/3: {str(error)[:200]}. No source edits or acceptance ran.')
+                        checkpoint(files.output, task=label, action='Retry malformed model response',
+                            status='REJECTED', details={'error': str(error)[:500], 'attempt': protocol_attempt + 1,
+                                'implementation_round': turn, 'acceptance_ran': False})
+                        if protocol_attempt == 2:
+                            raise ProtocolExhausted(label + ' / response protocol', turn,
+                                {'phase': 'model_protocol', 'error': str(error)[:1000]}) from error
+                        request['protocol_correction'] = (
+                            'Previous output was empty or invalid JSON. Return a single JSON object '
+                            'with tool_calls. Keep the edit batch small; no fences, prose or whitespace-only response.')
             response = request_model()
             while isinstance(response, dict):
                 if "context_request" in response:
@@ -210,15 +246,20 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             files.discovery_no_progress = 0
             checkpoint(files.output, task=label, action=f"Accept edit round {turn}",
                 details={"round": turn, "checks": checks})
-            return {"turns": turn, "checks": checks, "files": sorted(files.changed_paths)}
-        except UpstreamRepairRequired:
+            return {"turns": turn, "protocol_retries": protocol_retries, "checks": checks, "files": sorted(files.changed_paths)}
+        except (UpstreamRepairRequired, ProtocolExhausted, TestSetupRequired):
             raise
         except (*RESPONSE_ERRORS, RuntimeError, OSError) as error:
             message = str(error)
             phase = "acceptance" if checking else "tool_protocol"
             title = "Acceptance failed" if checking else "Tool feedback (checks not run)"
             console.show(f"{label} | {title}", message)
+            if checking:
+                same_tool_failure = 0
             if isinstance(error, FileToolError):
+                tool_signature = (error.feedback.get('code'), error.feedback.get('path'))
+                same_tool_failure = same_tool_failure + 1 if tool_signature == last_tool_failure else 1
+                last_tool_failure = tool_signature
                 rejected = {"error": message, "details": error.feedback}
             elif checking:
                 rejected = getattr(error, "feedback", {"error": message})
@@ -228,6 +269,14 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 rejected = {**rejected, "previous_diagnosis": response["diagnosis"]}
             rejected = feedback_filter(rejected) if feedback_filter else rejected
             if checking:
+                signature = failure_signature(rejected)
+                same_failure = same_failure + 1 if signature == last_failure else 1
+                last_failure = signature
+                if same_failure >= 2:
+                    rejected = {'checks': rejected, 'stalled_diagnosis_required': True,
+                        'instruction': 'Same failing evidence repeated. Reclassify implementation vs isolated Given/test '
+                                       'vs environment; do not change production seeds or repeat the same repair.'}
+            if checking:
                 last_acceptance = {"origin": "agent_gate", "round": turn, "stale": False, "checks": rejected}
             feedback = [{"phase": phase, "round": turn, "acceptance_ran": checking,
                 "error": message[:1600], "details": rejected,
@@ -236,4 +285,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             checkpoint(files.output, task=label, action=f"Reject edit round {turn}", status="REJECTED",
                 details={"round": turn, "applied": applied, "phase": phase,
                     "acceptance_ran": checking, "last_acceptance_stale": last_acceptance["stale"], "feedback": feedback})
+            if not checking and same_tool_failure >= 3:
+                raise RepairStalled(label + ' / repeated tool misuse requires diagnosis', turn, rejected)
+            if checking and same_failure >= 3:
+                raise RepairStalled(label + ' / repeated failure requires diagnosis', turn, rejected)
     raise AgentExhausted(label, max_turns, feedback)
