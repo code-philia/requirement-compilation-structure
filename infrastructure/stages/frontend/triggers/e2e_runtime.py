@@ -81,10 +81,8 @@ import { basename, dirname } from "node:path";
 import { createDatabaseClient } from "../../../../backend/src/db/client.js";
 import { initializeDatabase } from "../../../../backend/src/db/initialize.js";
 export { fixturePasswordHash } from "../../../../backend/tests/support/context.js";
-export async function prepareGiven<T>(setup: () => T | Promise<T>): Promise<T> {
-  try { return await setup(); }
-  catch (error) { throw new Error("ARC_FIXTURE_SETUP: " + (error instanceof Error ? error.message : String(error)), { cause: error }); }
-}
+export { prepareGiven, insertGiven, ownGiven } from "../../../../backend/tests/support/helpers.js";
+export { loginGiven, browserRequest } from "./helpers.js";
 export const test = base.extend<{ database: Database.Database; applicationErrors: void }>({
   database: [async ({}, use) => {
     const path = process.env.ARC_E2E_DB_FILE;
@@ -124,6 +122,10 @@ def prepare_e2e(output, backend):
     sources = {CONFIG: CONFIG_SOURCE, RUNNER: RUNNER_SOURCE,
         VITE_CONFIG: 'import { defineConfig, mergeConfig } from "vite";\nimport base from "./vite.config";\nexport default mergeConfig(base, defineConfig({ server: { proxy: { "/api": { target: process.env.ARC_BACKEND_URL!, changeOrigin: false } } } }));\n',
         FIXTURE: FIXTURE_SOURCE}
+    from pathlib import Path
+    templates = Path(__file__).resolve().parents[3] / 'shared/project/templates'
+    for name in ('backend/tests/support/helpers.ts', 'frontend/tests/e2e/support/helpers.ts'):
+        sources[name] = (templates / name).read_text()
     for relative, source in sources.items():
         save_text(output / relative, source)
     path = output / "package.json"

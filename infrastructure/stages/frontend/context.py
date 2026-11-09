@@ -50,6 +50,8 @@ def load_ui_context(arc_dir, input_dir):
             "images": {key: images[key] for key in refs},
             "backend_foundation": getattr(tree,"backend_foundation",{"enabled":False}),
             "platform_http": {"login":"POST /api/auth/login", "me":"GET /api/auth/me", "logout":"POST /api/auth/logout",
+                "registration_options":"GET /api/auth/registration-options returns enabled,userTypes [{id,label}].",
+                "registration":"POST /api/auth/register {username,password,userType}; show only configured source user types; after 201 return to login, no auto-login.",
                 "csrf":"Login/me returns csrfToken. Use browser cookies and X-CSRF-Token for mutations; recover via me after reload.",
                 "idempotency":"Use Idempotency-Key for workflow commands; keep key stable for retries of the same intent, generate a new key for changed inputs."} if getattr(tree,"backend_foundation",{}).get("enabled") else {}}
     return tree, images, contexts

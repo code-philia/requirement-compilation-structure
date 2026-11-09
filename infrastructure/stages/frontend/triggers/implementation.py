@@ -6,6 +6,8 @@ repairs cannot edit tests. Finish one requirement before advancing, then run fin
 
 import json
 
+from infrastructure.shared.agent.incremental import RequirementCheckpoints
+from pathlib import Path
 from infrastructure.shared.agent.files import editable_application_path
 from infrastructure.shared.agent.feedback import TestSetupRequired
 from infrastructure.stages.frontend.triggers.diagnosis import fixture_failure, diagnose, source_coverage
@@ -79,7 +81,12 @@ IMPLEMENT_INSTRUCTIONS = """Implement the current requirement's interactions in 
 Step 09's triggers are a reference prototype: preserve their requirement-defined behavior,
 not a fixed handler/context ABI, event dispatcher, store or routing implementation.
 Read the actual entrypoints, relevant components and supplied package/configuration first.
-Use the project's framework and installed dependencies. You own component events, lifecycle
+Use the project's framework and installed dependencies.
+If source registration is enabled, import RegisterPage from frontend/src/auth/RegisterPage.tsx
+and mount it at the source route (default /register). Pass loginPath and source label props
+as needed; expose registration from login/navigation only when configured. The fixed form
+loads allowed user types from the server and calls the shared register endpoint. Do not
+reimplement its role choices or add arbitrary role/unit selectors. You own component events, lifecycle
 hooks, routing, state, input conversion, request construction and response integration.
 The compiler does not regenerate App, route tables, handlers, stores or API clients.
 
@@ -208,6 +215,10 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
     original_source = read_artifact(arc_dir,"requirements.json")
     oracle = {rid:source_expectations(original_source,rid) for rid in tree.leaves}
     save_json(arc_dir/"acceptance_evidence.json",oracle)
+    resume_inputs = lambda rid: {'schema': schema, 'backend': backend,
+        'pages': scenario_context(ui, design, rid), 'source_context': contexts[rid],
+        'recipe': Path(__file__).read_text()}
+
     prepare_frontend(output)
     prepare_e2e(output, backend)
     console.show("E2E preparation | Dependencies", "Install workspace dependencies and Chromium. Each browser run owns a new real test database; production data is not used.")
@@ -264,7 +275,16 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             report["baseline"]["repair_turns"] = repair["turns"]
         report["baseline"].update(status="GREEN", checks=baseline)
     save_json(arc_dir / "frontend_e2e.json", report)
+    resume = RequirementCheckpoints(arc_dir, 'frontend', original_source, resume_inputs)
     for number, rid in enumerate(tree.leaves, 1):
+        reused = resume.reuse(rid)
+        if reused:
+            report['requirements'][rid] = reused
+            accepted.append(rid)
+            implemented.update(reused.get('target_triggers', []))
+            console.show(rid + ' | Reuse accepted frontend checkpoint', 'Source, dependencies and files are unchanged; final coverage/regression remains enabled.')
+            save_json(arc_dir / 'frontend_e2e.json', report)
+            continue
         tids = set(design["requirements"].get(rid, []))
         steps = tree.own_steps[rid]
         label = f"E2E requirement {number}/{len(tree.leaves)} {rid}"
@@ -483,9 +503,14 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 "dependency_status": {dep: report['requirements'].get(dep, {}).get('status', 'UNKNOWN')
                     for dep in (original_source_requirement_dependencies(original_source, rid) or [])},
                 "verification_scope": "isolated_scenarios_with_cumulative_regression"})
+            resume.refresh_accepted(report['requirements'], lambda key: [
+                test_path(key), FIXTURE, CONFIG, 'frontend/vite.e2e.config.ts',
+                'frontend/tests/e2e/support/helpers.ts', 'backend/tests/support/helpers.ts'])
             save_json(arc_dir / "frontend_e2e.json", report)
             console.show(label + " | GREEN", result["output"])
         save_json(arc_dir / "frontend_e2e.json", report)
+    report['incremental'] = {'checkpoint': resume.path.name, 'reused_requirements': sum(
+        bool(entry.get('reused_checkpoint')) for entry in report['requirements'].values())}
     return verify_frontend(arc_dir, tree, backend, ui, console, report)
 
 

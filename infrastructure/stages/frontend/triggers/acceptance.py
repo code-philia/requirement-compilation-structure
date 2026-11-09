@@ -99,3 +99,10 @@ require them. Earlier tests do not leave rows behind. Do not wrap UI When action
 Then assertions, real feature failures or network/environment errors to relabel them
 as setup failures. Never fix missing Given state by adding production startup seed.
 """
+
+INSTRUCTIONS += """
+The fixture module reexports loginGiven, browserRequest, insertGiven and ownGiven.
+Use them for isolated Given setup instead of regenerating Cookie/CSRF or generic insert
+helpers. Never replace an original UI When with a Given API helper. Use prepareGiven
+only around data preparation; supply all business values and FK relationships explicitly.
+"""

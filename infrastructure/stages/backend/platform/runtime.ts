@@ -337,6 +337,35 @@ export function bootstrapOwnership(db: Database.Database): void {
 }
 export function registerPlatformAuth(app: Express, db: Database.Database): void {
   const route=(work:(req:Request)=>ApiResponse):RequestHandler=>(req,res)=>{void exclusive(db,async()=>{try{return work(req);}catch(error){return errorResponse(error);}}).then(result=>{for(const [k,v]of Object.entries(result.headers??{}))res.setHeader(k,v);res.status(result.status).send(result.body);}).catch(()=>res.status(500).json({error:"Authentication operation failed"}));};
+  app.get('/api/auth/registration-options',route(()=>({status:200,body:{
+    enabled:settings.registration?.enabled ?? false,
+    userTypes:settings.registration?.enabled ? settings.registration.userTypes.map(t=>({id:t.id,label:t.label})) : []
+  }})));
+  app.post('/api/auth/register',route(req=>{
+    sameOrigin(req);
+    if(!settings.registration?.enabled)throw new Failure(404,"Registration is unavailable");
+    const body=req.body??{};
+    if(Object.keys(body).some(k=>!["username","password","userType"].includes(k)))throw new Failure(400,"Unsupported registration field");
+    const {username,password,userType}=body;
+    if(typeof username!=="string"||!username.trim()||username.length>128||typeof password!=="string"||!password.length||password.length>4096||typeof userType!=="string")
+      throw new Failure(400,"Account, password and user type required");
+    const type=settings.registration.userTypes.find(t=>t.id===userType);
+    if(!type||type.role==="admin")throw new Failure(400,"Invalid user type");
+    const name=username.trim();
+    if(db.prepare("SELECT id FROM users WHERE username=?").get(name))throw new Failure(409,"Account already exists");
+    const id=randomUUID(),salt=randomBytes(16);
+    const encoded='scrypt$'+salt.toString('hex')+'$'+scryptSync(password,salt,64).toString('hex');
+    try {
+      db.transaction(()=>{
+        db.prepare("INSERT INTO users(id,username,password_hash) VALUES(?,?,?)").run(id,name,encoded);
+        db.prepare("INSERT INTO user_ou_roles(id,user_id,unit_id,role_id) VALUES(?,?,?,?)").run(randomUUID(),id,type.unitId,type.role);
+      })();
+    } catch(error) {
+      if((error as {code?:string}).code === 'SQLITE_CONSTRAINT_UNIQUE')throw new Failure(409,"Account already exists");
+      throw error;
+    }
+    return {status:201,body:{user:{id,username:name,userType:type.id}}};
+  }));
   app.post('/api/auth/login',route(req=>{
     sameOrigin(req);
     const {username,password,unit}=req.body??{};

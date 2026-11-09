@@ -29,7 +29,7 @@ def prepare_runtime(output: Path) -> None:
     templates = Path(__file__).resolve().parents[2] / "shared/project/templates"
     if not (output / REGISTER_PATH).is_file():
         save_text(output / REGISTER_PATH, (templates / REGISTER_PATH).read_text(encoding="utf-8"))
-    for relative in (TEST_RUNNER_PATH, TEST_SUPPORT_PATH):
+    for relative in (TEST_RUNNER_PATH, TEST_SUPPORT_PATH, "backend/tests/support/helpers.ts"):
         save_text(output / relative, (templates / relative).read_text(encoding="utf-8"))
     for relative, name, command in (("package.json", "test:backend", "npm run test -w @arc/backend"), ("backend/package.json", "test", "node scripts/test-api.mjs")):
         path = output / relative

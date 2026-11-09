@@ -98,6 +98,8 @@ def prepare_frontend(output: Path) -> None:
     for relative in ("package.json", "frontend/package.json", "frontend/src/main.tsx", "frontend/tsconfig.json", "frontend/vite.config.ts"):
         if not (output / relative).is_file():
             raise ValueError(f"Missing {relative}; run main.py --stage 00 first")
+    template = Path(__file__).resolve().parents[3] / 'shared/project/templates/frontend/src/auth/RegisterPage.tsx'
+    save_text(output / 'frontend/src/auth/RegisterPage.tsx', template.read_text())
     configure_arco(output)
     configure_tailwind(output)
     enable_import_case_checks(output, "frontend")

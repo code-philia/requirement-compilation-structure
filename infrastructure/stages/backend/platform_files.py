@@ -70,6 +70,11 @@ def publish_platform(output, evidence, plan, schema, raw):
             tables[name]={"key":keys[0],"references":{key:field["references"] for key,field in entity["fields"].items() if field["references"]}}
     config = {"tables":tables, "model": evidence["authorization"]["model"], "policy": policy_text, "resources": resources,
         "boundary": plan["default_boundary"], "features": plan["features"], "machines": plan["machines"]}
+    from infrastructure.stages.backend.registration import registration_config
+    registration = registration_config(plan, evidence)
+    config['registration'] = {'enabled': registration['enabled'], 'userTypes': [
+        {'id': row['id'], 'label': row['label'], 'role': row['role'], 'unitId': units[row['unit']]}
+        for row in registration['user_types']]}
     save_text(output / "backend/src/platform/settings.ts", 'import type { PlatformSettings } from "./types.js";\nexport const settings: PlatformSettings = ' + json.dumps(config, ensure_ascii=False, indent=2) + ';\n')
     statements = []
     def insert(table, values, condition):

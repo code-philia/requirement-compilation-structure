@@ -38,6 +38,7 @@ export interface MachineSpec {
   transitions: Record<string,TransitionSpec>;
 }
 export interface PlatformSettings {
+  registration?: { enabled: boolean; userTypes: { id:string;label:string;role:string;unitId:string }[] };
   model: string; policy: string;
   resources: Record<string,{key:string;references:Record<string,string>}>;
   tables: Record<string,{key:string;references:Record<string,string>}>;

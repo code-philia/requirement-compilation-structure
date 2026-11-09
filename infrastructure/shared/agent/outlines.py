@@ -91,7 +91,10 @@ unless explicitly required by the selected identity strategy.'''
 Describe layout/navigation/forms/important visible states briefly in purpose or notes.
 Reuse shared shell/pages and source routes when specified. API IDs refer to the actual
 backend inventory. Do not design component trees, props or individual trigger records.
-Use Arco; choose components and callback wiring during implementation.'''
+Use Arco; choose components and callback wiring during implementation.
+When registration is enabled by source/foundation, plan a registration page using the
+fixed frontend/src/auth/RegisterPage.tsx and shared /api/auth/registration-options/register
+endpoints. User type labels/options come from the server; never duplicate role selection.'''
     backend = read_artifact(arc_dir, 'backend_endpoints.json') if kind == 'frontend' else None
     for rid in tree.leaves:
         request = {'requirement': contexts[rid], 'inventory': plan['items'],

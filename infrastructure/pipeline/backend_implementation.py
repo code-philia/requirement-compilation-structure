@@ -8,6 +8,7 @@ from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.files import editable_application_path
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.outlines import load_outline
+from infrastructure.shared.agent.incremental import RequirementCheckpoints
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.shared.agent.feedback import CheckFailure
 from infrastructure.shared.models.text import TextModel
@@ -76,8 +77,9 @@ A workflow transition's guards and effects are implemented as real handler logic
 platform applies state/audit and commits only successful responses. Related transitions
 use request.access.advance. Explicit assignment uses assignment:true and access.assign.
 Use access.register for newly created scoped records when needed. Default admin keeps
-all permissions; ordinary identities retain source-defined boundaries. Fixed login/me/
-logout endpoints already exist and must not be reimplemented. Use session mode only for
+all permissions; ordinary identities retain source-defined boundaries. Fixed login/me/logout and registration-options/register endpoints already exist and
+must not be reimplemented. Registration is available only when foundation.registration
+is enabled; use its server-owned user type mappings. Use session mode only for
 source-required authenticated operations with no business resource. All runtime policy
 configuration can be corrected in code by this same implementation loop.
 Without the platform, wire handlers through Express and implement required transactions
@@ -100,6 +102,9 @@ behavior ONLY from original requirements.
 Cover each original scenario, naming its ID in the executed test title. Test successful
 results, source-required rejection, unchanged state on rejection, permission/tenant
 isolation and workflow effects. Include cross-module supporting reads/foreign IDs.
+Use fixed loginSession/sessionRequest/insertGiven/ownGiven/prepareGiven from the supplied
+support module; do not regenerate login or SQL fixture wrappers. These are Given helpers,
+not substitutes for source-required When/Then assertions.
 Use node:test and node:assert/strict. Import createApiTest and fixturePasswordHash from
 task.support_module using relative .js imports. Call createApiTest(t) inside each test;
 use its database for isolated Given setup and SQL observations, and baseURL for real fetch.
@@ -128,7 +133,9 @@ def publish_inventory(arc_dir, inventory):
         for name, method, route, usage in (
             ('login', 'POST', '/api/auth/login', 'Body username/password; returns csrfToken and server-managed session cookie.'),
             ('me', 'GET', '/api/auth/me', 'Returns current principal and csrfToken using the session cookie.'),
-            ('logout', 'POST', '/api/auth/logout', 'Send session cookie and X-CSRF-Token; invalidates current session.')):
+            ('logout', 'POST', '/api/auth/logout', 'Send session cookie and X-CSRF-Token; invalidates current session.'),
+            ('registration-options', 'GET', '/api/auth/registration-options', 'Public: enabled and allowed userTypes [{id,label}].'),
+            ('register', 'POST', '/api/auth/register', 'When enabled: username,password,userType -> 201 user; 400 invalid type, 409 duplicate. No auto-login.')):
             inventory['apis']['platform-' + name] = {'description': name, 'platform_builtin': True,
                 'signature': {'name': name, 'method': method, 'path': route}, 'usage': usage,
                 'implementation': 'backend/src/platform/runtime.ts'}
@@ -152,10 +159,24 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
     accepted = []
     cached = BackendCheckCache(output, checks)
     raw = read_artifact(arc_dir, 'requirements.json')
+    resume = RequirementCheckpoints(arc_dir, 'backend', raw, lambda rid: {
+        'schema': schema, 'foundation': foundation,
+        'apis': {aid: design.get('items', {}).get(aid) for aid in design.get('requirements', {}).get(rid, [])},
+        'notes': design.get('notes', {}).get(rid),
+        'recipe': Path(__file__).read_text()})
     sources = [REGISTER_PATH, 'backend/src/api/types.ts']
     if foundation.get('enabled'):
         sources += ['backend/src/platform/types.ts']
     for rid in tree.leaves:
+        reused = resume.reuse(rid)
+        if reused:
+            relative = reused['test_path']
+            report['requirements'][rid] = reused
+            report['tests'][rid] = {rid: relative}
+            accepted.append(relative)
+            console.show(rid + ' | Reuse accepted backend checkpoint', 'Inputs and implementation files are unchanged; final regression remains enabled.')
+            save_json(arc_dir / 'backend_tdd.json', report)
+            continue
         entry = report['requirements'][rid] = {'status': 'IMPLEMENTING', 'requirements': [rid]}
         save_json(arc_dir / 'backend_tdd.json', report)
         with implementation_task(output, entry, console, rid):
@@ -254,9 +275,14 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
             accepted.append(relative)
             report['tests'][rid] = {rid: relative}
             entry.update(status='GREEN', test_path=relative)
+            resume.refresh_accepted(report['requirements'], lambda key: [
+                report['requirements'][key]['test_path'], 'backend/tests/support/context.ts',
+                'backend/tests/support/helpers.ts', 'backend/scripts/test-api.mjs', INVENTORY])
         save_json(arc_dir / 'backend_tdd.json', report)
     verification = final_checks(console, typecheck=(lambda: cached.run('typecheck'), None),
         tests=(lambda: cached.run('tests', accepted), require_green if accepted else None), build=(checks.build, None))
+    report['incremental'] = {'checkpoint': resume.path.name, 'reused_requirements': sum(
+        bool(entry.get('reused_checkpoint')) for entry in report['requirements'].values())}
     report['check_cache'] = cached.stats
     complete_report(report, report['requirements'].values(), verification)
     save_json(arc_dir / 'backend_tdd.json', report)

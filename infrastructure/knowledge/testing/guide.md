@@ -15,91 +15,73 @@ These examples describe compiler-owned helper APIs, not new business requirement
 
 ## http
 
-Use the login example only when the platform is enabled or these actual auth endpoints
-exist. Otherwise follow the source-required authentication transport.
-Import node:test and node:assert/strict. A suite under backend/tests/requirements uses:
+Use the compiler-owned backend/tests/support/context.ts, which reexports fixed helpers:
+createApiTest(t), fixturePasswordHash(password), loginSession(baseURL,account),
+sessionRequest(session,path,options), insertGiven(db,table,values), ownGiven(db,ownership)
+and prepareGiven(callback). Do not regenerate these helper implementations in each suite.
 
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApiTest, fixturePasswordHash } from '../support/context.js';
-
+import { createApiTest, loginSession, sessionRequest, prepareGiven,
+  insertGiven, ownGiven } from '../support/context.js';
 test('SOURCE-SCENARIO-ID source behavior', async t => {
-  const { database, baseURL } = createApiTest(t);
-  // Substitute a source account from task.test_accounts.
-  const login = await fetch(new URL('/api/auth/login', baseURL), {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: 'SOURCE_USERNAME', password: 'SOURCE_PASSWORD' }),
-    redirect: 'manual'
+  const {database, baseURL} = createApiTest(t);
+  const given = await prepareGiven(async () => {
+    // Source-specific values/real FK parents belong here. insertGiven generates a
+    // missing technical TEXT id only; it never guesses statuses, names or ownership.
+    return {};
   });
-  assert.equal(login.status, 200);
-  const { csrfToken } = await login.json() as { csrfToken: string };
-  const cookie = login.headers.getSetCookie().map(v => v.split(';')[0]).join('; ');
-  const headers = { Cookie: cookie, 'X-CSRF-Token': csrfToken,
-    'content-type': 'application/json' };
-  // Use headers with the actual source-required mutation route/body.
-  // Given: database.prepare('...').run(...); When: real fetch; Then: response + SQL.
+  // Substitute an actual task.test_accounts account. Use normal fetch when login
+  // itself is the When action or a rejection response must be observed.
+  const session = await loginSession(baseURL, {username:'SOURCE_USERNAME',password:'SOURCE_PASSWORD'});
+  const response = await sessionRequest(session, '/SOURCE_ROUTE', {method:'GET'});
+  // Assert the original Then, including relevant database observations.
 });
 ```
 
-createApiTest(t) returns {database, baseURL}, resets startup rows in its owned temporary
-DB and closes the connection after the test. fixturePasswordHash(password) returns a
-compatible scrypt encoding only for isolated Given accounts. Fetch has no cookie jar:
-forward Cookie explicitly; track refreshed cookie/CSRF responses. Never forge identity
-headers. For 204 skip JSON parsing. Read the supplied helper if its API changes, not the
-whole platform runtime or every previous suite. Tests execute sequentially.
+sessionRequest accepts {method,body,idempotencyKey,headers}, manages Cookie and CSRF,
+updates refreshed cookies/tokens and returns the raw fetch Response. It never turns an
+error status into success; assert source-required statuses and effects. Use separate
+sessions per actor. Login helper expects success and is only Given setup. For 204 skip
+JSON parsing. The fixture owns resets, cleanup and the temporary server/database.
 
 ## browser
 
-The fixed login/session conventions below apply to the enabled platform; otherwise use
-the actual source-defined login behavior.
-Import the real browser fixture; never import @playwright/test's test directly:
+Import test/expect and shared helpers from frontend/tests/e2e/support/context.ts;
+never import @playwright/test's test directly. Adjust the relative path to test_path.
 
 ```ts
-import { test, expect, prepareGiven } from './support/context.js';
-
-test('SOURCE-SCENARIO-ID visible behavior', async ({ page, database }) => {
+import {test,expect,prepareGiven,insertGiven,ownGiven,
+  loginGiven,browserRequest} from './support/context.js';
+test('SOURCE-SCENARIO-ID visible behavior', async ({page,database}) => {
   const given = await prepareGiven(async () => {
-    // Create all source-required prerequisite rows with database.prepare(...).
-    // Include real FK parents and ownership rows in this isolated DB.
-    // Return the rows/IDs needed below. Do not assume a previous test left data.
+    // Insert all isolated source Given rows, FK parents and ownership here.
     return {};
   });
-  // Only isolated Given setup belongs in prepareGiven; UI When and Then stay below.
-  // Navigate to the actual application login route, then fill visible username/password
-  // fields using their source-required accessible labels and a task.test_accounts account.
-  // Click the real login button and await an authenticated page or /api/auth/me response.
-  // Drive When through actual UI controls. Assert visible Then and persisted results.
+  // If login is Given only, loginGiven(page, sourceAccount) uses page.request's
+  // cookie jar. If login is the scenario When, use the actual login UI instead.
+  // All business When actions go through real UI; assert visible Then + persistence.
 });
 ```
 
-Adjust the relative support import to task.test_path. prepareGiven marks setup failures with ARC_FIXTURE_SETUP for a separate test-maintenance
-path. Never wrap real UI actions, business assertions or environment/network errors in
-that helper. Frontend implementation cannot modify production db/seeds or schema files.
-The auto database fixture resets
-SEED rows before each case and exposes the same DB used by the real backend. The page
-browser context manages HttpOnly cookies; never set browser Cookie headers manually.
-For Given-only API setup when login itself is not the scenario's When operation:
+loginGiven returns {request,csrfToken}. browserRequest(session,path,{method,data,
+idempotencyKey,headers}) performs Given-only API setup with current CSRF and browser
+cookies and returns APIResponse. UI When must not be replaced by this helper. Use a
+separate browser context/token per actor. HttpOnly cookies are browser-managed.
+prepareGiven marks only isolated data preparation failures with ARC_FIXTURE_SETUP;
+never put real When/Then or network/environment failures inside it. The DB fixture
+resets SEED data per test: earlier tests never leave records for a later test. Do not
+modify production startup seed to manufacture Given data.
 
-```ts
-const login = await page.request.post('/api/auth/login', {
-  data: { username: 'SOURCE_USERNAME', password: 'SOURCE_PASSWORD' }
-});
-expect(login.status()).toBe(200);
-const session = await login.json();
-// page.request shares this browser context's cookie jar.
-// A Given mutation uses headers: { 'X-CSRF-Token': session.csrfToken }.
-// Use a separate browser context and its own token for a second actor.
-```
-
-The normal fixture uses same-origin Vite /api proxying; preserve that host/origin setup.
-A page.request response is APIResponse; page.waitForResponse returns Response. A helper
-supporting both Page and Locator must accept Page | Locator. Arco Select uses real popup
-options, not native selectOption; locate the visible combobox by accessible label, click,
-then select the source option from the visible popup. Dialog labels and row identity
-come from the source. For a download, drive the actual UI and inspect its contents.
-Do not read platform internals to rediscover cookies or fixture initialization unless
-specific runtime evidence contradicts these documented APIs.
+insertGiven(db,table,values) uses parameterized SQL and validates actual columns;
+ownGiven(db,{resource,recordId,unitId,ownerId?,assigneeId?}) inserts isolated ownership.
+These do not invent business values, permissions or memberships. Supply real source
+fields/FK parents. No domain-specific warehouse/product data is hardcoded in templates.
+A page.request result is APIResponse; waitForResponse returns Response. Shared scope
+helpers may accept Page | Locator. Arco Select uses popup options rather than native
+selectOption. Drive actual downloads and inspect contents. Fixed platform endpoints
+apply only when enabled; otherwise use the actual source authentication transport.
 
 ## workflow
 

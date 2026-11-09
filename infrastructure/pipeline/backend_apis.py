@@ -12,7 +12,9 @@ def design_backend_joint(arc_dir: Path, pause: bool = False) -> dict:
     inventory = {}
     if tree.backend_foundation.get('enabled'):
         for name, method, route in (('login', 'POST', '/api/auth/login'),
-                ('me', 'GET', '/api/auth/me'), ('logout', 'POST', '/api/auth/logout')):
+                ('me', 'GET', '/api/auth/me'), ('logout', 'POST', '/api/auth/logout'),
+                ('registration-options', 'GET', '/api/auth/registration-options'),
+                ('register', 'POST', '/api/auth/register')):
             inventory['platform-' + name] = {
                 'purpose': 'Existing platform ' + name,
                 'method': method, 'path': route,

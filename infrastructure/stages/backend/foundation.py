@@ -58,6 +58,25 @@ feature checks, command receipts, audit, Casbin and XState. Their private tables
 infrastructure; do not invent business workflows to exercise them.'''
 
 
+INSTRUCTIONS += """
+Also include registration:{enabled:boolean,user_types:[{id,label,role,unit,requirements,source_refs}]}.
+Enable it only when source prose/scenarios explicitly require account registration.
+Use account/password registration without SMS/email verification. Types such as student,
+teacher, customer or supplier are source business identities, not arbitrary catalog roles.
+Derive each selectable user type label and its exact existing role/unit from source
+registration rules, with requirement IDs and concrete references. A sole source type is
+still one option; a source with no registration stays disabled. Never infer that all
+catalog roles are publicly selectable, grant admin via signup or let the client submit
+arbitrary memberships/organizations. If required mapping is ambiguous, keep registration
+disabled and record the missing evidence in decisions instead of guessing a default role.
+The fixed platform supplies GET /api/auth/registration-options and POST /api/auth/register.
+The latter accepts username,password,userType and atomically creates the allowed account
+and membership, returning 201 without auto-login. Existing login/me/logout remain shared.
+Registration UI uses the public options endpoint and source type labels, then returns to
+login after success. Do not implement a duplicate business registration endpoint.
+"""
+
+
 def require_refs(value, nodes):
     refs = value.get("requirements")
     if not isinstance(refs, list) or not refs or not set(refs) <= set(nodes):
@@ -159,6 +178,8 @@ def validate_foundation(plan, evidence, schema):
         require_refs(decision, nodes)
         if not decision.get("issue") or not decision.get("resolution") or not decision.get("source_refs"):
             raise ValueError("Source conflicts require traceable explicit resolutions")
+    from infrastructure.stages.backend.registration import registration_config
+    plan['registration'] = registration_config(plan, evidence)
     return plan
 
 
