@@ -4,7 +4,7 @@ import yaml
 
 from infrastructure.stages.requirements.tree import RequirementTree
 
-INSTRUCTIONS = '''Write requirement acceptance tests for ONE original requirement before its implementation.
+INSTRUCTIONS = '''Write requirement acceptance tests for ONE original requirement after its initial implementation.
 source_expectations is a model-free copy of original scenarios and external data, not
 generated API/UI expectations. Cover EVERY supplied source scenario and include its
 SCN ID verbatim in an executed test title. Assert actual Then outcomes, forbidden writes,
@@ -56,7 +56,7 @@ registration/creation implementations. Arrange scenario-specific absence or conf
 Given states in the isolated test database; still drive the current When through the UI.
 Seed additional minimal valid Given records using the documented database/test utilities. Application
 sources, shared fixtures, original requirements and other suites are not editable.
-Compilation and a real browser run check the suite during generation. Missing application
+Generation checks test compilation only. The subsequent acceptance gate runs the real browser. Missing application
 behavior is useful RED for implementation, never a reason to weaken assertions. Use edit_file to create or repair only test_path under frontend/tests/e2e/.'''
 
 REVIEW_INSTRUCTIONS = '''Review this requirement acceptance test against the original requirement.
@@ -78,3 +78,14 @@ def original_requirements(input_dir):
     if not path.is_file():
         raise ValueError('Requirement acceptance requires original input/requirements.yaml')
     return RequirementTree(yaml.safe_load(path.read_text(encoding='utf-8-sig')))
+
+
+# Shared prompt advice avoids recurring fixture/Playwright type mismatches.
+INSTRUCTIONS += """
+Use Playwright APIResponse for page.request/fetch API responses and Response for page
+network events/waitForResponse. They are different types. A helper accepting both page
+and dialog scope should type its argument Page | Locator, not Locator only. Use the
+actual accessible names rendered by the implemented UI while retaining source labels.
+Do not infer expected business results from that UI. Do not launch tests from tools;
+the host handles the subsequent real-browser acceptance.
+"""

@@ -49,9 +49,11 @@ application code in the merged backend stage. Correct them locally from source e
 there is no immutable API-design contract or automatic scoped-read contract revision.
 A genuinely missing source grant or contradictory ER still requires source review.
 input.scope declares project directories, existing filenames, related files and write limits.
-input.files already contains the COMPLETE current contents of readable related files and
-project configuration. Read those contents directly from the input; do not call read_file
-before editing a supplied file. Prefer completing the current requirement by incrementally
+input.files contains current related files and project configuration. Entries with
+content_omitted=true contain metadata only: use a targeted search or read_file line range.
+Otherwise read supplied contents directly; do not reread a fully supplied file.
+Frontend reads default to 160 lines and return at most 400 lines per call; follow the
+returned range and total_lines, and retrieve only a necessary continuation. Prefer completing the current requirement by incrementally
 modifying these associated files.
 Only read an additional file when the supplied related files are insufficient to complete
 this requirement correctly, such as a missing imported component, shared helper, integration

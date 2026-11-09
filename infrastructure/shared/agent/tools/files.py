@@ -52,6 +52,8 @@ def read_file(files, path, start_line=1, end_line=None):
         raise FileToolError("INVALID_LINE_RANGE", "Use positive, inclusive line numbers", path)
     content = read_source(target)
     lines = content.splitlines(keepends=True)
+    if files.stage in {'frontend', 'ui'}:
+        end_line = min(end_line if end_line is not None else start_line + 159, start_line + 399)
     last = min(end_line if end_line is not None else len(lines), len(lines))
     reference = None
     if files.supplied_contents.get(path) == content:

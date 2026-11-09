@@ -80,6 +80,14 @@ Use the same shell/menu/components across pages; preserve existing page and elem
 '''
 
 IMPLEMENT_INSTRUCTIONS = '''
+COMMON ARCO PITFALLS — use these facts before searching references:
+- Layout grid: import { Grid } from '@arco-design/web-react'; use Grid.Row/Grid.Col.
+  Row and Col are not top-level exports. Update imports AND every JSX usage together.
+- Select is a composite control. Supply aria-label with the original field label on
+  Select itself (e.g. aria-label="所属商品"); Form.Item text alone may not label its trigger.
+- Drawer uses visible/onCancel/footer; check its exact API before borrowing Modal-only props.
+- Make coherent, focused edit batches. When changing imports, update all matching uses.
+
 ARCO IMPLEMENTATION CONTRACT
 Follow task.frontend_stack and each element.component. Use the actual installed React
 Arco components, not styled HTML imitations or Ant Design/Vue component APIs. Import from

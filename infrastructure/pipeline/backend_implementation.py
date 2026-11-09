@@ -174,6 +174,17 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
                 if accepted:
                     require_green(checks.tests(accepted))
                 inventory = read_inventory(output)
+                planned = design.get('requirements', {}).get(rid, [])
+                linked = inventory['requirements'].get(rid, [])
+                if planned and not linked:
+                    raise CheckFailure('Implemented endpoint documentation omitted this backend requirement', {
+                        'requirement': rid, 'planned_apis': planned, 'file': INVENTORY,
+                        'repair': 'Implement the planned source behavior and associate its actual endpoint IDs. '
+                                  'A missing association does not mean NO_DIRECT_APIS. Keep original scenarios for HTTP acceptance.'})
+                missing = [aid for aid in linked if aid not in inventory['apis'] and not aid.startswith('platform-')]
+                if missing:
+                    raise CheckFailure('Document the actual implemented endpoints before acceptance',
+                        {'requirement': rid, 'missing_endpoint_ids': missing, 'file': INVENTORY})
                 return {'typecheck': typed, 'inventory': inventory}
 
             # Stage 05 already designed the APIs. Implement now without another proposal loop.

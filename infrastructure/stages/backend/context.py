@@ -82,3 +82,18 @@ def related_schema(schema, records):
     names = {field.split(".")[0] for record in records for mode in ("read", "write")
         for field in record.get(mode, [])}
     return {name: value for name, value in schema["entities"].items() if name in names}
+
+
+def requirement_schema(schema, rid):
+    """Source-linked tables and FK parents, without unrelated system table definitions."""
+    names = {symbol.split('.', 1)[0] for symbol in schema.get('requirements', {}).get(rid, [])}
+    pending = list(names)
+    while pending:
+        for field in schema['entities'].get(pending.pop(), {}).get('fields', {}).values():
+            reference = field.get('references')
+            if reference:
+                target = reference.split('.', 1)[0]
+                if target not in names:
+                    names.add(target)
+                    pending.append(target)
+    return {name: entity for name, entity in schema['entities'].items() if name in names}

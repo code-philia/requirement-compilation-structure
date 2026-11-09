@@ -14,5 +14,10 @@ def compact_feedback(item):
         return {key: compact_feedback(child) for key, child in item.items()
             if not (key in {'output', 'stdout', 'files'} and item.get('failures'))}
     if isinstance(item, list):
-        return [compact_feedback(child) for child in item]
+        kept = [compact_feedback(child) for child in item[:8]]
+        if len(item) > 8:
+            kept.append({'additional_entries_in_full_log': len(item) - 8})
+        return kept
+    if isinstance(item, str) and len(item) > 6000:
+        return item[:5000] + '\n[Middle omitted; full evidence remains in logs]\n' + item[-1000:]
     return item

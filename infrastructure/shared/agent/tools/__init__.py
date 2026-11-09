@@ -103,14 +103,24 @@ class FileTools:
         """Supply complete current readable contents, so related files need no extra read call."""
         records = {}
         self.supplied_contents = {}
-        for path in sorted(self.files):
+        budget = 60000 if self.stage in {'frontend', 'ui'} else None
+        priority = set(getattr(self, 'focus_paths', ())) | self.changed_paths
+        paths = sorted(self.files, key=lambda path: (path not in priority,
+            path.startswith('backend/'), path not in self.related_files, path))
+        for path in paths:
             target = self.path(path)
             readable = self.can_read(path)
             content = read_source(target) if target.is_file() and readable else None
-            records[path] = {"content": content, "readable": readable,
-                "writable": self.can_write(path), "exists": target.is_file()}
-            if content is not None:
+            omitted = budget is not None and content is not None and (len(content) > 16000 or len(content) > budget)
+            records[path] = {'content': None if omitted else content, 'readable': readable,
+                'writable': self.can_write(path), 'exists': target.is_file()}
+            if omitted:
+                records[path].update(content_omitted=True, total_lines=len(content.splitlines()),
+                    reason='Read only the needed line range or search the named symbol.')
+            elif content is not None:
                 self.supplied_contents[path] = content
+                if budget is not None:
+                    budget -= len(content)
         return records
 
     def schemas(self):

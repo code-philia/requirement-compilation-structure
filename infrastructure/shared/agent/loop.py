@@ -1,6 +1,7 @@
 """Bounded file editing with failure attribution and real acceptance checks."""
 
 import json
+import re
 
 from infrastructure.shared.agent.conventions import task_conventions
 from infrastructure.shared.agent.context import implementation_context
@@ -61,8 +62,25 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         if len(lines) != excerpt["total_lines"] or content != excerpt["content"]:
                             read_files.pop(path)
                             break
+                if files.stage in {'frontend', 'ui'}:
+                    failure_text = json.dumps(feedback or initial or {}, ensure_ascii=False)
+                    files.focus_paths = set(re.findall(r'(?:frontend|backend)/[\w./-]+\.(?:tsx?|jsx?|sql)', failure_text))
+                    # Retain bounded, recent excerpts; dropped excerpts can be requested again.
+                    remaining = 32000
+                    for path in reversed(list(read_files)):
+                        kept = []
+                        for excerpt in reversed(read_files[path]):
+                            size = len(excerpt['content'])
+                            if size <= remaining:
+                                kept.insert(0, excerpt)
+                                remaining -= size
+                        if kept:
+                            read_files[path] = kept
+                        else:
+                            del read_files[path]
                 request = {"task": task, "scope": files.scope_state(), "files": files.state(), "feedback": feedback,
-                    "tools": files.schemas(),
+                    "tools": [schema for schema in files.schemas() if context_batches < 4
+                        or schema.get('tool') not in {'read_file', 'list_files', 'search_files', 'bash'}],
                     "round_state": {"round": turn, "acceptance_ran": False,
                         "context_batches_remaining": max(0, 4-context_batches),
                         "next_action": "Implement now if evidence is sufficient; do not spend the remaining budget by default."},
@@ -175,7 +193,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             if checking:
                 last_acceptance = {"origin": "agent_gate", "round": turn, "stale": False, "checks": rejected}
             feedback = [{"phase": phase, "round": turn, "acceptance_ran": checking,
-                "error": message, "details": rejected,
+                "error": message[:1600], "details": rejected,
                 "next_action": "Repair the code or evidenced test issue using these fresh check results." if checking
                     else "Resolve this tool/path/target error first. No new compilation or tests ran in this round; do not infer a new business failure from stale checks."}]
             checkpoint(files.output, task=label, action=f"Reject edit round {turn}", status="REJECTED",
