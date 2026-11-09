@@ -4,6 +4,7 @@ from infrastructure.shared.agent.files import EXCLUDED
 from infrastructure.utils.files import normalize_newlines, read_source
 from infrastructure.utils.paths import check_path_case, relative_path
 from difflib import get_close_matches
+import hashlib
 
 
 class FileToolError(ValueError):
@@ -51,6 +52,7 @@ def read_file(files, path, start_line=1, end_line=None):
             (type(end_line) is not int or end_line < start_line)):
         raise FileToolError("INVALID_LINE_RANGE", "Use positive, inclusive line numbers", path)
     content = read_source(target)
+    digest = hashlib.sha256(content.encode()).hexdigest()
     lines = content.splitlines(keepends=True)
     if files.stage in {'backend', 'frontend', 'ui'}:
         end_line = min(end_line if end_line is not None else start_line + 159, start_line + 399)
@@ -66,10 +68,11 @@ def read_file(files, path, start_line=1, end_line=None):
                 reference = f"read_files[{path}]"
                 break
     if reference:
-        return {"path": path, "cached": True, "context_reference": reference,
+        return {"path": path, "cached": True, "context_reference": reference, "sha256": digest,
+            "next_action": "Reuse the unchanged supplied content at context_reference; no new file evidence.",
             "start_line": start_line, "end_line": last, "total_lines": len(lines),
             "writable": files.can_write(path)}
-    return {"path": path, "content": "".join(lines[start_line - 1:last]), "start_line": start_line,
+    return {"path": path, "sha256": digest, "content": "".join(lines[start_line - 1:last]), "start_line": start_line,
         "end_line": last, "total_lines": len(lines), "writable": files.can_write(path)}
 
 

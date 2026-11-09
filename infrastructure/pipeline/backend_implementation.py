@@ -13,7 +13,7 @@ from infrastructure.shared.agent.feedback import CheckFailure
 from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.stages.backend.context import load_context
-from infrastructure.stages.backend.implementation_context import implementation_context, acceptance_context, HTTP_EXAMPLES
+from infrastructure.stages.backend.implementation_context import implementation_context, acceptance_context
 from infrastructure.stages.backend.check_cache import BackendCheckCache
 from infrastructure.stages.backend.runtime import prepare_runtime, REGISTER_PATH, TEST_SUPPORT_PATH
 from infrastructure.stages.backend.platform_files import publish_business_runtime
@@ -216,7 +216,7 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
                     raise CheckFailure('HTTP acceptance compilation failed', result)
                 return result
 
-            run_file_agent(model, TEST_RULES + HTTP_EXAMPLES, test_context, suite, test_gate,
+            run_file_agent(model, TEST_RULES, test_context, suite, test_gate,
                 max_turns, console, rid + ' / Source HTTP acceptance')
             workspace.files.add(relative)
             workspace.available_paths.add(relative)

@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import PurePosixPath
 
 from .files import FileToolError
+from .discovery_cache import refresh_paths, query_result
 
 
 def matches_glob(path, pattern):
@@ -22,6 +23,7 @@ def matches_glob(path, pattern):
 
 
 def candidates(files, glob):
+    refresh_paths(files)
     # Validate even when the source inventory is empty.
     matches_glob('validation',glob)
     return [path for path in sorted(files.available_paths)
@@ -33,7 +35,7 @@ def bounds(offset, limit):
         raise FileToolError("INVALID_SEARCH_BOUNDS", "offset >= 0 and 1 <= limit <= 100 are required")
 
 
-def list_files(files, glob="**/*", offset=0, limit=30):
+def _list_files(files, glob="**/*", offset=0, limit=30):
     bounds(offset,limit)
     paths = candidates(files,glob)
     chosen = paths[offset:offset+limit]
@@ -41,7 +43,7 @@ def list_files(files, glob="**/*", offset=0, limit=30):
         "next_offset":offset+limit if offset+limit<len(paths) else None}
 
 
-def search_files(files, query, glob="**/*", offset=0, limit=20, context=2):
+def _search_files(files, query, glob="**/*", offset=0, limit=20, context=2):
     bounds(offset,limit)
     if not isinstance(query,str) or not query.strip() or len(query)>256:
         raise FileToolError("INVALID_SEARCH_QUERY", "Use a nonempty literal query of at most 256 characters")
@@ -83,3 +85,23 @@ def search_files(files, query, glob="**/*", offset=0, limit=20, context=2):
             excerpt_chars += size
             matches.append({"path":relative,"line_number":number+1,"context":excerpt})
     return finish(None)
+
+
+def list_files(files, glob="**/*", offset=0, limit=30):
+    bounds(offset, limit)
+    paths = candidates(files, glob)
+    return query_result(files, 'list_files', {'glob': glob, 'offset': offset, 'limit': limit},
+        paths, lambda: _list_files(files, glob, offset, limit))
+
+
+def search_files(files, query, glob="**/*", offset=0, limit=20, context=2):
+    # Validate before any cache lookup or argument normalization.
+    bounds(offset, limit)
+    if not isinstance(query, str) or not query.strip() or len(query) > 256:
+        raise FileToolError('INVALID_SEARCH_QUERY', 'Use a nonempty literal query of at most 256 characters')
+    if type(context) is not int or not 0 <= context <= 5:
+        raise FileToolError('INVALID_SEARCH_CONTEXT', 'Use 0 <= context <= 5')
+    paths = candidates(files, glob)
+    return query_result(files, 'search_files', {'query': query.casefold(), 'glob': glob,
+        'offset': offset, 'limit': limit, 'context': context}, paths,
+        lambda: _search_files(files, query, glob, offset, limit, context))

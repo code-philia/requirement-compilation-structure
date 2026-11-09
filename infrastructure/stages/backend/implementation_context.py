@@ -61,38 +61,3 @@ def acceptance_context(tree, schema, inventory, rid, oracle, accounts, test_path
         'discovery': 'Read related route handlers/DDL only for a missing transport or fixture fact. '
                      'Endpoint documentation is at backend/src/api/endpoints.json. '
                      'Prior tests and platform runtime are optional references, not required reading.'}
-
-
-HTTP_EXAMPLES = '''
-HTTP fixture and authentication reference (adapt source accounts and real endpoint fields):
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-// In backend/tests/requirements/NAME.test.ts:
-import { createApiTest } from '../support/context.js';
-
-test('SOURCE-SCENARIO-ID actual source behavior', async t => {
-  const { database, baseURL } = createApiTest(t);
-  // Choose credentials from task.test_accounts; these variables are illustrative.
-  const account = { username: 'SOURCE_USERNAME', password: 'SOURCE_PASSWORD' };
-  const login = await fetch(new URL('/api/auth/login', baseURL), {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(account), redirect: 'manual'
-  });
-  assert.equal(login.status, 200);
-  const session = await login.json() as { csrfToken: string };
-  const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
-  // Login/me can refresh or rotate session/CSRF state. Always use the latest response.
-  // For a real mutation: Cookie, X-CSRF-Token, JSON content-type;
-  // add a stable Idempotency-Key for the same workflow/bulk intent and its replay.
-  // Fetch does not keep cookies automatically. Use separate cookie/token pairs per actor.
-  // Arrange minimal Given rows via database.prepare(...).run(...), with actual DDL.
-  // Execute When through real fetch and assert source Then with response + SQL.
-});
-createApiTest owns initialization, shared seed restoration, DB cleanup and server URL.
-Never call initializeDatabase, reset the shared fixture, launch another server or invoke
-business handlers. Helpers return {database, baseURL}; fixturePasswordHash(password)
-returns a compatible scrypt hash only for isolated Given credentials. Use 0/1 booleans,
-exact decimal strings and real FK parents. For 204 do not parse JSON. Assertions follow
-source values, not example constants. Reuse this fixture API without reading all prior
-suites or platform/runtime.ts. No imposed test-count limit: cover every source scenario.
-'''

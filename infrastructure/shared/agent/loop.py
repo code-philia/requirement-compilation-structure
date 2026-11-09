@@ -4,6 +4,7 @@ import json
 import re
 
 from infrastructure.shared.agent.conventions import task_conventions
+from infrastructure.shared.agent.testing_reference import testing_reference
 from infrastructure.shared.agent.context import implementation_context
 from infrastructure.shared.agent.feedback import compact_feedback
 from infrastructure.shared.agent.repairs import UpstreamRepairRequired
@@ -36,6 +37,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
     if feedback_filter is None:
         feedback_filter = compact_feedback
     context_result = None
+    test_reference = testing_reference(task)
     read_observations = {}
     files.read_files = {}
     read_files = files.read_files
@@ -79,12 +81,20 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         else:
                             del read_files[path]
                 request = {"task": task, "scope": files.scope_state(), "files": files.state(), "feedback": feedback,
-                    "tools": [schema for schema in files.schemas() if context_batches < 4
+                    "tools": [schema for schema in files.schemas() if (context_batches < 4 and files.discovery_no_progress < 3)
                         or schema.get('tool') not in {'read_file', 'list_files', 'search_files', 'bash'}],
                     "round_state": {"round": turn, "acceptance_ran": False,
                         "context_batches_remaining": max(0, 4-context_batches),
                         "next_action": "Implement now if evidence is sufficient; do not spend the remaining budget by default."},
                     "last_acceptance": last_acceptance}
+                if test_reference:
+                    request['test_tool_reference'] = test_reference
+                if files.discovery_cache:
+                    request['discovery_cache'] = files.discovery_cache
+                if files.discovery_no_progress >= 3:
+                    request['round_state']['next_action'] = (
+                        'Repeated discovery produced no new evidence. Implement from retained content '
+                        'or report the precise blocker; discovery tools are temporarily hidden.')
                 if files.stage in {"backend", "frontend", "ui"} and files.writable is None:
                     request["implementation_context"] = implementation_context(files)
                 # A fully supplied file must not also occupy retained read context.
@@ -119,6 +129,13 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         {"tool":call["tool"],"target":call.get("path",call.get("glob","**/*"))} for call in calls]))
                     results = files.execute(calls)
                     observation = {"tool_results": results}
+                    fresh_reads = [item for item in results if item.get('tool') == 'read_file'
+                        and item.get('result', {}).get('content') is not None]
+                    if fresh_reads:
+                        files.discovery_no_progress = 0
+                    elif results and all(item.get('tool') == 'read_file' and
+                            item.get('result', {}).get('cached') for item in results):
+                        files.discovery_no_progress += 1
                     for item in results:
                         if "error" in item or item.get("tool") != "read_file":
                             continue
@@ -133,17 +150,27 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     context_result = {
                         "phase": "context_read", "acceptance_ran": False,
                         "read_paths": [item["result"]["path"] for item in results if "result" in item and item.get("tool")=="read_file"],
-                        "tool_results": [item for item in results if item.get("tool") != "read_file"],
+                        "tool_results": [{**item, 'result': {
+                            'cache_id': item['result']['cache_id'],
+                            'context_reference': 'discovery_cache[' + item['result']['cache_id'] + ']',
+                            **{key: item['result'][key] for key in ('cached', 'new_evidence', 'next_action', 'no_progress_queries')
+                               if key in item['result']}}}
+                            if item.get('result', {}).get('cache_id') in files.discovery_cache else item
+                            for item in results if item.get("tool") != "read_file"],
                         "errors": [item["error"] for item in results if "error" in item],
                         "references": [item["result"] for item in results if item.get("result", {}).get("cached")],
                     }
+                    if files.discovery_no_progress >= 2:
+                        console.show(label + ' | Reuse retained evidence',
+                            'Repeated discovery added no evidence. Implement from the shared guide/cache or identify the exact blocker.')
                     if context_result["errors"]:
                         console.show(label + " | Read feedback (checks not run)", json.dumps(context_result["errors"], ensure_ascii=False))
                     fingerprint = json.dumps(observation, sort_keys=True, ensure_ascii=False)
                     count = read_observations.get(fingerprint, 0) + 1
                     read_observations[fingerprint] = count
                     if count >= 3:
-                        raise FileToolError("REPEATED_READ", "The same read results were supplied repeatedly. Use the retained files or edit the implementation.")
+                        files.discovery_no_progress = max(files.discovery_no_progress, 3)
+                        context_result['next_action'] = 'Repeated unchanged observations. Implement now or report the exact blocker; do not repeat discovery.'
                     if count == 2:
                         context_result["next_action"] = "These read results are already retained. Use them instead of reading again."
                 else:
@@ -153,6 +180,11 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 console.show(label + " | Failure diagnosis", json.dumps(response["diagnosis"], ensure_ascii=False, indent=2))
             calls = response["tool_calls"]
             results = files.execute(calls)
+            if any(change['before'] != change['after'] for change in files.last_changes):
+                # Never present old discovery snippets after publishing application edits.
+                files.discovery_cache.clear()
+                files.discovery_seen.clear()
+                files.discovery_no_progress = 0
             for change in files.last_changes:
                 read_files.pop(change["path"], None)
                 if change["before"] != change["after"]:
@@ -175,6 +207,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
             checking = True
             context_batches = 0  # A real acceptance attempt starts a fresh repair evidence budget.
             checks = gate()
+            files.discovery_no_progress = 0
             checkpoint(files.output, task=label, action=f"Accept edit round {turn}",
                 details={"round": turn, "checks": checks})
             return {"turns": turn, "checks": checks, "files": sorted(files.changed_paths)}

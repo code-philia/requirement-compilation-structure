@@ -346,15 +346,13 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
 
             test_context = {**model_context(context), "schema": requirement_schema(schema, rid), "schema_discovery": "Read actual backend/src/db/tables/*.sql for any additional fixture tables", "test_path": relative,
                 "source_expectations":oracle[rid], "test_accounts":test_accounts(original_source)}
-            test_workspace = FileTools(output, ["frontend", "backend"], requirements=[rid], stage="frontend", discovery=True, references=arco_references(),
-                writable=[relative], files=[relative, "frontend/src/ui-runtime.ts", CONFIG, FIXTURE, "backend/tests/support/context.ts",
-                    *APPLICATION_ENTRYPOINTS,
-                    "frontend/package.json", "frontend/tsconfig.json", "frontend/vite.config.ts",
-                    "backend/src/db/initialize.ts", "backend/src/db/seed.ts", "backend/src/db/client.ts",
-                    "backend/src/api/register.ts", "backend/src/api/types.ts", "backend/src/app.ts",
-                    *[f"backend/src/db/tables/{name}.sql" for name in requirement_schema(schema, rid)],
-                    *[f"backend/src/db/seeds/{name}.sql" for name in requirement_schema(schema, rid)
-                        if (output / f"backend/src/db/seeds/{name}.sql").is_file()]])
+            test_workspace = FileTools(output, ['frontend', 'backend'], requirements=[rid], stage='frontend',
+                discovery=True, references=arco_references(), writable=[relative],
+                files=[relative, FIXTURE, *APPLICATION_ENTRYPOINTS,
+                    *[path for path in workspace.changed_paths if path.startswith('frontend/src/')]])
+            test_workspace.preferred_files = {relative, FIXTURE, *APPLICATION_ENTRYPOINTS} | {
+                path for path in workspace.changed_paths if path.startswith('frontend/src/')}
+            test_workspace.defer_context_files = True
             source_ui_rules = ("\nThe page outline is intentionally approximate. Derive visible controls, required names, "
                 "routes and explicit empty/loading/error/denied states from this requirement and its UI evidence. "
                 "Test source-required forms, dialogs and interactions through real accessible controls. "

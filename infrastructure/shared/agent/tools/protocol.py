@@ -66,6 +66,18 @@ reference_files_omitted indicates this and list_files can inspect those authoriz
 readonly_reference_roots are virtual paths backed by compiler-owned documentation outside
 the application. Search/read them normally; they are never writable. Do not copy reference
 libraries into the generated application or import virtual paths at runtime.
+test_tool_reference contains selected sections of references/testing/guide.md, with a
+source hash. For test tasks reuse these fixture/login/session/workflow APIs and examples
+before opening platform internals or prior suites. HTTP and browser tasks share the same
+versioned guide; only their relevant sections are injected. Source scenarios still define
+business expectations. Reference files are readonly and must not be copied into the app.
+Discovery results with cache_id live in input.discovery_cache. cached=true points to a
+retained result from the same arguments and unchanged file version; reuse its context_reference.
+Different line ranges, pagination or changed files are new observations. A read_file cache
+hit points to files/read_files with a content hash; a cache location is only valid while
+that content is present in the current request. Consecutive searches without new facts
+produce a next_action hint. State the exact missing fact, otherwise implement or report
+the actual blocker; do not vary query wording to repeat the same broad investigation.
 When list_files/search_files appear in input.tools, use them for a specific missing
 component/document/source definition. list_files filters paths by glob; search_files
 performs case-insensitive literal search and returns line numbers. Then read_file the

@@ -10,6 +10,7 @@ from infrastructure.shared.agent.files import editable_application_path, source_
 from infrastructure.utils.files import read_source, save_bytes, save_text
 
 from .files import FileToolError, workspace_path
+from infrastructure.shared.agent.testing_reference import ROOT as TEST_REFERENCE_ROOT
 from .schemas import TOOL_REGISTRY
 
 
@@ -28,7 +29,10 @@ class FileTools:
         self.requirements = list(dict.fromkeys(requirements))
         self.stage = stage
         self.reference_roots = {}
-        for prefix, directory in (references or {}).items():
+        mounted = dict(references or {})
+        if stage in {'backend', 'frontend', 'ui'}:
+            mounted['references/testing'] = TEST_REFERENCE_ROOT
+        for prefix, directory in mounted.items():
             if not prefix.startswith("references/") or '\\' in prefix or any(not part or part.startswith('.') for part in prefix.split('/')):
                 raise ValueError("Readonly references require a references/NAME virtual prefix")
             root = Path(directory).resolve()
@@ -48,6 +52,8 @@ class FileTools:
         if self.readable is not None:
             self.files.intersection_update(self.readable)
         self.changed_paths, self.last_changes = set(), []
+        self.discovery_cache, self.discovery_seen = {}, set()
+        self.discovery_no_progress = 0
         self.available_paths = set(self.files)
         for directory in self.scope:
             self.available_paths.update(source_paths(self.output, directory))
