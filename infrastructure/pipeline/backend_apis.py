@@ -154,6 +154,7 @@ def design_backend_apis(arc_dir: Path, pause: bool = False, top_k: int = 6, max_
                     "items": {aid: implementation_plan["items"][aid]
                         for aid in implementation_plan["requirements"][rid]},
                     "notes": implementation_plan["notes"][rid],
+                    "source_proposal": implementation_plan.get("source_proposals", {}).get(rid),
                     "policy": "Implement this outline; only add/revise operations when source evidence requires it. "
                               "Use minimal concrete I/O and conditions needed for executable routing and acceptance. "
                               "Do not elaborate implementation algorithms or duplicate business prose."}

@@ -2,9 +2,7 @@
 
 import hashlib
 import json
-from pathlib import PurePosixPath
 
-from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.files import read_artifact, save_json
 from infrastructure.utils.presentation.console import DemoConsole
@@ -40,13 +38,42 @@ def input_hashes(arc_dir, kind):
 
 def load_outline(arc_dir, kind):
     plan = read_artifact(arc_dir, kind + '_plan.json')
-    if plan.get('input_hashes') != input_hashes(arc_dir, kind) or plan.get('status') != 'GREEN':
-        raise ValueError(f'{kind} outline is incomplete or stale; rerun its planning stage')
     return plan
 
 
+def collect_outline(proposal, rid):
+    """Tolerate partial shapes; retain raw values for interpretation during implementation."""
+    if not isinstance(proposal, dict):
+        proposal = {'items': {rid: {'purpose': str(proposal), 'source_value': proposal}}}
+    raw_items = proposal.get('items', {})
+    if isinstance(raw_items, list):
+        raw_items = {str(item.get('id') or f'{rid}-item-{i}') if isinstance(item, dict)
+            else f'{rid}-item-{i}': item for i, item in enumerate(raw_items, 1)}
+    elif not isinstance(raw_items, dict):
+        raw_items = {rid: raw_items} if raw_items else {}
+    items = {}
+    for key, value in raw_items.items():
+        item = dict(value) if isinstance(value, dict) else {'purpose': str(value), 'source_value': value}
+        item.setdefault('purpose', str(key))
+        api_ids = item.get('api_ids', [])
+        item['api_ids'] = [api_ids] if isinstance(api_ids, str) else (
+            [str(aid) for aid in api_ids] if isinstance(api_ids, (list, dict)) else [])
+        items[str(key)] = item
+    uses = proposal.get('uses', [])
+    if isinstance(uses, str):
+        uses = [uses]
+    elif isinstance(uses, dict):
+        uses = list(uses)
+    elif not isinstance(uses, list):
+        uses = []
+    # Every proposed item belongs to this slice even when omitted from uses.
+    uses = list(dict.fromkeys([str(key) for key in uses] + list(items)))
+    notes = proposal.get('notes', '')
+    return items, uses, notes if isinstance(notes, str) else json.dumps(notes, ensure_ascii=False)
+
+
 def plan_requirements(arc_dir, kind, tree, contexts, *, inventory=None, pause=False, max_attempts=5):
-    """Only check identifiers/locations/references here; implementation owns details."""
+    """Collect one proposal per requirement, without design rejection or repair calls."""
     model, console = TextModel(), DemoConsole(pause)
     plan = {'status': 'RUNNING', 'kind': kind, 'input_hashes': input_hashes(arc_dir, kind),
         'items': dict(inventory or {}), 'requirements': {}, 'notes': {}}
@@ -74,45 +101,19 @@ Use Arco; choose components and callback wiring during implementation.'''
             request['backend_inventory'] = {aid: {'description': api['description'], 'signature': api['signature']}
                 for aid, api in backend['apis'].items()}
 
-        def accept(proposal):
-            items, uses = proposal['items'], proposal['uses']
-            if not isinstance(items, dict) or not isinstance(uses, list) or any(not isinstance(x, str) for x in uses):
-                raise ValueError('Outline requires items object and uses ID array')
-            if not isinstance(proposal.get('notes'), str) or (not uses and not proposal['notes'].strip()):
-                raise ValueError('Explain integration or why this requirement has no work in this layer')
-            if kind == 'frontend' and not uses and contexts[rid].get('ui_evidence', {}).get('pages'):
-                raise ValueError('This requirement cites published UI pages; retain a page entry for implementation')
-            if set(items) - set(uses):
-                raise ValueError('Only propose items used by the current requirement')
-            for key, item in items.items():
-                if not isinstance(key, str) or not key.strip():
-                    raise ValueError('Use nonempty stable outline IDs')
-                if not isinstance(item, dict) or not isinstance(item.get('purpose'), str) or not item['purpose'].strip():
-                    raise ValueError('Each item needs a concise purpose')
-                hint = item.get('implementation_hint', '')
-                if not isinstance(hint, str) or not hint.startswith(kind + '/src/') or '\\' in hint or '..' in PurePosixPath(hint).parts:
-                    raise ValueError('Use a safe suggested application source path')
-                route = item.get('path' if kind == 'backend' else 'route')
-                if not isinstance(route, str) or not route.startswith('/api/' if kind == 'backend' else '/'):
-                    raise ValueError('Supply an API or page route')
-                if kind == 'backend':
-                    if item.get('method') not in {'GET', 'POST', 'PUT', 'PATCH', 'DELETE'}:
-                        raise ValueError('Use a supported HTTP method')
-                    if key in (inventory or {}) and item != inventory[key]:
-                        raise ValueError('Reuse platform endpoints without changing them')
-                else:
-                    aids = item.get('api_ids')
-                    if not isinstance(aids, list) or any(not isinstance(x, str) or x not in backend['apis'] for x in aids):
-                        raise ValueError('Page API IDs must refer to implemented backend contracts')
-            if not set(uses) <= set(plan['items']) | set(items):
-                raise ValueError('Unknown outline item ID')
-            return proposal
-
-        proposal, _ = propose_json(model, RULES + shape, request, accept, console,
-            f'{kind.title()} outline {rid}', max_attempts)
-        plan['items'].update(proposal['items'])
-        plan['requirements'][rid] = list(dict.fromkeys(proposal['uses']))
-        plan['notes'][rid] = proposal['notes']
+        console.show(f'{kind.title()} outline {rid}',
+            'Collect one outline; implementation resolves missing details and associations.')
+        proposal = model.generate_json(RULES + shape, request)
+        # Retain the exact response as evidence. Normalization is only an adapter to
+        # downstream dictionaries; it must not reject or silently lose model suggestions.
+        plan.setdefault('source_proposals', {})[rid] = proposal
+        items, uses, notes = collect_outline(proposal, rid)
+        plan['items'].update(items)
+        for key in uses:
+            if key not in plan['items']:
+                plan['items'][key] = {'purpose': key, 'unresolved_outline_reference': True}
+        plan['requirements'][rid] = uses
+        plan['notes'][rid] = notes
         save_json(path, plan)
     plan['status'] = 'GREEN'
     save_json(path, plan)

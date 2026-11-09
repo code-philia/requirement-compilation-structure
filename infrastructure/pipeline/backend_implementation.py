@@ -250,7 +250,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "implementation_outline": {
                             "items": {key: implementation_plan["items"][key]
                                 for key in implementation_plan["requirements"][rid]},
-                            "notes": implementation_plan["notes"][rid]},
+                            "notes": implementation_plan["notes"][rid],
+                            "source_proposal": implementation_plan.get("source_proposals", {}).get(rid)},
                     }
                     workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend", discovery=True,
                         files=[relative, *supplied_sources(output, api, schema)], writable=[relative])
@@ -291,7 +292,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "implementation_outline": {
                             "items": {key: implementation_plan["items"][key]
                                 for key in implementation_plan["requirements"][rid]},
-                            "notes": implementation_plan["notes"][rid]},
+                            "notes": implementation_plan["notes"][rid],
+                            "source_proposal": implementation_plan.get("source_proposals", {}).get(rid)},
                         "implementation_path": implementation_path(aid) if foundation.get("enabled") else None,
                         "backend_foundation": foundation,
                         "api_wiring": {"registry": REGISTER_PATH, "app": "backend/src/app.ts",

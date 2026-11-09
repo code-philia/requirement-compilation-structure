@@ -22,7 +22,7 @@ def model_context(context):
     """Supply selected triggers, complete page data, API contracts and derived DB effects."""
     if context.get("outline"):
         return {key: context[key] for key in (
-            "page_subtrees", "backend_apis", "requirement", "implementation_notes") if key in context}
+            "page_subtrees", "backend_apis", "requirement", "implementation_notes", "unresolved_api_hints") if key in context}
     selected = set(context["triggers"])
     triggers = {tid: context["triggers"][tid] for tid in sorted(selected)}
     called = {aid for trigger in triggers.values() for aid in api_ids(trigger)}

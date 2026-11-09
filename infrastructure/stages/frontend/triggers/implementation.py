@@ -295,6 +295,9 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
             called.update(aid for page in pages.values() for aid in page.get("api_ids", []))
             called.update(backend["requirements"].get(rid, []))
             called.update(aid for aid, api in backend["apis"].items() if api.get("platform_builtin"))
+        if ui.get("outline"):
+            context["unresolved_api_hints"] = sorted(called - set(backend["apis"]))
+            called.intersection_update(backend["apis"])
         context["obligations"] = {tid: trigger_obligations(trigger, backend) for tid, trigger in context["triggers"].items()}
         context.update({"requirement": contexts[rid],
             "target_trigger_ids": sorted(targets),
