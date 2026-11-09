@@ -2,6 +2,7 @@
 
 import json
 import re
+import uuid
 
 from infrastructure.shared.agent.feedback import CheckFailure, compact_feedback
 from infrastructure.shared.agent.tools import FileTools
@@ -15,6 +16,7 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.backend.context import requirement_context
 from infrastructure.utils.files import read_artifact, save_json, save_text
 from infrastructure.stages.database.runtime import seed_source
+from infrastructure.stages.database.seeds import MANIFEST, SEED_RULES, seed_assertions
 from infrastructure.stages.requirements.data import load_data, publish_seed_data, DATA_INSTRUCTIONS
 from infrastructure.stages.backend.platform_files import IDENTITY_TABLES
 
@@ -28,126 +30,47 @@ WIRING = (
     "backend/scripts/copy-db.mjs", "package.json", "backend/package.json", "backend/tsconfig.json",
 )
 
-SEED_INSTRUCTIONS = DATA_INSTRUCTIONS + '''If compiler platform bootstrap exists, users, roles, org_units and user_ou_roles are
-already bootstrapped from source accounts. Preserve them; do not duplicate/reset identities.
-The compiler-owned identity/session/audit seed files are read-only. Do not add team
-memberships, mirror roles across units or infer authorization from a scenario's setup.
-Fixture variations belong in isolated test setup, never the shared application seed.
-Business prerequisite rows still belong in their canonical per-table insertion files.
-For explicit multi-unit or ownership prerequisites, maintain record_access rows with
-correct resource/record_id/unit_id/owner_id/assignee_id; never assign every record to
-one unit when requirements specify multiple units. The single-unit initial bootstrap
-can assign otherwise-unowned seed rows to that sole unit, without guessing ownership.
-Read the current requirement and incrementally maintain its prerequisite database rows.
-Each table has one insertion file: backend/src/db/seeds/ENTITY.sql. The compiler has
-created these files and a dependency-ordered seed.ts loader. Edit only the insertion
-SQL files; do not put records or INSERT statements in seed.ts or the table DDL files.
-task.insert_files identifies the current tables. task.table_names lists the canonical
-table names; their DDL is in backend/src/db/tables/ENTITY.sql. If another table is needed,
-read its DDL and insertion SQL directly. Semantic queries are not available in this stage.
-Only canonical database table/insertion files are readable; other application files and
-requirements are outside this task. The password helper contract is specified below;
-there is no need to inspect the seed loader or other infrastructure.
-
-Identify data that must EXIST BEFORE this requirement's When actions:
-- System/domain data users cannot create through the application, such as train services,
-  reference catalogues, built-in roles or already stocked books.
-- Existing users, books, shelves and other domain records stated in Given or explicit
-  seed/prerequisite sections. Include these even when another requirement implements
-  their creation: login must be testable with a pre-existing account independently of
-  registration, and reading/editing content must not depend on its creation workflow.
-- Include the related parent rows and association rows needed to make these records valid.
-Preserve exact names, credentials, contents, relationships and initial status supplied by
-requirements. For omitted mandatory fields, choose minimal valid deterministic values.
-Do not discard prerequisites merely because they occur in a scenario rather than a
-sentence saying "system startup". Use the supplied complete requirement and its scenarios.
-If a generic reference such as "an existing verified account" does not identify concrete
-records, do not invent a separate account, password or object. The defining leaf requirement
-will supply those records during this pass. Fill omitted mandatory fields only for records
-whose identity is actually established by this requirement.
-
-Do not pre-execute the current When/Then. A record created by this scenario's operation
-must remain absent until that operation. Do not fabricate authenticated sessions, personal
-history, favorites or drafts that the requirement explicitly establishes through login
-or other UI actions. Browser/session state is not a database seed prerequisite.
-Different scenarios may need different preconditions. Seed their distinct prerequisite
-objects with the exact specified identities; scenario-specific absence, counts or mutable
-states can still be arranged by isolated test fixtures. If constraints prevent coexistence,
-keep the shared baseline valid and leave conflicting scenario variations to test setup.
-Return tool_calls=[] only when no prerequisite rows need adding or correcting.
-
-Read relevant existing insertion SQL, then append missing rows or replace a small exact
-span. Preserve ALL earlier requirements' records and comments; never replace a whole
-file or rebuild it for only the current requirement. Mark related statements with the
-requirement ID. A table's insertion file inserts only into that table; put its parents
-and associations in their own files. SELECT subqueries may resolve existing foreign keys.
-Use stable identifiers/business keys and SQLite INSERT ... SELECT ... WHERE NOT EXISTS,
-or a targeted ON CONFLICT ... DO NOTHING. Avoid INSERT OR IGNORE, which hides invalid data.
-Repeated startup must not duplicate records, overwrite user edits or reset credentials.
-Do not DELETE, DROP, REPLACE, change table definitions, disable constraints or suppress errors.
-The loader executes these files in table-dependency order inside the initialization
-transaction; foreign-key checks are deferred until all seed files have executed.
-
-For password-hash columns, use the SQL function seed_password_hash('required password').
-It returns scrypt$saltHex$digestHex using a 16-byte salt and a 64-byte digest, compatible
-with the documented test credential format. Never store a plaintext password in a hash
-column or invent a digest. The password function is called by SQL only for missing rows.
-Escape SQL literals correctly; use 0/1 booleans and valid JSON text when required.
-Real initialization/build checks run after this pass and the database owner repairs errors.
-'''
-
-
 def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=10):
-    """Create per-table files, then accumulate prerequisite rows one requirement at a time."""
+    """Implement explicit source data against completed DDL in one coordinated pass."""
     output = arc_dir.parent.resolve()
     order = [name for group in implementation_groups(schema) for name in group]
     insert_paths = {name: f"backend/src/db/seeds/{name}.sql" for name in order}
     for name, relative in insert_paths.items():
         if not (output / relative).is_file():
-            save_text(output / relative, f"-- Prerequisite rows for {name}; extended incrementally by requirement.\n")
+            save_text(output / relative, f"-- Explicit startup data for {name}.\n")
     save_text(output / SEED_PATH, seed_source(order))
-    checkpoint(output, stage="04", task="startup data loader", action="Publish per-table insertion files and loader",
-        details={"insertion_order": order, "insert_files": insert_paths})
-
+    catalog = load_data(arc_dir)
+    publish_seed_data(output, schema, catalog)
+    business = {key: row for key, row in catalog["records"].items()
+        if row["lifecycle"] == "SEED" and row["entity"] != "test account"}
+    if not business:
+        return
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
-    tree.validation_data = load_data(arc_dir)
+    tree.validation_data = catalog
     from infrastructure.stages.backend.evidence import load_evidence
     tree.backend_evidence = load_evidence(arc_dir)
-    tree.backend_foundation = read_artifact(arc_dir,"backend_foundation.json") if (arc_dir/"backend_foundation.json").is_file() else {"enabled":False}
-    publish_seed_data(output, schema, tree.validation_data)
-    dependencies = table_dependencies(schema)
-    readable = set(insert_paths.values()) | {f"backend/src/db/tables/{name}.sql" for name in order}
-    protected_seeds = {insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths} if tree.backend_foundation.get("enabled") else set()
-    allowed = set(insert_paths.values()) - protected_seeds
-    for rid in tree.leaves:
-        requirement = requirement_context(tree, rid)
-        if not requirement["description"] and not requirement["steps"]:
-            continue
-        with failures.task("startup data / " + rid):
-            names = set()
-            for symbol in schema["requirements"].get(rid, []):
-                names.add(symbol.split(".", 1)[0])
-            pending = list(names)
-            while pending:
-                for parent in dependencies[pending.pop()]:
-                    if parent not in names:
-                        names.add(parent)
-                        pending.append(parent)
-            entities = {name: schema["entities"][name] for name in sorted(names)}
-            references = [f"backend/src/db/tables/{name}.sql" for name in entities
-                if (output / f"backend/src/db/tables/{name}.sql").is_file()]
-            references.extend(insert_paths[name] for name in sorted(names))
-            files = FileTools(output, ["backend/src/db"], requirements=[rid], stage="database",
-                files=references, writable=allowed, readable=readable)
-            task = {"requirement": requirement, "entities": entities, "table_names": order,
-                "reserved_created_locators": {key:record["locator"] for key,record in tree.validation_data["records"].items() if record["lifecycle"] != "SEED"},
-                "insert_files": {name: insert_paths[name] for name in sorted(names)}}
+    tree.backend_foundation = read_artifact(arc_dir, "backend_foundation.json")
+    protected = {insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths} if tree.backend_foundation.get("enabled") else set()
+    readable = set(insert_paths.values()) | {f"backend/src/db/tables/{name}.sql" for name in order} | {MANIFEST}
+    files = FileTools(output, ["backend/src/db"], requirements=list(tree.leaves), stage="database",
+        files=[], writable=(set(insert_paths.values()) - protected) | {MANIFEST}, readable=readable)
+    task = {"catalog": business, "entities": schema["entities"],
+        "source_sha256": catalog["source_sha256"], "schema_sha256": catalog["schema_sha256"],
+        "manifest_path": MANIFEST, "insert_files": insert_paths,
+        "requirements": [requirement_context(tree, rid) for rid in tree.leaves],
+        "reserved_future_data": {key: row for key, row in catalog["records"].items()
+            if row["lifecycle"] != "SEED"},
+        "identity_references": {key: {"username": row["properties"].get("username"),
+            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, "arc-backend:user:" + row["properties"]["username"]))}
+            for key, row in catalog["records"].items() if row["entity"] == "test account"}}
 
-            def generated():
-                return {"status": "GENERATED", "insert_files": list(files.changed_paths)}
+    def generated():
+        assertions = seed_assertions(output, schema, catalog)
+        return {"status": "GENERATED", "source_records": len(business), "observed_rows": len(assertions)}
 
-            run_file_agent(model, SEED_INSTRUCTIONS, task, files, generated,
-                max_turns, console, "Startup data / " + rid)
+    with failures.task("startup data / semantic SQL implementation"):
+        run_file_agent(model, DATA_INSTRUCTIONS + SEED_RULES, task, files, generated,
+            max_turns, console, "Implement explicit startup data")
 
 
 REPAIR_INSTRUCTIONS = '''Repair the actual database implementation and its startup wiring.
@@ -226,9 +149,9 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
     if protected:
         protected.update(insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths)
     workspace = FileTools(output, ["backend", "package.json"], requirements=list(schema.get("requirements", {})),
-        stage="database", files=WIRING, writable=allowed-protected, readable=allowed)
+        stage="database", files=WIRING, writable=allowed-protected, readable=allowed | {MANIFEST})
     task = {"table_order": [name for group in implementation_groups(schema) for name in group],
-        "startup_data_loader": SEED_PATH,
+        "startup_data_loader": SEED_PATH, "seed_evidence": MANIFEST,
         "insertion_directory": "backend/src/db/seeds",
         "database_path": "backend/data/app.db", "entities": {}}
     dependencies = table_dependencies(schema)
@@ -238,6 +161,8 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
         text = json.dumps(value, ensure_ascii=False)
         selected = {name for name in sql_paths if f"{name}.sql" in text
             or re.search(r"Missing (?:table|column): " + re.escape(name) + r"(?!\w)", text)}
+        if "SEED" in text or "seed" in text:
+            selected.update(sql_paths)
         pending = list(selected)
         while pending:
             name = pending.pop()
@@ -246,8 +171,8 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
                     selected.add(target)
                     pending.append(target)
         # Retain wiring and replace the previous failing table context instead of accumulating it.
-        workspace.files = set(WIRING) | {sql_paths[name] for name in selected} | {insert_paths[name] for name in selected}
-        workspace.writable = set(workspace.files)-protected
+        workspace.files = set(WIRING) | {MANIFEST} | {sql_paths[name] for name in selected} | {insert_paths[name] for name in selected}
+        workspace.writable = (set(workspace.files) | set(insert_paths.values())) - protected - {MANIFEST}
         task["entities"] = {name: schema["entities"][name] for name in sorted(selected)}
         return value
 

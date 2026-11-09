@@ -28,6 +28,14 @@ def load_context(arc_dir: Path, *, infer_obligations=False):
     foundation_path = arc_dir / "backend_foundation.json"
     tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled":False}
     schema = read_artifact(arc_dir, "db_schema.json")
+    from infrastructure.stages.database.seeds import MANIFEST, seed_assertions
+    seed_path = arc_dir.parent / MANIFEST
+    if seed_path.is_file():
+        seed_assertions(arc_dir.parent, schema, tree.validation_data)
+        import json
+        resolutions = json.loads(seed_path.read_text(encoding="utf-8-sig"))["records"]
+        for key, resolution in resolutions.items():
+            tree.validation_data["records"][key]["seed_resolution"] = resolution
     obligations = ({"requirements": {rid: {"read": [], "write": []} for rid in tree.requirements},
         "steps": {sid: {"read": [], "write": []} for sid in tree.steps}} if infer_obligations
         else normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree))

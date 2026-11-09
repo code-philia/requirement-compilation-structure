@@ -15,7 +15,9 @@ scenario-local fixtures, without stealing the identities/unique keys of CREATED 
 Capture created IDs from real responses or scoped unique-key queries. Use source record
 IDs as symbolic references, not invented persisted business keys. Compare expected fields
 after the relevant action, including exact decimal strings. An unbound source field or
-entity is a documented input gap, never permission to ignore it or invent a binding.
+entity requires semantic resolution against ER, requirement prose and actual DDL.
+Preserve source evidence and document the resolution; do not reject label differences
+or silently omit records. Seed SQL is implemented after table creation SQL.
 Persisted field values have one shared meaning across requirements. Preserve exact
 source codes and literals (including their language) in seed data, isolated Given
 fixtures, API writes, selectors and filters. Do not silently translate a stored status
@@ -84,9 +86,11 @@ def compile_data(raw, schema):
         for key, target in record["references"].items():
             if target not in records:
                 raise ValueError(f"{rid}.{key}: unknown data reference {target}")
-            target_entity = schema["entities"][record["entity"]]["fields"][key]["references"].split('.')[0]
+            reference = schema["entities"][record["entity"]]["fields"][key].get("references")
+            target_entity = reference.split(".")[0] if reference else None
             if target_entity != records[target]["entity"] and not (target_entity == "users" and records[target]["entity"] == "test account"):
-                raise ValueError(f"{rid}.{key}: data reference entity mismatch")
+                record["issues"].append(f"{key}: resolve reference entity from source evidence")
+                record["status"] = "unresolved"
             if record["lifecycle"] == "SEED" and records[target]["lifecycle"] != "SEED":
                 raise ValueError(f"SEED {rid} cannot reference a later-created record")
     requirements = {}
@@ -132,43 +136,13 @@ def load_data(arc_dir):
 
 
 def publish_seed_data(output, schema, catalog):
-    """Compiler-owned SEED inserts; CREATED/DERIVED never enter this SQL."""
-    def quote(name):
-        return '"' + name.replace('"', '""') + '"'
-    def literal(value):
-        if value is None: return "NULL"
-        if isinstance(value, bool): return "1" if value else "0"
-        if isinstance(value, (dict, list)): value = json.dumps(value, ensure_ascii=False)
-        return "'" + str(value).replace("'", "''") + "'"
-    statements = []
-    for rid, record in catalog["records"].items():
-        if record["lifecycle"] != "SEED" or record["entity"] == "test account":
-            continue
-        if record["status"] != "bound":
-            raise ValueError(f"SEED {rid} needs canonical data binding: {record['issues']}")
-        values = dict(record["fields"])
-        for key, target in record["references"].items():
-            other = catalog["records"][target]
-            if other["entity"] == "test account":
-                values[key] = str(uuid.uuid5(uuid.NAMESPACE_URL,"arc-backend:user:"+other["properties"]["username"]))
-                continue
-            target_field = schema["entities"][record["entity"]]["fields"][key]["references"].split('.')[1]
-            if other["status"] != "bound" or target_field not in other["fields"]:
-                raise ValueError(f"Cannot initialize {rid}: unresolved SEED reference {target}")
-            values[key] = other["fields"][target_field]
-        table = quote(record["entity"])
-        locator = record["locator"]
-        where = ' AND '.join(quote(k)+'='+literal(v) for k,v in locator.items())
-        statements.append(f'INSERT INTO {table} ('+','.join(map(quote,values))+') SELECT '+','.join(map(literal,values.values()))+f' WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {where});')
-    sql = '\n'.join(statements)
-    save_text(output / "backend/src/db/bound-data.ts", 'import type Database from "better-sqlite3";\nexport function seedBoundData(db: Database.Database): void { db.exec('+json.dumps(sql)+'); }\n')
-    path = output / "backend/src/db/initialize.ts"
-    source = path.read_text()
-    if "seedBoundData" not in source:
-        marker = "      seedDatabase(connection);"
-        if marker not in source: raise ValueError("Missing database seed hook")
-        source = 'import { seedBoundData } from "./bound-data.js";\n' + source.replace(marker,"      seedBoundData(connection);\n"+marker)
-        save_text(path, source)
+    """Publish source evidence; actual INSERT SQL belongs to the seed agent."""
+    # Old initialized workspaces may still import this hook. Never run their obsolete
+    # static INSERTs alongside the new per-table SQL implementation.
+    path = output / "backend/src/db/bound-data.ts"
+    if path.exists():
+        save_text(path, 'import type Database from "better-sqlite3";\n'
+            'export function seedBoundData(_db: Database.Database): void {}\n')
     save_json(output / ".arc/data_bindings.json", catalog)
 
 

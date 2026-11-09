@@ -63,7 +63,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
         raise ValueError("--max-turns must be positive")
     source = arc_dir / "db_schema.json"
     if not source.is_file():
-        raise ValueError("Run main.py --stage 02 first to create .arc/db_schema.json")
+        raise ValueError("Run --stage 02_design_backend_foundation first to collect ER metadata in .arc/db_schema.json")
     output_dir = arc_dir.parent.resolve()
     for required in ("backend/package.json", "backend/src/db/client.ts", "backend/src/db/initialize.ts"):
         if not (output_dir / required).is_file():
@@ -148,7 +148,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
         details={"table_order": order, "published_tables": list(implementations)})
     print(f"Database initialization wired: {initializer}", flush=True)
     if order:
-        # Revisit requirements after DDL: preserve and extend each table's prerequisite rows.
+        # Resolve explicit source data after DDL; never infer startup rows from hypothetical scenarios.
         implement_startup_data(arc_dir, schema, model, console, failures, max_attempts)
     with failures.task("database runtime"):
         verified = verify_database_runtime(arc_dir, schema, model, console, max_turns)

@@ -195,6 +195,14 @@ def add_platform_schema(schema):
 
 def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
     raw = read_artifact(arc_dir, "requirements.json")
+    # ER is the database authority. This is deterministic evidence import, not
+    # an independent model database-design pass. Metadata supports later checks.
+    from infrastructure.stages.database.er import import_er_schema
+    imported = import_er_schema(raw, input_dir)
+    if imported is None:
+        raise ValueError("Database implementation requires published ER evidence; no separate schema inference stage is used")
+    save_json(arc_dir / "db_schema.json", imported)
+    save_json(arc_dir / "er_import.json", imported["er_import"])
     evidence = compile_evidence(raw, input_dir)
     save_json(arc_dir / "backend_evidence.json", evidence)
     if not evidence["enabled"]:

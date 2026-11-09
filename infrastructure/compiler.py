@@ -5,7 +5,6 @@ import traceback
 
 from infrastructure.pipeline.project_initialization import project_initialization
 from infrastructure.pipeline.requirements import explore_requirement
-from infrastructure.pipeline.db_schema import build_db_schema
 from infrastructure.stages.backend.foundation import design_backend_foundation
 from infrastructure.pipeline.database import implement_db
 from infrastructure.pipeline.backend_apis import design_backend_joint
@@ -21,10 +20,9 @@ from infrastructure.utils.presentation.events import begin_run, finish_run, begi
 PIPELINE = (
     ("00_project_initialization", project_initialization, "project_files"),
     ("01_explore_requirement", explore_requirement, "requirements"),
-    ("02_build_db_schema", build_db_schema, "db_schema"),
     ("02_design_backend_foundation", design_backend_foundation, "backend_foundation"),
-    ("05_design_backend_joint", design_backend_joint, "backend_apis"),
     ("04_implement_db", implement_db, "db_implementations"),
+    ("05_design_backend_joint", design_backend_joint, "backend_apis"),
     ("06_implement_backend_tdd", implement_backend_tdd, "backend_checks"),
     ("07_design_frontend_joint", design_frontend_joint, "frontend_design"),
     ("10_implement_frontend_joint", implement_frontend_joint, "frontend_e2e"),
@@ -107,8 +105,6 @@ class Compiler:
                     result = self._run(name, function, self.input_dir, self.output_dir, port=self.port, pause=self.pause)
                 elif function is design_backend_foundation:
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
-                elif function is build_db_schema:
-                    result = self._run(name, function, self.arc_dir, input_dir=self.input_dir, pause=self.pause)
                 elif function in (explore_requirement, design_frontend_joint, implement_frontend_joint):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
                 else:

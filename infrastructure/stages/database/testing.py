@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 
 from infrastructure.utils.processes import capture_process, npm_command
 from infrastructure.stages.requirements.data import load_data, startup_assertions
+from infrastructure.stages.database.seeds import seed_assertions
 from infrastructure.stages.backend.platform_files import identity_startup_assertions
 
 
@@ -195,7 +196,7 @@ class DatabaseChecks:
                     "tables": {name: list(entity["fields"]) for name, entity in self.schema["entities"].items()},
                     "schema":self.schema["entities"],
                     "identity_accounts":identity,
-                    "validation_data":startup_assertions(load_data(self.output/".arc")),
+                    "validation_data":startup_assertions(load_data(arc)) + seed_assertions(self.output, self.schema, load_data(arc)),
                     "setup": [*npm_command(), "run", "db:init", "--workspace", "@arc/backend"]}
                 runner = Path(temporary) / "check-database.mjs"
                 arguments = Path(temporary) / "plan.json"
