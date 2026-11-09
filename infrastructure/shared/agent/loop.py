@@ -62,7 +62,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         if len(lines) != excerpt["total_lines"] or content != excerpt["content"]:
                             read_files.pop(path)
                             break
-                if files.stage in {'frontend', 'ui'}:
+                if files.stage in {'backend', 'frontend', 'ui'}:
                     failure_text = json.dumps(feedback or initial or {}, ensure_ascii=False)
                     files.focus_paths = set(re.findall(r'(?:frontend|backend)/[\w./-]+\.(?:tsx?|jsx?|sql)', failure_text))
                     # Retain bounded, recent excerpts; dropped excerpts can be requested again.
@@ -87,6 +87,10 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     "last_acceptance": last_acceptance}
                 if files.stage in {"backend", "frontend", "ui"} and files.writable is None:
                     request["implementation_context"] = implementation_context(files)
+                # A fully supplied file must not also occupy retained read context.
+                for path in list(read_files):
+                    if path in files.supplied_contents:
+                        read_files.pop(path)
                 if read_files:
                     request["read_files"] = read_files
                 conventions = task_conventions(files.output, task)

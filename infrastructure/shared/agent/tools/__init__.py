@@ -100,18 +100,19 @@ class FileTools:
             "related_files": sorted(path for path in self.related_files if self.can_read(path))}
 
     def state(self):
-        """Supply complete current readable contents, so related files need no extra read call."""
+        """Prioritize relevant bodies within budget; omitted files stay discoverable/readable."""
         records = {}
         self.supplied_contents = {}
-        budget = 60000 if self.stage in {'frontend', 'ui'} else None
-        priority = set(getattr(self, 'focus_paths', ())) | self.changed_paths
+        budget = 60000 if self.stage in {'backend', 'frontend', 'ui'} else None
+        priority = set(getattr(self, 'focus_paths', ())) | self.changed_paths | set(getattr(self, 'preferred_files', ()))
         paths = sorted(self.files, key=lambda path: (path not in priority,
-            path.startswith('backend/'), path not in self.related_files, path))
+            path.startswith('backend/') if self.stage != 'backend' else False, path not in self.related_files, path))
         for path in paths:
             target = self.path(path)
             readable = self.can_read(path)
             content = read_source(target) if target.is_file() and readable else None
-            omitted = budget is not None and content is not None and (len(content) > 16000 or len(content) > budget)
+            deferred = getattr(self, 'defer_context_files', False) and path not in priority
+            omitted = content is not None and (deferred or (budget is not None and (len(content) > 16000 or len(content) > budget)))
             records[path] = {'content': None if omitted else content, 'readable': readable,
                 'writable': self.can_write(path), 'exists': target.is_file()}
             if omitted:

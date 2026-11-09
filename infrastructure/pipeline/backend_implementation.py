@@ -12,7 +12,9 @@ from infrastructure.shared.agent.recovery import implementation_task, final_chec
 from infrastructure.shared.agent.feedback import CheckFailure
 from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.project.dependencies import install_dependencies
-from infrastructure.stages.backend.context import load_context, requirement_context
+from infrastructure.stages.backend.context import load_context
+from infrastructure.stages.backend.implementation_context import implementation_context, acceptance_context, HTTP_EXAMPLES
+from infrastructure.stages.backend.check_cache import BackendCheckCache
 from infrastructure.stages.backend.runtime import prepare_runtime, REGISTER_PATH, TEST_SUPPORT_PATH
 from infrastructure.stages.backend.platform_files import publish_business_runtime
 from infrastructure.stages.backend.testing import BackendChecks, require_green
@@ -58,8 +60,9 @@ for EVERY business route. Export/use normal ApiHandler functions receiving reque
 connection. The platform owns authentication, CSRF, transactions, scope, ownership,
 idempotency, audit and state transitions. Do not replace or bypass it, open another DB,
 start transactions in handlers, manually mutate workflow state or edit platform files.
-Read the supplied platform/types.ts and settings.ts for the exact runtime API and source
-resource/action/machine IDs. RoutePolicy is ordinary code configuration beside registration:
+Use supplied platform/types.ts and backend_foundation/source evidence for runtime APIs
+and source resource/action/machine IDs. Read platform/settings.ts only for a specific
+missing configuration detail; do not load the entire runtime or all existing tests by default. RoutePolicy is ordinary code configuration beside registration:
 {security:{mode:'policy',permissions:[{resource:'...',action:'...'}],features:[],
 resource:'...',action:'...',record_id:'params.id' or null,operation:'read|create|update|delete|command|bulk'},
 readResources:['resource'],writeTables:['table'],workflow:null or
@@ -90,8 +93,10 @@ contradiction in original ER/source or shared infrastructure requires upstream r
 '''
 
 TEST_RULES = '''Write HTTP acceptance tests for the supplied original requirement and scenarios.
-There is no generated API contract: inspect actual route/handler code and endpoint docs
-for the transport, but derive expected business behavior ONLY from original requirements.
+There is no generated API contract. Supplied endpoint usage and fixed fixture examples
+normally suffice for transport. Inspect a specific route/handler only for missing facts;
+do not read all historical tests or platform runtime by default. Derive expected business
+behavior ONLY from original requirements.
 Cover each original scenario, naming its ID in the executed test title. Test successful
 results, source-required rejection, unchanged state on rejection, permission/tenant
 isolation and workflow effects. Include cross-module supporting reads/foreign IDs.
@@ -145,34 +150,25 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
     model, console, checks = TextModel(), DemoConsole(pause), BackendChecks(output)
     report = {'mode': 'source_implementation', 'status': 'IMPLEMENTING', 'requirements': {}, 'tests': {}}
     accepted = []
+    cached = BackendCheckCache(output, checks)
     raw = read_artifact(arc_dir, 'requirements.json')
-    sources = [REGISTER_PATH, INVENTORY, 'backend/src/api/types.ts', TEST_SUPPORT_PATH]
+    sources = [REGISTER_PATH, 'backend/src/api/types.ts']
     if foundation.get('enabled'):
-        sources += ['backend/src/platform/types.ts', 'backend/src/platform/settings.ts']
+        sources += ['backend/src/platform/types.ts']
     for rid in tree.leaves:
         entry = report['requirements'][rid] = {'status': 'IMPLEMENTING', 'requirements': [rid]}
         save_json(arc_dir / 'backend_tdd.json', report)
         with implementation_task(output, entry, console, rid):
-            context = {'requirement': requirement_context(tree, rid), 'db_schema': schema,
-                'api_design': {'items': {aid: design.get('items', {}).get(aid, {'purpose': aid})
-                    for aid in design.get('requirements', {}).get(rid, [])},
-                    'notes': design.get('notes', {}).get(rid, ''),
-                    'source_proposal': design.get('source_proposals', {}).get(rid)},
-                'api_inventory': design.get('items', {}),
-                'backend_foundation': foundation, 'source_expectations': source_expectations(raw, rid),
-                'existing_endpoint_documentation': read_artifact(arc_dir, 'backend_endpoints.json')
-                    if (arc_dir / 'backend_endpoints.json').is_file() else {},
-                'endpoint_documentation': INVENTORY, 'registry': REGISTER_PATH}
+            context = implementation_context(tree, schema, design, rid)
             workspace = FileTools(output, ['backend'], requirements=[rid], stage='backend',
                 discovery=True, files=sources,
                 allow_write=lambda path: path.startswith('backend/src/') and editable_application_path(output, path))
+            workspace.preferred_files = set(sources) | {path for path in workspace.related_files
+                if path.startswith('backend/src/') and not path.startswith(('backend/src/db/', 'backend/src/platform/'))
+                and path != INVENTORY}
+            workspace.defer_context_files = True
 
-            def code_gate():
-                typed = checks.typecheck(accepted)
-                if typed['returncode']:
-                    raise CheckFailure('Backend source compilation failed', typed)
-                if accepted:
-                    require_green(checks.tests(accepted))
+            def endpoint_gate():
                 inventory = read_inventory(output)
                 planned = design.get('requirements', {}).get(rid, [])
                 linked = inventory['requirements'].get(rid, [])
@@ -185,7 +181,13 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
                 if missing:
                     raise CheckFailure('Document the actual implemented endpoints before acceptance',
                         {'requirement': rid, 'missing_endpoint_ids': missing, 'file': INVENTORY})
-                return {'typecheck': typed, 'inventory': inventory}
+                return inventory
+
+            def code_gate():
+                typed = cached.run('typecheck', [])
+                if typed['returncode']:
+                    raise CheckFailure('Backend source compilation failed', typed)
+                return {'typecheck': typed, 'inventory': endpoint_gate()}
 
             # Stage 05 already designed the APIs. Implement now without another proposal loop.
             implemented = run_file_agent(model, IMPLEMENT_RULES, context, workspace,
@@ -197,44 +199,65 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
                 save_json(arc_dir / 'backend_tdd.json', report)
                 continue
             relative = 'backend/tests/requirements/' + hashlib.sha256(rid.encode()).hexdigest()[:16] + '.test.ts'
-            test_context = {**context, 'implemented_endpoints': inventory, 'test_path': relative,
-                'support_module': TEST_SUPPORT_PATH, 'test_accounts': test_accounts(raw)}
+            test_context = acceptance_context(tree, schema, inventory, rid,
+                source_expectations(raw, rid), test_accounts(raw), relative, TEST_SUPPORT_PATH)
+            # Supply the fixed helper and current handlers, not all application wiring
+            # or historical tests. Related extra files remain discoverable metadata.
+            current_paths = [api.get('implementation') for aid, api in inventory['apis'].items()
+                if aid in inventory['requirements'].get(rid, []) and api.get('implementation')]
             suite = FileTools(output, ['backend'], requirements=[rid], stage='backend',
-                discovery=True, files=[*sources, relative], writable=[relative])
+                discovery=True, files=[relative, TEST_SUPPORT_PATH, *current_paths], writable=[relative])
+            suite.preferred_files = {relative, TEST_SUPPORT_PATH, *current_paths}
+            suite.defer_context_files = True
 
             def test_gate():
-                result = checks.typecheck([*accepted, relative])
+                result = cached.run('typecheck', [relative])
                 if result['returncode']:
                     raise CheckFailure('HTTP acceptance compilation failed', result)
                 return result
 
-            run_file_agent(model, TEST_RULES, test_context, suite, test_gate,
+            run_file_agent(model, TEST_RULES + HTTP_EXAMPLES, test_context, suite, test_gate,
                 max_turns, console, rid + ' / Source HTTP acceptance')
             workspace.files.add(relative)
             workspace.available_paths.add(relative)
+            workspace.preferred_files.add(relative)
+
+            cumulative = False
 
             def acceptance_gate():
-                result = code_gate()
-                tested = checks.tests([*accepted, relative])
+                selected = [*accepted, relative] if cumulative else [relative]
+                # Compile exactly the tested suites; code_gate already handles docs.
+                result = {'inventory': endpoint_gate()}
+                typed = cached.run('typecheck', selected)
+                if typed['returncode']:
+                    raise CheckFailure('Backend acceptance compilation failed', typed)
+                result['typecheck'] = typed
+                tested = cached.run('tests', selected)
                 require_green(tested)
                 result['tests'] = tested
                 return result
 
-            try:
-                verified = acceptance_gate()
-            except (ValueError, RuntimeError) as error:
-                repaired = run_file_agent(model, IMPLEMENT_RULES, context, workspace,
-                    acceptance_gate, max_turns, console, rid + ' / Repair backend',
-                    feedback=getattr(error, 'feedback', {'error': str(error)}))
-                verified = repaired['checks']
+            # Repair current behavior first. Only then regress accepted requirements.
+            # Cache successful calls by all backend source/test/config content, so an
+            # unchanged suite is not executed again during final verification.
+            for cumulative in ((False, True) if accepted else (False,)):
+                try:
+                    verified = acceptance_gate()
+                except (ValueError, RuntimeError) as error:
+                    repaired = run_file_agent(model, IMPLEMENT_RULES, context, workspace,
+                        acceptance_gate, max_turns, console,
+                        rid + (' / Regression repair' if cumulative else ' / Repair backend'),
+                        feedback=getattr(error, 'feedback', {'error': str(error)}))
+                    verified = repaired['checks']
             # Publish only accepted implementation docs; rejected task files roll back.
             publish_inventory(arc_dir, verified['inventory'])
             accepted.append(relative)
             report['tests'][rid] = {rid: relative}
             entry.update(status='GREEN', test_path=relative)
         save_json(arc_dir / 'backend_tdd.json', report)
-    verification = final_checks(console, typecheck=(checks.typecheck, None),
-        tests=(lambda: checks.tests(accepted), require_green if accepted else None), build=(checks.build, None))
+    verification = final_checks(console, typecheck=(lambda: cached.run('typecheck'), None),
+        tests=(lambda: cached.run('tests', accepted), require_green if accepted else None), build=(checks.build, None))
+    report['check_cache'] = cached.stats
     complete_report(report, report['requirements'].values(), verification)
     save_json(arc_dir / 'backend_tdd.json', report)
     return report

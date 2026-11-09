@@ -52,7 +52,7 @@ input.scope declares project directories, existing filenames, related files and 
 input.files contains current related files and project configuration. Entries with
 content_omitted=true contain metadata only: use a targeted search or read_file line range.
 Otherwise read supplied contents directly; do not reread a fully supplied file.
-Frontend reads default to 160 lines and return at most 400 lines per call; follow the
+Application reads default to 160 lines and return at most 400 lines per call; follow the
 returned range and total_lines, and retrieve only a necessary continuation. Prefer completing the current requirement by incrementally
 modifying these associated files.
 Only read an additional file when the supplied related files are insufficient to complete
