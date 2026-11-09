@@ -1,6 +1,28 @@
 """One file protocol for every implementation task."""
 
 FILE_TOOL_RULES = '''Implement the supplied requirement and design incrementally.
+Work evidence-first, then implement promptly: identify the entrypoint, relevant contract,
+existing implementation owner and concrete acceptance target. Once these are sufficient,
+make a coherent edit batch immediately. Do not seek exhaustive knowledge of the repository.
+Normally spend zero to two focused context batches before editing. The host allows at most
+four batches (eight calls each) between real acceptance attempts, including Bash diagnostics.
+Batch independent missing-file queries. Every additional read must resolve a named unknown;
+do not reopen supplied files, reread retained excerpts, or repeatedly scan broad directories.
+After a failing check, inspect only its specific missing evidence and repair the cause.
+Do not run acceptance merely to reset the context budget. If a contract blocks implementation,
+request the smallest evidenced upstream revision instead of wandering through more files.
+
+When bash appears in input.tools it runs in a disposable authorized-file snapshot, with
+readonly installed dependencies, no network and no inherited provider keys. Use it for a
+specific diagnostic (rg, a short script, or a focused local command). Set a bounded timeout.
+The working directory is /workspace. Bash writes, builds and temporary files are discarded;
+publish all source changes with edit_file so scope, atomic edits and provenance remain valid.
+Do not install dependencies, inspect secrets, launch persistent services, or run the whole
+suite repeatedly. A shell exit code is diagnostic evidence, never the stage acceptance result.
+If sandbox initialization fails, use file tools and report the environment issue; do not
+request or simulate unrestricted host execution.
+Example: {"tool_calls":[{"tool":"bash","command":"rg -n 'handleSubmit' frontend/src","timeout_seconds":30}]}.
+
 If correct source-required behavior cannot fit the canonical schema, obligations, API,
 UI/trigger contract or compiler runtime, use request_design_revision with requirement IDs,
 concrete source references and the smallest proposed correction. Send that control call

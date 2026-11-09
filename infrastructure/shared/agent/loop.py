@@ -41,6 +41,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
     last_acceptance = {"origin": "initial_observation" if initial is not None else "not_run",
         "round": None, "stale": False, "checks": initial}
     feedback = []
+    context_batches = 0
     for turn in range(1, max_turns + 1):
         console.show(f"{label} | Edit round {turn}/{max_turns}",
             "Generate file edits, then run the stage's compilation and test acceptance checks.")
@@ -61,7 +62,9 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                             break
                 request = {"task": task, "scope": files.scope_state(), "files": files.state(), "feedback": feedback,
                     "tools": files.schemas(),
-                    "round_state": {"round": turn, "acceptance_ran": False},
+                    "round_state": {"round": turn, "acceptance_ran": False,
+                        "context_batches_remaining": max(0, 4-context_batches),
+                        "next_action": "Implement now if evidence is sufficient; do not spend the remaining budget by default."},
                     "last_acceptance": last_acceptance}
                 if read_files:
                     request["read_files"] = read_files
@@ -79,6 +82,14 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     raise FileToolError("QUERY_DISABLED", "Implementation tasks do not query designs. Use the supplied requirement/design and read_file within scope.")
                 elif "tool_calls" in response and files.effect(response["tool_calls"]) == "read":
                     calls = response["tool_calls"]
+                    if context_batches >= 4:
+                        raise FileToolError("CONTEXT_BUDGET_EXHAUSTED",
+                            "Four context batches already collected for this implementation attempt. "
+                            "Use supplied/retained evidence and edit now, run acceptance with [], or request an evidenced upstream revision. "
+                            "Further reads do not reset the budget.")
+                    if len(calls) > 8:
+                        raise FileToolError("CONTEXT_BATCH_TOO_LARGE", "Batch at most eight focused context calls")
+                    context_batches += 1
                     console.show(label + " | Read/discover files", str([
                         {"tool":call["tool"],"target":call.get("path",call.get("glob","**/*"))} for call in calls]))
                     results = files.execute(calls)
@@ -137,6 +148,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 details={"round": turn, "files": [change["path"] for change in files.last_changes],
                     "diagnosis": response.get("diagnosis")})
             checking = True
+            context_batches = 0  # A real acceptance attempt starts a fresh repair evidence budget.
             checks = gate()
             checkpoint(files.output, task=label, action=f"Accept edit round {turn}",
                 details={"round": turn, "checks": checks})

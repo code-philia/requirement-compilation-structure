@@ -2,6 +2,7 @@
 
 from .files import edit_file, read_file
 from .search import list_files, search_files
+from .shell import bash
 from infrastructure.shared.agent.repairs import request_design_revision, TARGETS
 
 
@@ -15,6 +16,9 @@ def definition(name, description, properties, required, example):
 
 STRING = {"type": "string"}
 TOOL_REGISTRY = {
+    "bash": (bash, definition("bash", "Run bounded Bash diagnostics in a disposable authorized-file snapshot. No network or host secrets. Installed dependencies are readonly. Shell writes are discarded; publish changes via edit_file. Requires Linux bubblewrap; never substitutes for acceptance gates.",
+        {"command": STRING, "timeout_seconds": {"type":"integer", "minimum":1}}, ["command"],
+        {"tool":"bash", "command":"rg -n 'handleSubmit' frontend/src", "timeout_seconds":30}), "read"),
     "request_design_revision": (request_design_revision, definition("request_design_revision",
         "Request a source-backed upstream contract/compiler correction instead of editing protected artifacts or weakening tests. Pauses this task and records impacted stages for review/recompilation.",
         {"target":{"type":"string","enum":list(TARGETS)},"requirements":{"type":"array","items":STRING},

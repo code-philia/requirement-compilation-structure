@@ -2,6 +2,8 @@
 
 from copy import deepcopy
 from pathlib import Path
+import shutil
+import sys
 
 from infrastructure.shared.agent.context import FILE_LINKS, project_files, related_files, record_files
 from infrastructure.shared.agent.files import editable_application_path, source_paths
@@ -36,6 +38,8 @@ class FileTools:
         self.discovery = discovery
         self.tool_registry = {name:entry for name,entry in TOOL_REGISTRY.items()
             if discovery or name not in {"list_files","search_files"}}
+        if sys.platform != "linux" or not shutil.which("bwrap"):
+            self.tool_registry.pop("bash", None)
         self.related_files = set(files) | related_files(self.output, self.requirements)
         self.files = self.related_files | project_files(self.output, self.scope)
         self.writable = set(writable) if writable is not None else None
