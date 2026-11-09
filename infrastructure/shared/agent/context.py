@@ -74,7 +74,7 @@ def project_files(output, scope):
 
 
 def record_files(output, requirements, stage, paths):
-    """Record every known or edited file; a requirement may own any number of files."""
+    """Record edited files; references alone must not imply implementation ownership."""
     if not requirements or not paths:
         return
     path = output / ".arc" / FILE_LINKS
@@ -83,3 +83,42 @@ def record_files(output, requirements, stage, paths):
         stages = links.setdefault(rid, {})
         stages[stage] = sorted(set(stages.get(stage, [])) | set(paths))
     save_json(path, links)
+
+
+def implementation_context(files):
+    """Offer real landing points and shared consumers without another discovery stage."""
+    output = files.output
+    links_path = output / ".arc" / FILE_LINKS
+    links = read_artifact(output / ".arc", FILE_LINKS) if links_path.is_file() else {}
+    # Refresh after every edit; dependency reads are hints too, never exclusive ownership.
+    relevant = files.related_files | set(files.read_files) | files.changed_paths
+    owners = {}
+    for rid, stages in links.items():
+        for paths in stages.values():
+            for path in set(paths) & relevant:
+                if files.can_read(path) and files.path(path).is_file():
+                    owners.setdefault(path, set()).add(rid)
+    entrypoints = [path for path in (
+        "backend/src/server.ts", "backend/src/app.ts", "backend/src/api/register.ts",
+        "frontend/src/main.tsx", "frontend/src/App.tsx")
+        if files.can_read(path) and files.path(path).is_file()]
+    api_paths = {}
+    mapping = output / ".arc/backend_implementation_files.json"
+    if mapping.is_file():
+        api_paths = {aid: path for aid, path in read_artifact(output / ".arc", mapping.name).items()
+            if files.can_read(path) and files.path(path).is_file()}
+    contract_path = output / ".arc/backend_apis.json"
+    contracts = read_artifact(output / ".arc", contract_path.name) if contract_path.is_file() else {}
+    api_locations = {}
+    for aid, path in api_paths.items():
+        api = contracts.get("apis", {}).get(aid, {})
+        signature = api.get("signature", {})
+        api_locations[aid] = {"path": path,
+            "method": signature.get("method"), "route": signature.get("path"),
+            "operation": signature.get("name"),
+            "requirements": [rid for rid, ids in contracts.get("requirements", {}).items() if aid in ids]}
+    return {"entrypoints": entrypoints, "api_implementations": api_locations,
+        "file_requirements": {path: sorted(ids) for path, ids in sorted(owners.items())},
+        "changed_files": sorted(files.changed_paths),
+        "policy": "Reuse actual owners; connect every new module to a real caller; preserve shared consumers. "
+                  "These paths are discovery hints, not a required file layout or exclusive write scope."}

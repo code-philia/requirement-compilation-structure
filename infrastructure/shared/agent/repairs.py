@@ -6,16 +6,12 @@ from uuid import uuid4
 from infrastructure.utils.files import save_json
 
 TARGETS = {
-    "schema":"02_build_db_schema", "backend_foundation":"02_design_backend_foundation",
-    "obligations":"03_infer_db_obligations", "backend_api":"05_design_backend_apis",
-    "ui_design":"07_design_ui", "triggers":"09_design_frontend_triggers",
-    "acceptance":"10_implement_frontend_tdd", "validation_data":"02_design_backend_foundation",
-    "input_evidence":"01_explore_requirement",
-    "compiler_runtime":"compiler_maintenance",
+    "schema": "02_design_backend_foundation", "backend_foundation": "02_design_backend_foundation",
+    "obligations": "05_design_backend_joint", "backend_api": "05_design_backend_joint",
+    "ui_design": "07_design_frontend_joint", "triggers": "07_design_frontend_joint",
+    "acceptance": "10_implement_frontend_joint", "validation_data": "04_implement_db",
+    "input_evidence": "01_explore_requirement", "compiler_runtime": "compiler_maintenance",
 }
-STAGES = ["01_explore_requirement","02_build_db_schema","02_design_backend_foundation","03_infer_db_obligations",
-    "04_implement_db","05_design_backend_apis","06_implement_backend_tdd","07_design_ui",
-    "08_implement_ui","09_design_frontend_triggers","10_implement_frontend_tdd"]
 
 
 class UpstreamRepairRequired(RuntimeError):
@@ -40,7 +36,10 @@ def request_design_revision(files, target, requirements, source_refs, reason, pr
     if not set(requirements) <= known:
         raise ValueError("Revision request cites an unknown requirement")
     stage = TARGETS[target]
-    affected = STAGES[STAGES.index(stage):] if stage in STAGES else list(STAGES)
+    # Resolve at call time to avoid compiler/stage import cycles and stale stage lists.
+    from infrastructure.compiler import PIPELINE
+    stages = [name for name, _, _ in PIPELINE]
+    affected = stages[stages.index(stage):] if stage in stages else stages
     record = {"id":"REV-"+uuid4().hex[:12], "status":"PENDING_REVIEW", "requesting_stage":files.stage,
         "target":target,"target_stage":stage,"issue_code":issue_code,"requirements":requirements,"source_refs":source_refs,
         "reason":reason,"proposed_change":proposed_change,"potentially_affected_stages":affected,

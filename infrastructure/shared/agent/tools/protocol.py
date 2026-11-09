@@ -4,6 +4,21 @@ FILE_TOOL_RULES = '''Implement the supplied requirement and design incrementally
 Work evidence-first, then implement promptly: identify the entrypoint, relevant contract,
 existing implementation owner and concrete acceptance target. Once these are sufficient,
 make a coherent edit batch immediately. Do not seek exhaustive knowledge of the repository.
+For application tasks, implementation_context gives actual entrypoints, existing API
+implementation paths and previous file associations. Associations are navigation hints,
+not exclusive ownership or proof that a file is correct. Follow the real imports/calls
+before choosing an implementation location. Reuse an existing business owner before
+creating a parallel implementation. A new requirement/API/trigger ID does not imply a
+new file. New helpers must be imported and invoked from the actual application entry chain.
+In the first edit diagnosis, briefly state the entrypoint -> business/component owner ->
+shared helpers/API path and why each edited file belongs there. Include the integration
+edit in the same coherent batch as a new module. Do not leave an unregistered route,
+unmounted page, unused service or duplicate event listener as a completed implementation.
+No separate planning stage or file-location artifact is required.
+After a failure distinguish a wrong path/export/import/registration from wrong business
+logic. Repair the real owner and its callers, not a duplicate file with a guessed name.
+Use implementation_context.file_requirements to notice shared-file consumers; preserve
+all their behavior. The host's cumulative regression gates remain the acceptance authority.
 Normally spend zero to two focused context batches before editing. The host allows at most
 four batches (eight calls each) between real acceptance attempts, including Bash diagnostics.
 Batch independent missing-file queries. Every additional read must resolve a named unknown;

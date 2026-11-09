@@ -196,7 +196,7 @@ class FileTools:
             for path, content in self._pending.items():
                 save_text(self.path(path), content)
                 written.append(path)
-            known = {path for path in self.related_files if self.can_write(path) and self.path(path).is_file()} | set(self._pending)
+            known = set(self._pending)
             if self.requirements and known:
                 index_changed = True
                 record_files(self.output, self.requirements, self.stage, known)

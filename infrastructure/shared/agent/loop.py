@@ -3,6 +3,7 @@
 import json
 
 from infrastructure.shared.agent.conventions import task_conventions
+from infrastructure.shared.agent.context import implementation_context
 from infrastructure.shared.agent.feedback import compact_feedback
 from infrastructure.shared.agent.repairs import UpstreamRepairRequired
 
@@ -66,6 +67,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                         "context_batches_remaining": max(0, 4-context_batches),
                         "next_action": "Implement now if evidence is sufficient; do not spend the remaining budget by default."},
                     "last_acceptance": last_acceptance}
+                if files.stage in {"backend", "frontend", "ui"} and files.writable is None:
+                    request["implementation_context"] = implementation_context(files)
                 if read_files:
                     request["read_files"] = read_files
                 conventions = task_conventions(files.output, task)

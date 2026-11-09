@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from infrastructure.shared.agent.tools import FileTools
+from infrastructure.shared.agent.files import editable_application_path
 from infrastructure.shared.agent.loop import run_file_agent
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
 from infrastructure.stages.backend.context import load_context, requirement_context, supplied_sources, related_schema, api_requirement_uses
@@ -93,8 +94,9 @@ using a relative .js ESM import. Return status/body/optional headers, not Expres
 Implement request validation, API preconditions, success/rejection responses and DB
 effects according to the contract and scenarios. Use the supplied connection, parameterized
 better-sqlite3 SQL. When task.backend_foundation.enabled is true, the compiler owns the
-transaction and API registry: implement the handle at task.implementation_path only and
-never edit wiring or begin/commit/rollback a transaction. Otherwise use transactions for
+transaction and API registry: keep the exported handle at task.implementation_path and reuse or implement related
+business services/validators/helpers in backend/src as needed. Wire their imports into
+the real handle; never edit compiler-owned wiring or begin/commit/rollback a transaction. Otherwise use transactions for
 related writes and wire the route as described below. Respect schema-generated integer
 keys and use node:crypto for UUIDs or hashing when the schema/contract requires them.
 Use the supplied test utilities and generated tests to understand existing fixture data
@@ -119,9 +121,9 @@ pass concrete parameter names and values to handle. Preserve cookies and error h
 Use read_file with optional line ranges, to inspect related wiring; read only the relevant missing
 lines and use a unique exact edit_file replacement. Do not start the production server in source code.
 Preserve unrelated behavior when repairing other supplied writable backend sources.
-Generated tests can be corrected against requirement and API evidence when their
-expectations or fixtures are wrong or overly strict. Preserve required success and
-rejection coverage; do not weaken a valid assertion to accept broken behavior.
+Tests are read-only during implementation. If source evidence proves a test mismatch,
+report the precise discrepancy for separate review; never change expected behavior
+to make an implementation pass.
 SQL, designs, test utilities and compiler infrastructure remain references.
 The compiler starts the real server and runs current/accepted HTTP API suites after TypeScript checks. Repair implementation
 failures without weakening assertions or detecting tests to fake business behavior.
@@ -242,7 +244,7 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "support_module": TEST_SUPPORT_PATH,
                         "api_uses": api_requirement_uses(tree,contracts["requirements"],aid),
                     }
-                    workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend",
+                    workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend", discovery=True,
                         files=[relative, *supplied_sources(output, api, schema)], writable=[relative])
                     agent = run_file_agent(model, TEST_INSTRUCTIONS + (PLATFORM_TEST_INSTRUCTIONS if foundation.get("enabled") else ""), context, workspace,
                         test_gate, max_turns, console, label + " / Test Generation")
@@ -283,7 +285,8 @@ def implement_backend_tdd(arc_dir: Path, pause: bool = False, max_turns: int = 1
                         "api_wiring": {"registry": REGISTER_PATH, "app": "backend/src/app.ts",
                             "server": "backend/src/server.ts"},
                     }
-                    workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend",
+                    workspace = FileTools(output, ["backend"], requirements=api_owners, stage="backend", discovery=True,
+                        allow_write=lambda path: path.startswith("backend/src/") and editable_application_path(output, path),
                         files=[REGISTER_PATH, *([implementation_path(aid)] if foundation.get("enabled") else []), *files_by_api[aid], *supplied_sources(output, api, schema)])
                     agent = run_file_agent(model, IMPLEMENT_INSTRUCTIONS + (PLATFORM_IMPLEMENT_INSTRUCTIONS if foundation.get("enabled") else ""), context, workspace,
                         implementation_gate, max_turns, console, aid + " / Implementation", feedback=current)
@@ -333,8 +336,12 @@ source evidence, not a universal fixed warehouse scenario. Use persistent role/o
 rows in isolated Given fixtures; never manufacture trusted headers or bypass real auth.
 """
 PLATFORM_IMPLEMENT_INSTRUCTIONS = CONTRACT_INSTRUCTIONS + """
-Implement only the current API's handle export at task.implementation_path; keep the
-existing ApiRequest/ApiHandler signature. The compiler owns register.ts, app.ts, platform
+Keep the current API's handle export at task.implementation_path with the existing
+ApiRequest/ApiHandler signature. This is the stable gateway entrypoint, not a one-file
+implementation restriction. Create or extend ordinary business services, validators and
+helpers when needed; call them from the handle using the supplied request and connection.
+Reuse existing shared business logic across APIs and preserve its other callers.
+Do not open another connection or bypass access checks through a shared helper. The compiler owns register.ts, app.ts, platform
 settings/auth/authorization/workflow/transaction code. Do not modify or bypass them.
 Use request.access.principal for trusted subject/unit/roles. For scoped SQL:
 const scope = request.access.scope('actual-resource', 'read', 'alias.id');
