@@ -4,7 +4,7 @@ import type Database from "better-sqlite3";
 import { newEnforcer, newModelFromString, StringAdapter, type Enforcer } from "casbin";
 import { createMachine, transition as xtransition } from "xstate";
 import type { ApiHandler, ApiRequest, ApiResponse } from "../api/types.js";
-import type { ApiContract, BackendAccess, Principal, MachineSpec, TransitionSpec } from "./types.js";
+import type { RoutePolicy, BackendAccess, Principal, MachineSpec, TransitionSpec } from "./types.js";
 import { settings } from "./settings.js";
 
 class Failure extends Error { constructor(public status: number, message: string) { super(message); } }
@@ -118,15 +118,15 @@ type Row = Record<string,unknown>;
 function businessSnapshot(db: Database.Database): Record<string,Map<string,Row>> {
   return Object.fromEntries(Object.entries(settings.tables).map(([table,spec])=>[table,new Map((db.prepare(`SELECT * FROM ${quote(table)}`).all() as Row[]).map(row=>[String(row[spec.key]),row]))]));
 }
-function validateWrites(db: Database.Database, principal: Principal, contract: ApiContract, before: ReturnType<typeof businessSnapshot>, ownedBefore: Map<string,Ownership>, advanced: Map<string,string>): void {
+function validateWrites(db: Database.Database, principal: Principal, policy: RoutePolicy, before: ReturnType<typeof businessSnapshot>, ownedBefore: Map<string,Ownership>, advanced: Map<string,string>): void {
   const after = businessSnapshot(db);
-  const writes = new Set(contract.write);
+  const writes = new Set(policy.writeTables ?? []);
   const created: [string,string][] = [];
   for (const [table,rows] of Object.entries(after)) for (const [id,row] of rows) {
     const old = before[table].get(id);
     if (!old) created.push([table,id]);
     if (old && stable(old) === stable(row)) continue;
-    for (const [field,value] of Object.entries(row)) if ((!old || stable(old[field])!==stable(value)) && (old!==undefined || value!==null) && !writes.has(table+"."+field)) throw new Failure(500,"Handler exceeded declared database write contract");
+    if (!writes.has(table)) throw new Failure(500,"Handler wrote outside route writeTables");
     if (old && settings.resources[table]) {
       const owned = ownedBefore.get(table+":"+id);
       if (!principal.admin && (!owned || !sameBoundary(db,principal,owned.unit_id))) throw new Failure(403,"Cross-boundary mutation rejected");
@@ -137,7 +137,7 @@ function validateWrites(db: Database.Database, principal: Principal, contract: A
     }
   }
   for (const [table,rows] of Object.entries(before)) for (const id of rows.keys()) if (!after[table].has(id)) {
-    if (!contract.write.some(field=>field.startsWith(table+"."))) throw new Failure(500,"Undeclared database deletion");
+    if (!(policy.writeTables ?? []).includes(table)) throw new Failure(500,"Undeclared database deletion");
     const owned=ownedBefore.get(table+":"+id);
     if (settings.resources[table] && !principal.admin && (!owned || !sameBoundary(db,principal,owned.unit_id))) throw new Failure(403,"Cross-boundary deletion rejected");
     if(!settings.resources[table]&&!principal.admin) for(const [field,target] of Object.entries(settings.tables[table].references)) {
@@ -187,40 +187,40 @@ function handlerDatabase(db: Database.Database): Database.Database {
 function errorResponse(error: unknown): ApiResponse {
   return error instanceof Failure ? {status:error.status,body:{error:error.message}} : {status:500,body:{error:"Backend operation failed"}};
 }
-export function guardedRoute(db: Database.Database, aid: string, contract: ApiContract, handler: ApiHandler): RequestHandler {
+export function businessRoute(db: Database.Database, aid: string, policy: RoutePolicy, handler: ApiHandler): RequestHandler {
   return (req,res) => { void exclusive(db,async()=>{
     let begun=false;
     try {
       const {principal,csrf:secret}=session(db,req); csrf(req,secret);
-      for (const id of contract.security.features) {
+      for (const id of policy.security.features) {
         const feature=settings.features.find(f=>f.id===id);
         if (!feature || (!principal.admin && (feature.denied_usernames.includes(principal.username) || !feature.allowed_roles.some(role=>principal.roles.includes(role))))) throw new Failure(403,"Feature entitlement required");
       }
       const e=await enforcer(db,principal);
-      const recordDenied=(message:string)=>new Failure(contract.security.record_denial_status??403,contract.security.record_denial_status===404?"Record not found":message);
-      for (const permission of contract.security.permissions) if (!await permitted(db,e,principal,permission.resource,permission.action)) throw new Failure(403,"Operation permission denied");
+      const recordDenied=(message:string)=>new Failure(policy.security.record_denial_status??403,policy.security.record_denial_status===404?"Record not found":message);
+      for (const permission of policy.security.permissions) if (!await permitted(db,e,principal,permission.resource,permission.action)) throw new Failure(403,"Operation permission denied");
       db.exec("BEGIN IMMEDIATE"); begun=true;
       db.exec('CREATE TEMP TABLE IF NOT EXISTS arc_allowed(resource TEXT,action TEXT,record_id TEXT,PRIMARY KEY(resource,action,record_id)); DELETE FROM arc_allowed;');
       const used=new Set<string>();
       const assignments=new Map<string,string>();
       const advanced=new Map<string,string>();
       const advancedAudits: Row[]=[];
-      for (const permission of contract.security.permissions) {
+      for (const permission of policy.security.permissions) {
         const rows=db.prepare("SELECT resource,record_id,unit_id,owner_id,assignee_id FROM record_access WHERE resource=?").all(permission.resource) as Ownership[];
         for (const row of rows) if (await permitted(db,e,principal,permission.resource,permission.action,row)) db.prepare("INSERT OR IGNORE INTO arc_allowed VALUES(?,?,?)").run(permission.resource,permission.action,row.record_id);
       }
       const access: BackendAccess={principal,
         scope(resource,action,keyColumn="id") {
-          if (!contract.security.permissions.some(p=>p.resource===resource && p.action===action)) throw new Failure(403,"Undeclared scope request");
+          if (!policy.security.permissions.some(p=>p.resource===resource && p.action===action)) throw new Failure(403,"Undeclared scope request");
           used.add(resource);
           const column=keyColumn.split('.').map(quote).join('.');
           return principal.admin ? {sql:"1=1",params:[]} : {sql:`CAST(${column} AS TEXT) IN (SELECT record_id FROM arc_allowed WHERE resource=? AND action=?)`,params:[resource,action]};
         },
         async advance(mid,tid,id) {
-          const binding=contract.workflow?.related_transitions?.find(b=>b.machine===mid&&b.transition===tid);
+          const binding=policy.workflow?.related_transitions?.find(b=>b.machine===mid&&b.transition===tid);
           const machine=settings.machines[mid],spec=machine?.transitions[tid];
           if(!binding||!machine||!spec)throw new Failure(403,"Undeclared related transition");
-          const permission=contract.security.permissions.find(p=>p.resource===machine.entity&&p.action===spec.action);
+          const permission=policy.security.permissions.find(p=>p.resource===machine.entity&&p.action===spec.action);
           if(!permission)throw new Failure(403,"Related transition permission required");
           if(!before[machine.entity].has(id))registerRecord(db,principal,machine.entity,id);
           const owned=ownership(db,machine.entity,id);
@@ -240,7 +240,7 @@ export function guardedRoute(db: Database.Database, aid: string, contract: ApiCo
           advancedAudits.push(audit);
         },
         assign(resource,id,assigneeId,requiredRole) {
-          if(!contract.workflow||resource!==contract.security.resource||id!==selected(request,contract.security.record_id)||!contract.write.includes('record_access.assignee_id'))throw new Failure(403,"Assignment must be an explicit workflow effect");
+          if(!policy.workflow||resource!==policy.security.resource||id!==selected(request,policy.security.record_id)||!policy.assignment)throw new Failure(403,"Assignment must be an explicit workflow effect");
           const owned=ownership(db,resource,id);
           if(!owned||!sameBoundary(db,principal,owned.unit_id))throw new Failure(403,"Cannot assign an inaccessible record");
           const bindings=db.prepare("SELECT role_id FROM user_ou_roles WHERE user_id=? AND unit_id=?").all(assigneeId,owned.unit_id) as {role_id:string}[];
@@ -248,38 +248,38 @@ export function guardedRoute(db: Database.Database, aid: string, contract: ApiCo
           db.prepare("UPDATE record_access SET assignee_id=? WHERE resource=? AND record_id=?").run(assigneeId,resource,id);
           assignments.set(resource+":"+id,assigneeId);
         },
-        register(resource,id) { if (!contract.write.some(f=>f.startsWith(resource+'.'))) throw new Failure(403,"Undeclared resource creation"); registerRecord(db,principal,resource,id); },
+        register(resource,id) { if (!(policy.writeTables ?? []).includes(resource)) throw new Failure(403,"Undeclared resource creation"); registerRecord(db,principal,resource,id); },
       };
       const request: ApiRequest={params:Object.fromEntries(Object.entries(req.params).map(([k,v])=>[k,String(v)])),query:req.query,body:req.body??{},headers:Object.fromEntries(Object.entries(req.headers).map(([k,v])=>[k,Array.isArray(v)?v.join(','):v])),access:Object.freeze(access)};
-      const recordId=selected(request,contract.security.record_id);
-      if (recordId!==null && contract.security.resource) {
-        const resource=contract.security.resource;
+      const recordId=selected(request,policy.security.record_id);
+      if (recordId!==null && policy.security.resource) {
+        const resource=policy.security.resource;
         const owned=ownership(db,resource,recordId);
         if (!principal.admin && !owned) throw recordDenied("Record has no trusted data ownership");
-        for (const p of contract.security.permissions.filter(p=>p.resource===resource)) if (!await permitted(db,e,principal,p.resource,p.action,owned)) throw recordDenied("Record permission denied");
+        for (const p of policy.security.permissions.filter(p=>p.resource===resource)) if (!await permitted(db,e,principal,p.resource,p.action,owned)) throw recordDenied("Record permission denied");
         used.add(resource);
 
       }
       const key=req.headers['idempotency-key'];
-      if ((contract.workflow || contract.security.operation==="bulk") && (typeof key!=="string" || !key || key.length>128)) throw new Failure(400,"Idempotency-Key required");
+      if ((policy.workflow || policy.security.operation==="bulk") && (typeof key!=="string" || !key || key.length>128)) throw new Failure(400,"Idempotency-Key required");
       const receiptId=typeof key==="string"?hash(principal.id+':'+principal.unitId+':'+aid+':'+key):null;
       const requestHash=hash(stable({aid,params:request.params,query:request.query,body:request.body}));
       if (receiptId) {
         const old=db.prepare("SELECT request_hash,response FROM command_receipts WHERE id=?").get(receiptId) as {request_hash:string;response:string}|undefined;
         if (old) { if(old.request_hash!==requestHash) throw new Failure(409,"Idempotency key reused with different request"); db.exec('COMMIT');begun=false;return JSON.parse(old.response) as ApiResponse; }
       }
-      if (recordId!==null && contract.security.resource) {
-        const resource=contract.security.resource;
+      if (recordId!==null && policy.security.resource) {
+        const resource=policy.security.resource;
         const machine=Object.values(settings.machines).find(m=>m.entity===resource);
         if (machine) {
           const row=db.prepare(`SELECT ${quote(machine.state_field)} AS state FROM ${quote(resource)} WHERE ${quote(resourceKey(resource))}=?`).get(recordId) as {state:string}|undefined;
           if (!row) throw new Failure(404,"Record not found");
-          for (const p of contract.security.permissions.filter(p=>p.resource===resource)) if (!(machine.state_actions[row.state]??[]).includes(p.action)) throw new Failure(409,"Operation is unavailable in current state");
+          for (const p of policy.security.permissions.filter(p=>p.resource===resource)) if (!(machine.state_actions[row.state]??[]).includes(p.action)) throw new Failure(409,"Operation is unavailable in current state");
         }
       }
       let flow: {machine:MachineSpec;spec:TransitionSpec;previous:string;next:string}|undefined;
-      if (contract.workflow) {
-        const machine=settings.machines[contract.workflow.machine],spec=machine?.transitions[contract.workflow.transition];
+      if (policy.workflow) {
+        const machine=settings.machines[policy.workflow.machine],spec=machine?.transitions[policy.workflow.transition];
         if (!machine || !spec || recordId===null) throw new Failure(500,"Invalid compiled workflow binding");
         if(!principal.admin && spec.roles.length && !spec.roles.some(role=>principal.roles.includes(role)))throw new Failure(403,"Workflow actor role denied");
         if(!principal.admin && spec.assigned_only && ownership(db,machine.entity,recordId)?.assignee_id!==principal.id)throw new Failure(403,"Command requires current assignment");
@@ -307,7 +307,7 @@ export function guardedRoute(db: Database.Database, aid: string, contract: ApiCo
             if(rows[i].id!==principal.id||Object.keys(current[i]).some(k=>k!=="password_hash"&&stable(current[i][k])!==stable(rows[i][k]))||!/^scrypt\$[a-f0-9]{32}\$[a-f0-9]{128}$/.test(String(current[i].password_hash)))throw new Failure(403,"Only your own password hash may be changed");
           }
         }
-        if(!contract.write.some(f=>f.startsWith(name+'.')))throw new Failure(500,"Undeclared identity mutation");
+        if(!(policy.writeTables ?? []).includes(name))throw new Failure(500,"Undeclared identity mutation");
       }
       for(const [key,old] of ownedBefore) {
         const current=ownership(db,old.resource,old.record_id);
@@ -315,12 +315,12 @@ export function guardedRoute(db: Database.Database, aid: string, contract: ApiCo
       }
       const createdOwnership=db.prepare("SELECT resource,record_id,unit_id,owner_id,assignee_id FROM record_access").all() as Ownership[];
       for(const row of createdOwnership)if(!ownedBefore.has(row.resource+":"+row.record_id)&&(row.unit_id!==principal.unitId||row.owner_id!==principal.id||row.assignee_id!==null))throw new Failure(403,"Ownership must come from trusted creation context");
-      validateWrites(db,principal,contract,before,ownedBefore,advanced);
-      if (!principal.admin) for (const table of new Set(contract.read.map(f=>f.split('.')[0]).filter(t=>settings.resources[t]))) if (!used.has(table)) throw new Failure(500,"Business query omitted its required access scope");
-      if (flow && contract.workflow) {
+      validateWrites(db,principal,policy,before,ownedBefore,advanced);
+      if (!principal.admin) for (const table of new Set((policy.readResources ?? []).filter(t=>settings.resources[t]))) if (!used.has(table)) throw new Failure(500,"Business query omitted its required access scope");
+      if (flow && policy.workflow) {
         const changed=db.prepare(`UPDATE ${quote(flow.machine.entity)} SET ${quote(flow.machine.state_field)}=? WHERE ${quote(resourceKey(flow.machine.entity))}=? AND ${quote(flow.machine.state_field)}=?`).run(flow.next,recordId,flow.previous);
         if(changed.changes!==1) throw new Failure(409,"Concurrent workflow change");
-        db.prepare("INSERT INTO workflow_audit(id,machine,record_id,event,from_state,to_state,actor_id,unit_id,occurred_at) VALUES(?,?,?,?,?,?,?,?,?)").run(randomUUID(),contract.workflow.machine,recordId,flow.spec.event,flow.previous,flow.next,principal.id,principal.unitId,new Date().toISOString());
+        db.prepare("INSERT INTO workflow_audit(id,machine,record_id,event,from_state,to_state,actor_id,unit_id,occurred_at) VALUES(?,?,?,?,?,?,?,?,?)").run(randomUUID(),policy.workflow.machine,recordId,flow.spec.event,flow.previous,flow.next,principal.id,principal.unitId,new Date().toISOString());
       }
       if(receiptId) db.prepare("INSERT INTO command_receipts(id,request_hash,response) VALUES(?,?,?)").run(receiptId,requestHash,JSON.stringify(response));
       db.exec('COMMIT');begun=false;return response;

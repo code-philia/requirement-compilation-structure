@@ -44,10 +44,10 @@ concrete source references and the smallest proposed correction. Send that contr
 alone. It stops this task and records affected stages for upstream review. Never bypass
 the conflict by editing protected artifacts, disabling strict/noCheck checks, changing
 build scripts or weakening a correct test. Normal code bugs remain implementation repairs.
-Use issue_code=missing_scoped_read only when an immutable API reads a business resource
-without any declared permission usable by access.scope; the host may add a read declaration
-only after proving that every actor already has it in source policy. Other revisions stay
-pending for evidence review and cannot change role grants automatically.
+Route policy, supporting read permissions and endpoint documentation are ordinary
+application code in the merged backend stage. Correct them locally from source evidence;
+there is no immutable API-design contract or automatic scoped-read contract revision.
+A genuinely missing source grant or contradictory ER still requires source review.
 input.scope declares project directories, existing filenames, related files and write limits.
 input.files already contains the COMPLETE current contents of readable related files and
 project configuration. Read those contents directly from the input; do not call read_file

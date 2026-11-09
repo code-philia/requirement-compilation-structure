@@ -46,6 +46,8 @@ def api_test_paths(output: Path, api_ids=None) -> list[str]:
     if not path.is_file():
         return []
     report = read_artifact(output / ".arc", "backend_tdd.json")
+    if report.get("mode") == "source_implementation":
+        api_ids = None  # Suites cover requirements and shared endpoints, not design API allocations.
     result = set()
     for tests in report.get("tests", {}).values():
         for aid, relative in tests.items():

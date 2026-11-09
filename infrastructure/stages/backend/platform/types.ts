@@ -6,7 +6,7 @@ export interface BackendAccess {
   advance(machine: string, transition: string, recordId: string): Promise<void>;
   assign(resource: string, id: string, assigneeId: string, requiredRole?: string): void;
 }
-export interface SecurityContract {
+export interface SecurityPolicy {
   mode: "session" | "policy";
   permissions: {resource: string; action: string}[];
   features: string[];
@@ -16,10 +16,14 @@ export interface SecurityContract {
   operation: "read" | "create" | "update" | "delete" | "command" | "bulk";
   record_denial_status?: 403 | 404;
 }
-export interface ApiContract {
-  security: SecurityContract;
-  workflow: null | { machine: string; transition: string; record_id: string; guard_bindings: Record<string,string>; effect_bindings: Record<string,string>; related_transitions?: {machine:string;transition:string;guard_bindings:Record<string,string>;effect_bindings:Record<string,string>}[] };
-  read: string[]; write: string[];
+// Executable route policy, colocated with application handlers. No design P/Q or field IR.
+export interface RoutePolicy {
+  security: SecurityPolicy;
+  workflow?: null | { machine: string; transition: string; record_id: string;
+    related_transitions?: {machine: string; transition: string}[] };
+  readResources?: string[];
+  writeTables?: string[];
+  assignment?: boolean;
 }
 export interface TransitionSpec {
   roles: string[]; assigned_only: boolean;

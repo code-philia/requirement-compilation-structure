@@ -59,7 +59,7 @@ def load_frontend_context(arc_dir, input_dir):
     """Combine visual requirements with database and API artifacts for design stages."""
     tree, images, contexts = load_ui_context(arc_dir, input_dir)
     schema = read_artifact(arc_dir, "db_schema.json")
-    contracts = read_artifact(arc_dir, "backend_apis.json")
+    contracts = read_artifact(arc_dir, "backend_endpoints.json")
     return tree, schema, contracts, images, contexts
 
 

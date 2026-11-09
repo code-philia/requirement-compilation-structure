@@ -145,25 +145,8 @@ def implementation_path(aid):
     return 'backend/src/api/implementations/api_'+hashlib.sha256(aid.encode()).hexdigest()[:20]+'.ts'
 
 
-def publish_routes(output, design, foundation):
-    if not foundation.get('enabled'):
-        return
-    lines = ['import type { Express } from "express";', 'import type Database from "better-sqlite3";', 'import { guardedRoute } from "../platform/runtime.js";']
-    registrations = []
-    for index, (aid, api) in enumerate(sorted(design['apis'].items(), key=lambda item: (item[1]['signature']['path'].count(':'), -len(item[1]['signature']['path']), item[0]))):
-        if api.get('platform_builtin'):
-            continue
-        relative = implementation_path(aid)
-        module = Path(relative).stem
-        path = output / relative
-        if not path.exists():
-            save_text(path, 'import type { ApiHandler } from "../types.js";\nexport const handle: ApiHandler = async () => ({ status: 501, body: { error: "Not implemented" } });\n')
-        lines.append(f'import {{ handle as handler{index} }} from "./implementations/{module}.js";')
-        method, route = api['signature']['method'].lower(), api['signature']['path']
-        if method not in {'get','post','put','patch','delete'} or not route.startswith('/api/'):
-            raise ValueError(f'Invalid protected route {aid}')
-        contract = {key: api[key] for key in ('security','workflow','read','write')}
-        registrations.append(f'  app.{method}({json.dumps(route)}, guardedRoute(connection, {json.dumps(aid)}, {json.dumps(contract,ensure_ascii=False)}, handler{index}));')
-    lines.append('export function registerApis(app: Express, connection: Database.Database): void {\n'+'\n'.join(registrations)+'\n}')
-    save_text(output / 'backend/src/api/register.ts', '\n'.join(lines)+'\n')
-    save_json(output / '.arc/backend_implementation_files.json', {aid: implementation_path(aid) for aid, api in design['apis'].items() if not api.get('platform_builtin')})
+def publish_business_runtime(output):
+    """Refresh infrastructure after upgrading; application route registration is agent-owned."""
+    if (output / 'backend/src/platform/settings.ts').is_file():
+        for asset in ('runtime.ts', 'types.ts'):
+            save_text(output / 'backend/src/platform' / asset, (PLATFORM / asset).read_text())

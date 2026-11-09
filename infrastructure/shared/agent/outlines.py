@@ -32,7 +32,7 @@ def fingerprint(value):
 def input_hashes(arc_dir, kind):
     names = ['requirements.json', 'db_schema.json', 'backend_foundation.json']
     if kind == 'frontend':
-        names += ['backend_apis.json', 'ui_evidence.json', 'visual_analysis.json']
+        names += ['backend_endpoints.json', 'ui_evidence.json', 'visual_analysis.json']
     return {name: fingerprint(read_artifact(arc_dir, name)) for name in names}
 
 
@@ -92,13 +92,13 @@ Describe layout/navigation/forms/important visible states briefly in purpose or 
 Reuse shared shell/pages and source routes when specified. API IDs refer to the actual
 backend inventory. Do not design component trees, props or individual trigger records.
 Use Arco; choose components and callback wiring during implementation.'''
-    backend = read_artifact(arc_dir, 'backend_apis.json') if kind == 'frontend' else None
+    backend = read_artifact(arc_dir, 'backend_endpoints.json') if kind == 'frontend' else None
     for rid in tree.leaves:
         request = {'requirement': contexts[rid], 'inventory': plan['items'],
             'existing_sources': {key: read_artifact(arc_dir, key) for key in
                 ('requirement_files.json', 'backend_implementation_files.json') if (arc_dir / key).is_file()}}
         if backend:
-            request['backend_inventory'] = {aid: {'description': api['description'], 'signature': api['signature']}
+            request['backend_inventory'] = {aid: {'description': api.get('description', aid), 'signature': api.get('signature', {}), 'usage': api.get('usage', '')}
                 for aid, api in backend['apis'].items()}
 
         console.show(f'{kind.title()} outline {rid}',

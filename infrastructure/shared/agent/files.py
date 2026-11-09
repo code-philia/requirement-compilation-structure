@@ -30,7 +30,7 @@ def editable_application_path(output, relative):
     templates = Path(__file__).resolve().parents[1] / "project/templates"
     if (output / "backend/src/platform/settings.ts").is_file() and (
         relative.startswith("backend/src/platform/") or relative in {
-            "backend/src/app.ts", "backend/src/server.ts", "backend/src/api/register.ts", "backend/src/api/types.ts",
+            "backend/src/app.ts", "backend/src/server.ts", "backend/src/api/types.ts",
             "backend/src/db/initialize.ts", "backend/src/db/seed.ts"}):
         return False
     if relative.startswith("frontend/src/"):

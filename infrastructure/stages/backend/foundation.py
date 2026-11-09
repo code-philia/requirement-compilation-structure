@@ -1,4 +1,4 @@
-"""Normalize cross-cutting backend contracts before read/write and API design."""
+"""Collect ER, identity, authorization and workflow infrastructure before API design."""
 
 import json
 import re

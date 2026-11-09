@@ -116,7 +116,7 @@ def implementation_context(files):
     if mapping.is_file():
         api_paths = {aid: path for aid, path in read_artifact(output / ".arc", mapping.name).items()
             if files.can_read(path) and files.path(path).is_file()}
-    contract_path = output / ".arc/backend_apis.json"
+    contract_path = output / ".arc/backend_endpoints.json"
     contracts = read_artifact(output / ".arc", contract_path.name) if contract_path.is_file() else {}
     api_locations = {}
     for aid, path in api_paths.items():

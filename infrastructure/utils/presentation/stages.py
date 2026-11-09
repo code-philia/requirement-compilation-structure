@@ -7,7 +7,7 @@ STAGES = {
     "03": "Infer database read/write obligations",
     "04": "Implement database",
     "05": "Design backend APIs including P/Q",
-    "06": "Resolve backend contracts, implement and verify",
+    "06": "Implement designed APIs and verify behavior",
     "07": "Design UI and frontend data",
     "08": "Implement UI and run existence tests",
     "09": "Design frontend triggers",

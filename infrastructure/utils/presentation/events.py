@@ -203,7 +203,7 @@ def task_metadata(label, requirement_ids=None):
         metadata.update(task_id=label, task_kind="requirement")
         return metadata
     for filename, registry, kind in (
-        ("backend_apis.json", "apis", "api"),
+        ("backend_endpoints.json", "apis", "api"),
         ("ui_design.json", "pages", "page"),
     ):
         try:

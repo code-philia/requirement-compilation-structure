@@ -5,13 +5,12 @@ from infrastructure.stages.backend.evidence import load_evidence, scoped_evidenc
 
 from infrastructure.utils.files import read_artifact
 
-from infrastructure.stages.database.obligations.records import normalize_obligations, check_symbols
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.requirements.data import load_data, data_context
 
 
-def load_context(arc_dir: Path, *, infer_obligations=False):
-    """Load the requirement tree, schema, and normalized obligations."""
+def load_context(arc_dir: Path):
+    """Load original evidence and implemented schema, without an API contract artifact."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     tree.backend_evidence = load_evidence(arc_dir)
     tree.validation_data = load_data(arc_dir)
@@ -36,11 +35,8 @@ def load_context(arc_dir: Path, *, infer_obligations=False):
         resolutions = json.loads(seed_path.read_text(encoding="utf-8-sig"))["records"]
         for key, resolution in resolutions.items():
             tree.validation_data["records"][key]["seed_resolution"] = resolution
-    obligations = ({"requirements": {rid: {"read": [], "write": []} for rid in tree.requirements},
-        "steps": {sid: {"read": [], "write": []} for sid in tree.steps}} if infer_obligations
-        else normalize_obligations(read_artifact(arc_dir, "db_obligations.json"), tree))
-    check_symbols([*obligations["requirements"].values(), *obligations["steps"].values()], schema)
-    return tree, schema, obligations
+    return tree, schema
+
 
 
 def requirement_context(tree, rid: str) -> dict:
@@ -80,6 +76,9 @@ def supplied_sources(output: Path, api: dict, schema: dict) -> list[str]:
 
 def related_schema(schema, records):
     """Project explicitly used entities; keep their complete definitions for SQL fixtures."""
+    records = list(records)
+    if not records or any('read' not in record and 'write' not in record for record in records):
+        return schema['entities']
     names = {field.split(".")[0] for record in records for mode in ("read", "write")
         for field in record.get(mode, [])}
     return {name: value for name, value in schema["entities"].items() if name in names}
