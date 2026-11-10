@@ -36,4 +36,4 @@ export function fixturePasswordHash(password: string): string {
   return `scrypt$${salt}$${digest}`;
 }
 
-export { loginSession, sessionRequest, insertGiven, ownGiven, prepareGiven } from "./helpers.js";
+export { loginSession, sessionRequest, insertGiven, ownGiven, prepareGiven, findGiven, ensureGiven, sessionIdentity, readResponse } from "./helpers.js";

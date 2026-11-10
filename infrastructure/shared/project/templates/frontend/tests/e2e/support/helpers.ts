@@ -1,6 +1,6 @@
 // Compiler-owned browser setup helpers. Scenario When actions must still use real UI.
 import type { Page, APIRequestContext } from '@playwright/test';
-export { insertGiven, ownGiven, prepareGiven } from '../../../../backend/tests/support/helpers.js';
+export { insertGiven, ownGiven, prepareGiven, findGiven, ensureGiven } from '../../../../backend/tests/support/helpers.js';
 export interface BrowserSession { request: APIRequestContext; csrfToken: string }
 export async function loginGiven(page: Page, account: {username:string;password:string;unit?:string}): Promise<BrowserSession> {
   const response = await page.request.post('/api/auth/login', {data:account});
@@ -19,4 +19,12 @@ export async function browserRequest(session: BrowserSession, path: string,
     if (body.csrfToken) session.csrfToken = body.csrfToken;
   }
   return response;
+}
+
+export async function browserIdentity(session: BrowserSession): Promise<{id:string;unitId:string;roles:string[];username:string;admin:boolean}> {
+  const response = await browserRequest(session, '/api/auth/me');
+  if (response.status() !== 200) throw new Error('Fixture cannot resolve browser session identity');
+  const body = await response.json();
+  if (!body?.user?.id || !body.user.unitId) throw new Error('Fixture session has no persisted user/unit ID');
+  return body.user;
 }
