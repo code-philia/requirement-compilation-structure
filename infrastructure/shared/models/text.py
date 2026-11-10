@@ -99,6 +99,22 @@ class TextModel:
                 raise
 
     def generate_json(self, instructions: str, payload: dict) -> dict:
+        """Recover once from endpoints incompatible with JSON response mode."""
+        try:
+            return self._generate_json(instructions, payload)
+        except (ModelProtocolError, RuntimeError) as error:
+            cause = error.__cause__
+            unsupported = (isinstance(cause, OpenAIError) and getattr(cause, 'status_code', None) in {400, 422}
+                and 'response_format' in str(cause).lower())
+            if not self.json_mode or not (isinstance(error, ModelProtocolError) or unsupported):
+                raise
+            # A whitespace-only successful response is transport/protocol evidence,
+            # never a business failure. Persist the compatible mode for this client.
+            self.json_mode = False
+            print('JSON response mode returned no usable content or was rejected; retrying once with the same strict JSON text protocol.', flush=True)
+            return self._generate_json(instructions, payload)
+
+    def _generate_json(self, instructions: str, payload: dict) -> dict:
         """Request JSON using the stage prompt and serialized task data."""
         mode = getattr(self, "reasoning", "low")
         try:
@@ -126,4 +142,9 @@ class TextModel:
         content = response.choices[0].message.content.strip()
         if not content:
             raise ModelProtocolError("Text model returned whitespace-only content")
+        if content.startswith('```') and content.endswith('```'):
+            lines = content.splitlines()
+            if len(lines) >= 3 and lines[0].strip().lower() in {'```', '```json'}:
+                content = '\n'.join(lines[1:-1]).strip()
+        # Never execute reasoning text, provider tags or a dropped second JSON object.
         return json.loads(content)

@@ -20,11 +20,12 @@ logic. Repair the real owner and its callers, not a duplicate file with a guesse
 Use implementation_context.file_requirements to notice shared-file consumers; preserve
 all their behavior. The host's cumulative regression gates remain the acceptance authority.
 Normally spend zero to two focused context batches before editing. The host allows at most
-four batches (eight calls each) between real acceptance attempts, including Bash diagnostics.
+four broad discovery batches (eight calls each), then up to four precise read_file batches
+for named missing spans between real acceptance attempts. Broad queries include Bash diagnostics.
 Batch independent missing-file queries. Every additional read must resolve a named unknown;
 do not reopen supplied files, reread retained excerpts, or repeatedly scan broad directories.
 After a failing check, inspect only its specific missing evidence and repair the cause.
-Do not run acceptance merely to reset the context budget. If a contract blocks implementation,
+Do not run acceptance merely to reset the context budget. A context-read budget is not an upstream source defect. If original evidence blocks implementation,
 request the smallest evidenced upstream revision instead of wandering through more files.
 
 When bash appears in input.tools it runs in a disposable authorized-file snapshot, with
@@ -103,7 +104,7 @@ Edit or create files using edit_file:
 {"tool_calls":[{"tool":"edit_file","path":"frontend/src/pages/Login.tsx","operation":"create","new_content":"new source"}]}.
 {"tool_calls":[{"tool":"edit_file","path":"frontend/src/App.tsx","operation":"replace","old_content":"exact local span","new_content":"replacement"}]}.
 - create requires a new file. Choose a meaningful filename inside scope.
-- replace requires nonempty old_content matching exactly once. Whole-file replacement is forbidden.
+- replace requires nonempty old_content matching exactly once. Prefer local replacements. A mostly unchanged full snapshot can be adapted to local hunks; destructive whole-file rewrites are rejected with suggested spans.
 - prepend/append insert at an existing file boundary; omit old_content.
 Preserve earlier routes, imports, exports, state, components, fixtures and accepted behavior.
 Extend shared files locally instead of replacing their contents with the current requirement.

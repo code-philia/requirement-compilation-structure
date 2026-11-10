@@ -124,6 +124,17 @@ class FileTools:
             if omitted:
                 records[path].update(content_omitted=True, total_lines=len(content.splitlines()),
                     reason='Read only the needed line range or search the named symbol.')
+                if path in priority and budget is not None and budget > 0:
+                    preview_lines, size = [], 0
+                    for line in content.splitlines(keepends=True)[:80]:
+                        if size + len(line) > min(3500, budget):
+                            break
+                        preview_lines.append(line)
+                        size += len(line)
+                    if preview_lines:
+                        records[path]['preview'] = {'start_line': 1, 'end_line':len(preview_lines),
+                            'content': ''.join(preview_lines)}
+                        budget -= size
             elif content is not None:
                 self.supplied_contents[path] = content
                 if budget is not None:

@@ -3,8 +3,9 @@
 from infrastructure.shared.agent.files import EXCLUDED
 from infrastructure.utils.files import normalize_newlines, read_source
 from infrastructure.utils.paths import check_path_case, relative_path
-from difflib import get_close_matches
+from difflib import get_close_matches, SequenceMatcher
 import hashlib
+import re
 
 
 class FileToolError(ValueError):
@@ -89,6 +90,7 @@ def edit_file(files, path, operation, new_content, old_content=""):
     new_content, old_content = normalize_newlines(new_content), normalize_newlines(old_content)
     target = files.path(path)
     current = files._pending.get(path, read_source(target) if target.is_file() else None)
+    adaptation = {}
     if operation == "create":
         if current is not None:
             raise FileToolError("FILE_ALREADY_EXISTS", "This file already exists. Read and edit it locally.",
@@ -103,9 +105,25 @@ def edit_file(files, path, operation, new_content, old_content=""):
             if not old_content:
                 raise FileToolError("INVALID_ARGUMENTS", "replace requires nonempty exact old_content", path)
             if current.strip() and old_content.strip() == current.strip():
-                raise FileToolError("WHOLE_FILE_REPLACEMENT_NOT_ALLOWED",
-                    "Incremental compilation forbids replacing a whole existing file. "
-                    "Use a smaller unique span and preserve earlier requirements, registrations and state.", path)
+                old_lines, new_lines = current.splitlines(keepends=True), new_content.splitlines(keepends=True)
+                spans = SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes()
+                retained = sum(i2-i1 for tag,i1,i2,j1,j2 in spans if tag == 'equal')
+                deleted = sum(i2-i1 for tag,i1,i2,j1,j2 in spans if tag == 'delete')
+                scaffold = re.sub(r'(?m)^\s*//[^\n]*\n', '', current)
+                empty_stub = re.fullmatch(r'(?:\s*import\s+type\b[^;]+;\s*)+export\s+function\s+\w+\([^)]*\)\s*(?::[^{}]+)?\s*\{\s*\}\s*', scaffold)
+                if empty_stub or retained >= max(1, len(old_lines) * .7) and deleted <= len(old_lines) * .15:
+                    # The exact old snapshot is known. Adapt a mostly unchanged full
+                    # proposal to its local hunks, then run normal compile/regression.
+                    old_content = current
+                    adaptation = {'adapted_to_local_diff': True,
+                        'changed_hunks': sum(tag != 'equal' for tag,*_ in spans)}
+                else:
+                    examples = [{'start_line':i1+1, 'old_content':''.join(old_lines[i1:i2])[:1600],
+                        'new_content':''.join(new_lines[j1:j2])[:1600]}
+                        for tag,i1,i2,j1,j2 in spans if tag != 'equal'][:3]
+                    raise FileToolError("WHOLE_FILE_REPLACEMENT_NOT_ALLOWED",
+                        "Proposal changes too much existing code to adapt safely. Use the provided local diff locations; preserve other owners and registrations.",
+                        path, suggested_spans=examples, retained_lines=retained, total_lines=len(old_lines))
             first = current.find(old_content)
             count = 0 if first < 0 else (2 if current.find(old_content, first + 1) >= 0 else 1)
             if count != 1:
@@ -119,4 +137,4 @@ def edit_file(files, path, operation, new_content, old_content=""):
     else:
         raise FileToolError("INVALID_OPERATION", "Use create, replace, prepend or append", path)
     files._pending[path] = updated
-    return {"path": path, "operation": operation}
+    return {"path": path, "operation": operation, **adaptation}
