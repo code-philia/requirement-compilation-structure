@@ -18,7 +18,7 @@ STAGES = {
 def stage_label(script: str) -> str:
     """Show the pipeline stage number and its purpose."""
     joint = {
-        "05_design_backend_joint": "Outline backend APIs and implementation locations",
+        "05_design_backend_joint": "Outline backend APIs, shared modules and implementation locations",
         "07_design_frontend_joint": "Outline pages and implementation locations",
         "10_implement_frontend_joint": "Implement pages and interactions directly from source evidence",
     }
