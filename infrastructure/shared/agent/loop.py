@@ -46,6 +46,8 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
         raise ValueError("--max-turns must be positive")
     if feedback_filter is None:
         feedback_filter = compact_feedback
+    if files.stage in {'backend', 'frontend', 'ui'} and hasattr(model, 'max_output_tokens'):
+        model.max_output_tokens = min(model.max_output_tokens, 24576)
     context_result = None
     test_reference = testing_reference(task)
     read_observations = {}
@@ -95,9 +97,10 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                             del read_files[path]
                 request = {"task": task, "scope": files.scope_state(), "files": files.state(), "feedback": feedback,
                     "tools": [schema for schema in files.schemas() if (context_batches < 4 and files.discovery_no_progress < 3)
-                        or schema.get('tool') not in {'read_file', 'list_files', 'search_files', 'bash'}],
+                        or schema.get('tool') not in {'list_files', 'search_files', 'bash'}],
                     "round_state": {"round": turn, "acceptance_ran": False,
-                        "context_batches_remaining": max(0, 4-context_batches),
+                        "context_batches_remaining": max(0, 8-context_batches),
+                        "broad_discovery_batches_remaining": max(0, 4-context_batches),
                         "next_action": "Implement now if evidence is sufficient; do not spend the remaining budget by default."},
                     "last_acceptance": last_acceptance}
                 if test_reference:
@@ -107,7 +110,7 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                 if files.discovery_no_progress >= 3:
                     request['round_state']['next_action'] = (
                         'Repeated discovery produced no new evidence. Implement from retained content '
-                        'or report the precise blocker; discovery tools are temporarily hidden.')
+                        'or use a precise read_file for a named missing span; broad discovery is temporarily hidden.')
                 if files.stage in {"backend", "frontend", "ui"} and files.writable is None:
                     request["implementation_context"] = implementation_context(files)
                 # A fully supplied file must not also occupy retained read context.
@@ -153,11 +156,14 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
                     raise FileToolError("QUERY_DISABLED", "Implementation tasks do not query designs. Use the supplied requirement/design and read_file within scope.")
                 elif "tool_calls" in response and files.effect(response["tool_calls"]) == "read":
                     calls = response["tool_calls"]
-                    if context_batches >= 4:
-                        raise FileToolError("CONTEXT_BUDGET_EXHAUSTED",
-                            "Four context batches already collected for this implementation attempt. "
-                            "Use supplied/retained evidence and edit now, run acceptance with [], or request an evidenced upstream revision. "
-                            "Further reads do not reset the budget.")
+                    precise = all(call.get('tool') == 'read_file' for call in calls if isinstance(call, dict))
+                    if context_batches >= 8 or context_batches >= 4 and not precise:
+                        # Avoid turning a local discovery limit into an input/schema
+                        # revision. Observe actual executable gaps, then repair code.
+                        console.show(label + ' | Discovery budget reached',
+                            'Retained evidence is available. Checking current files to return concrete implementation gaps; no upstream source revision is implied.')
+                        response = {'tool_calls': []}
+                        break
                     if len(calls) > 8:
                         raise FileToolError("CONTEXT_BATCH_TOO_LARGE", "Batch at most eight focused context calls")
                     context_batches += 1

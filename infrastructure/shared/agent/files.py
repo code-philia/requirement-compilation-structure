@@ -20,7 +20,7 @@ def source_paths(output: Path, root: str) -> list[str]:
             path = Path(directory) / name
             if name.startswith(".") or path.is_symlink():
                 continue
-            if path.suffix in {".ts", ".tsx", ".js", ".jsx", ".css", ".json", ".html", ".sql", ".md"}:
+            if path.suffix in {".ts", ".tsx", ".js", ".jsx", ".css", ".json", ".html", ".sql", ".md", ".csv", ".conf", ".xml", ".mmd", ".mermaid", ".yaml", ".yml"}:
                 result.append(path.relative_to(output).as_posix())
     return sorted(result)
 

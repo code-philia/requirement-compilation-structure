@@ -9,7 +9,7 @@ from infrastructure.utils.presentation.console import DemoConsole
 
 
 RULES = '''Produce a short implementation outline for ONE source requirement.
-Describe WHAT APIs/pages are needed and WHERE existing or new application code should
+Describe WHAT APIs, supporting backend modules or pages are needed and WHERE existing or new application code should
 implement them. Reuse inventory IDs for shared capabilities; extend their purpose without
 losing earlier uses. File locations are suggestions, not exclusive ownership or mandatory
 one-file-per-requirement mappings. Prefer actual existing owners if supplied.
@@ -72,6 +72,37 @@ def collect_outline(proposal, rid):
     return items, uses, notes if isinstance(notes, str) else json.dumps(notes, ensure_ascii=False)
 
 
+def backend_kind(item, identity=''):
+    """Kinds are guidance, not an enum gate; older HTTP outlines keep working."""
+    explicit = item.get('kind')
+    if not explicit and isinstance(item.get('type'), str) and item.get('type') in {'api', 'http', 'endpoint', 'http_api', 'service', 'repository', 'policy', 'workflow', 'validator', 'utility', 'integration', 'module'}:
+        explicit = item['type']
+    if isinstance(explicit, str) and explicit.strip():
+        value = explicit.strip().lower()
+        return 'api' if value in {'http', 'endpoint', 'http_api', 'api'} else value
+    signature = item.get('signature') or {}
+    if item.get('method') or isinstance(signature, dict) and signature.get('method') or identity.lower().startswith(('api-', 'platform-')):
+        return 'api'
+    return 'capability' if item.get('needs_implementation_refinement') else 'module'
+
+
+def backend_items(plan, rid):
+    """Include shared dependencies once; cycles/unknown hints never reject design."""
+    items, selected, pending = plan.get('items', {}), {}, list(plan.get('requirements', {}).get(rid, []))
+    while pending:
+        identity = pending.pop(0)
+        if identity in selected:
+            continue
+        item = dict(items.get(identity) or {'purpose': identity, 'unresolved_outline_reference': True})
+        item['kind'] = backend_kind(item, identity)
+        deps = item.get('depends_on', [])
+        deps = [deps] if isinstance(deps, str) else list(deps) if isinstance(deps, dict) else deps if isinstance(deps, list) else []
+        item['depends_on'] = list(dict.fromkeys(dep for dep in deps if isinstance(dep, str)))
+        selected[identity] = item
+        pending.extend(dep for dep in item['depends_on'] if dep not in selected)
+    return selected
+
+
 def plan_requirements(arc_dir, kind, tree, contexts, *, inventory=None, pause=False, max_attempts=5):
     """Collect one proposal per requirement, without design rejection or repair calls."""
     model, console = TextModel(), DemoConsole(pause)
@@ -80,11 +111,19 @@ def plan_requirements(arc_dir, kind, tree, contexts, *, inventory=None, pause=Fa
     path = arc_dir / (kind + '_plan.json')
     save_json(path, plan)
     if kind == 'backend':
-        shape = '''ITEM = {"purpose":"brief business operation", "method":"GET|POST|PUT|PATCH|DELETE",
-"path":"/api/...", "implementation_hint":"backend/src/..."}.
-No security or workflow DSL here; source authorization and process evidence is supplied
-again when implementing. Reuse platform identity endpoints; do not design registration
-unless explicitly required by the selected identity strategy.'''
+        shape = '''Backend ITEM = {"kind":"api|service|repository|policy|workflow|validator|utility|integration|other source-required module",
+"purpose":"short responsibility", "implementation_hint":"backend/src/...",
+"depends_on":["existing or proposed capability IDs"], "consumers":["API/module IDs or source-required caller"]}.
+Only kind=api needs method/path. A shared module needs responsibility, location and
+callers, NOT an invented HTTP endpoint. Export names and detailed interfaces are chosen
+while implementing. Reuse shared capabilities across requirements via IDs/dependencies;
+only propose useful source-backed modules, no mandatory layered architecture or utility
+catalog. Shared code may own calculations, validation, persistence, business operations,
+policy adapters or workflow orchestration. Do not duplicate fixed authentication,
+transactions, auditing or other platform infrastructure. For integrations/background
+work, describe real callers/lifecycle only when the source requires them.
+No security/workflow DSL or detailed contracts here. Source evidence is supplied again
+at implementation. Reuse fixed platform identity endpoints.'''
     else:
         shape = '''ITEM = {"purpose":"page/section and its main actions", "route":"/page/:id",
 "implementation_hint":"frontend/src/...", "api_ids":["existing backend API IDs"]}.
@@ -136,6 +175,8 @@ endpoints. User type labels/options come from the server; never duplicate role s
         # downstream dictionaries; it must not reject or silently lose model suggestions.
         plan.setdefault('source_proposals', {})[rid] = proposal
         items, uses, notes = collect_outline(proposal, rid)
+        if kind == 'backend':
+            items = {identity: {**item, 'kind': backend_kind(item, identity)} for identity, item in items.items()}
         plan['items'].update(items)
         for key in uses:
             if key not in plan['items']:

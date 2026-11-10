@@ -51,11 +51,25 @@ def related_files(output, requirements):
                 continue
             for stage in stages:
                 result.update(links.get(rid, {}).get(stage, []))
+    backend_plan = output / '.arc/backend_plan.json'
+    module_map = output / '.arc/backend_module_implementation_files.json'
+    if backend_plan.is_file() and module_map.is_file():
+        from infrastructure.shared.agent.outlines import backend_items
+        plan = read_artifact(output / '.arc', backend_plan.name)
+        locations = read_artifact(output / '.arc', module_map.name)
+        for rid in requirements:
+            for identity in backend_items(plan, rid):
+                location = locations.get(identity)
+                if isinstance(location, str):
+                    target = output / location
+                    if target.resolve().is_relative_to(output.resolve()) and target.is_file() and not target.is_symlink():
+                        result.add(location)
     schema = output / ".arc/db_schema.json"
     if schema.is_file():
         design = read_artifact(output / ".arc", "db_schema.json")
         entities = {field.split(".", 1)[0] for rid in requirements
-            for field in design.get("requirements", {}).get(rid, [])}
+            for field in design.get("requirements", {}).get(rid, [])
+            if design.get('entities', {}).get(field.split('.', 1)[0], {}).get('origin') not in {'backend_platform', 'reference_target'}}
         for entity in entities:
             for folder in ("tables", "seeds"):
                 relative = f"backend/src/db/{folder}/{entity}.sql"
@@ -126,7 +140,20 @@ def implementation_context(files):
             "method": signature.get("method"), "route": signature.get("path"),
             "operation": signature.get("name"),
             "requirements": [rid for rid, ids in contracts.get("requirements", {}).items() if aid in ids]}
-    return {"entrypoints": entrypoints, "api_implementations": api_locations,
+    # Only nearby/shared dependencies belong in each edit request. The full
+    # implementation inventory stays available as readonly context if needed.
+    api_locations = {aid: value for aid, value in api_locations.items()
+        if value['path'] in relevant or set(value['requirements']).intersection(files.requirements)}
+    shared_modules = {}
+    module_index = output / '.arc/backend_capabilities.json'
+    if module_index.is_file():
+        inventory = read_artifact(output / '.arc', module_index.name)
+        for identity, module in inventory.get('modules', {}).items():
+            location = module.get('implementation')
+            consumers = [rid for rid, ids in inventory.get('requirements', {}).items() if identity in ids]
+            if isinstance(location, str) and files.can_read(location) and (location in relevant or set(consumers).intersection(files.requirements)):
+                shared_modules[identity] = {key: module[key] for key in ('kind', 'description', 'implementation', 'exports', 'depends_on', 'callers') if key in module}
+    return {"entrypoints": entrypoints, "api_implementations": api_locations, "shared_modules": shared_modules,
         "file_requirements": {path: sorted(ids) for path, ids in sorted(owners.items())},
         "changed_files": sorted(files.changed_paths),
         "policy": "Reuse actual owners; connect every new module to a real caller; preserve shared consumers. "

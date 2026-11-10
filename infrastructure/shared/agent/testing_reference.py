@@ -20,7 +20,7 @@ def testing_reference(task):
         return None
     text = (ROOT / 'guide.md').read_text(encoding='utf-8')
     sections = dict(re.findall(r'^## (\w+)\n(.*?)(?=^## |\Z)', text, flags=re.M | re.S))
-    names = ['common', role]
+    names = ['common', role, 'fixture_mechanics']
     # Auth/session and workflow conventions are shared; do not duplicate them in callers.
     foundation = task.get('backend_foundation') or task.get('requirement', {}).get('backend_foundation', {})
     if foundation.get('enabled'):
