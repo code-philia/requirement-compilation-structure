@@ -71,6 +71,7 @@ class BackendChecks:
         for kind in ("tests", "pass", "fail", "skipped", "todo"):
             found = re.search(rf"^# {kind} (\d+)\s*$", tap, re.MULTILINE)
             result[kind] = int(found.group(1)) if found else 0
+        result['cases'] = [{'title': title.strip()} for title in re.findall(r'(?m)^\s*# Subtest: (.+)$', tap)]
         # TAP diagnostic blocks contain the assertion, stack and source location.
         # Successful subtests remain in the saved tool report, not repair context.
         failures = re.findall(r"(?m)^\s*not ok[^\n]*\n(?:[ \t]+[^\n]*\n)*", tap)
