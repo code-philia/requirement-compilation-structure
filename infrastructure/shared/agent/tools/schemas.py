@@ -34,7 +34,9 @@ TOOL_REGISTRY = {
         {"tool":"search_files","query":"onChange","glob":"references/arco/api/**/Select/**/*.d.ts","limit":10,"context":2}), "read"),
     "read_file": (read_file, definition("read_file", "Read an authorized project file or readonly compiler reference, with an optional inclusive 1-based line range, ONLY when the current requirement "
         "cannot be completed correctly using the full related-file contents already in input.files. "
-        "Explain the concrete missing dependency in diagnosis.reason. Do not re-read supplied or retained files.",
+        "Explain the concrete missing dependency in diagnosis.reason. Do not re-read supplied or retained files. "
+        "Read multiple independent files together using separate read_file entries in one tool_calls array (at most eight context calls total). "
+        "Backend/frontend/UI reads default to 400 lines; set end_line explicitly to read up to 2000 lines per call.",
         {"path": STRING, "start_line": {"type": "integer", "minimum": 1},
             "end_line": {"type": "integer", "minimum": 1}}, ["path"],
         {"tool": "read_file", "path": "backend/src/db/initialize.ts", "start_line": 1, "end_line": 40}), "read"),
@@ -47,4 +49,3 @@ TOOL_REGISTRY = {
         {"tool": "edit_file", "path": "backend/src/example.ts", "operation": "replace",
             "old_content": "exact existing span", "new_content": "replacement span"}), "write"),
 }
-

@@ -22,6 +22,12 @@ all their behavior. The host's cumulative regression gates remain the acceptance
 Normally spend zero to two focused context batches before editing. The host allows at most
 four broad discovery batches (eight calls each), then up to four precise read_file batches
 for named missing spans between real acceptance attempts. Broad queries include Bash diagnostics.
+You can read up to eight files in one response: put one read_file call per file in the
+same tool_calls array. When several independent missing files are already known, read
+their necessary ranges together instead of waiting for a separate model turn per file.
+The eight-call limit is shared with any list_files/search_files/bash calls in that batch;
+do not mix reads and edits. Read only the files needed now, not eight by default.
+Example: {"tool_calls":[{"tool":"read_file","path":"backend/src/server.ts","start_line":1,"end_line":80},{"tool":"read_file","path":"backend/src/api/register.ts","start_line":1,"end_line":120}]}.
 Batch independent missing-file queries. Every additional read must resolve a named unknown;
 do not reopen supplied files, reread retained excerpts, or repeatedly scan broad directories.
 After a failing check, inspect only its specific missing evidence and repair the cause.
@@ -53,7 +59,7 @@ input.scope declares project directories, existing filenames, related files and 
 input.files contains current related files and project configuration. Entries with
 content_omitted=true contain metadata only: use a targeted search or read_file line range.
 Otherwise read supplied contents directly; do not reread a fully supplied file.
-Application reads default to 160 lines and return at most 400 lines per call; follow the
+Application reads default to 400 lines and return at most 2000 lines per call; follow the
 returned range and total_lines, and retrieve only a necessary continuation. Prefer completing the current requirement by incrementally
 modifying these associated files.
 Only read an additional file when the supplied related files are insufficient to complete
@@ -92,8 +98,10 @@ These are compiler tools, not provider-native invocations. Do not emit DSML/XML 
 
 Read a file or an inclusive 1-based line range:
 {"tool_calls":[{"tool":"read_file","path":"frontend/src/App.tsx","start_line":1,"end_line":60}]}.
-Use this tool only for the necessary additional-file read described above. Omit end_line
-to read through EOF. New read content is retained in input.read_files; do not read it again
+Use this tool only for the necessary additional-file read described above. For backend,
+frontend and UI tasks, omitting end_line reads up to 400 lines; an explicit range reads
+at most 2000 lines per call. Other tasks read through EOF when end_line is omitted.
+New read content is retained in input.read_files; do not read it again
 while it is retained. Supplied input.files contents are refreshed after edits and checks.
 Cached results reference files[path] or read_files[path]; reuse that evidence.
 A read batch returns each success/error independently. Use suggested_paths or available_files

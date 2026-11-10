@@ -56,7 +56,7 @@ def read_file(files, path, start_line=1, end_line=None):
     digest = hashlib.sha256(content.encode()).hexdigest()
     lines = content.splitlines(keepends=True)
     if files.stage in {'backend', 'frontend', 'ui'}:
-        end_line = min(end_line if end_line is not None else start_line + 159, start_line + 399)
+        end_line = min(end_line if end_line is not None else start_line + 399, start_line + 1999)
     last = min(end_line if end_line is not None else len(lines), len(lines))
     reference = None
     if files.supplied_contents.get(path) == content:
