@@ -81,8 +81,8 @@ import { basename, dirname } from "node:path";
 import { createDatabaseClient } from "../../../../backend/src/db/client.js";
 import { initializeDatabase } from "../../../../backend/src/db/initialize.js";
 export { fixturePasswordHash } from "../../../../backend/tests/support/context.js";
-export { prepareGiven, insertGiven, ownGiven } from "../../../../backend/tests/support/helpers.js";
-export { loginGiven, browserRequest } from "./helpers.js";
+export { prepareGiven, insertGiven, ownGiven, findGiven, ensureGiven } from "../../../../backend/tests/support/helpers.js";
+export { loginGiven, browserRequest, browserIdentity } from "./helpers.js";
 export const test = base.extend<{ database: Database.Database; applicationErrors: void }>({
   database: [async ({}, use) => {
     const path = process.env.ARC_E2E_DB_FILE;
