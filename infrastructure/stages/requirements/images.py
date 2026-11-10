@@ -79,6 +79,8 @@ def read_json(path):
 def build_image_catalog(root, input_dir):
     """Validate referenced screenshots, optional published index and ID associations.
 
+    Names/page hints belong to each requirement use; shared capture IDs may have
+    different labels when their screenshot content is identical.
     Only screenshot records in index.json are consumed. Routes, states, recipes,
     ER, permissions, processes and seed data are outside this parser's scope.
     """
@@ -101,7 +103,7 @@ def build_image_catalog(root, input_dir):
             if capture["id"] in published:
                 raise ValueError(f"Duplicate published capture ID: {capture['id']}")
             published[capture["id"]] = capture
-    images, requirements, hashes = {}, {}, {}
+    images, requirements, hashes, bindings = {}, {}, {}, {}
     for node, image in definitions:
         if REFERENCE.fullmatch(image["reference"]):
             continue
@@ -124,9 +126,18 @@ def build_image_catalog(root, input_dir):
             if indexed != source or screenshot.get("sha256") != record["sha256"]:
                 raise ValueError(f"UI capture {iid} screenshot path or SHA256 does not match index.json")
         previous = images.get(iid)
-        if previous and any(previous.get(key) != record.get(key) for key in ("reference", "page")):
-            raise ValueError(f"Conflicting definitions for image ID {iid}")
-        images[iid] = record
+        # A capture identifies screenshot evidence, not a unique page/requirement.
+        # Exporters legitimately give a reused screenshot different local names.
+        # Keep the first canonical file and preserve every requirement's metadata.
+        if previous and previous["sha256"] != record["sha256"]:
+            raise ValueError(f"Conflicting screenshot content for image ID {iid}: "
+                f"{previous['reference']} versus {record['reference']} (requirement {node['id']})")
+        if previous is None:
+            images[iid] = {**record, "usages": []}
+        usage = {**record, "requirement": node["id"]}
+        if usage not in images[iid]["usages"]:
+            images[iid]["usages"].append(usage)
+        bindings.setdefault(node["id"], {}).setdefault(iid, record)
         requirements.setdefault(node["id"], [])
         if iid not in requirements[node["id"]]:
             requirements[node["id"]].append(iid)
@@ -139,4 +150,4 @@ def build_image_catalog(root, input_dir):
             requirements.setdefault(node["id"], [])
             if iid not in requirements[node["id"]]:
                 requirements[node["id"]].append(iid)
-    return {"images": images, "requirements": requirements}
+    return {"images": images, "requirements": requirements, "bindings": bindings}

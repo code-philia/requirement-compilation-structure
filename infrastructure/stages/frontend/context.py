@@ -50,7 +50,9 @@ def load_ui_context(arc_dir, input_dir):
             "validation_data": data_context(tree.validation_data,rid),
             "ui_evidence": ui_context(tree.ui_evidence,rid),
             "frontend_stack": stack_context(),
-            "images": {key: images[key] for key in refs},
+            "images": {key: {**images[key], **catalog.get("bindings", {}).get(rid, {}).get(key, {}),
+                "usage_hints": [usage for usage in images[key].get("usages", []) if usage["requirement"] == rid]}
+                for key in refs},
             "backend_foundation": getattr(tree,"backend_foundation",{"enabled":False}),
             "platform_http": {"login":"POST /api/auth/login", "me":"GET /api/auth/me", "logout":"POST /api/auth/logout",
                 "registration_options":"GET /api/auth/registration-options returns enabled,userTypes [{id,label}].",
