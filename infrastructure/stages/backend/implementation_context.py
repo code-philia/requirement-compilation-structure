@@ -1,8 +1,14 @@
 """Small, purpose-specific model inputs without discarding source evidence."""
 
 from copy import deepcopy
+import hashlib
 
+from infrastructure.shared.agent.outlines import backend_items
 from infrastructure.stages.backend.context import requirement_context, requirement_schema
+
+
+def evidence_filename(rid):
+    return hashlib.sha256(rid.encode()).hexdigest()[:24] + '.json'
 
 
 def source_context(tree, rid):
@@ -14,13 +20,31 @@ def source_context(tree, rid):
         # Text/scenarios already live in the requirement. Keep exact source bindings.
         evidence['requirement'] = {key: value for key, value in evidence['requirement'].items()
             if key not in {'text', 'name', 'scenarios', 'observed_ui_text', 'children'}}
+    # Ancestors/dependencies are links here, not copies of whole source chapters.
+    for key in ('ancestor_context', 'dependency_context'):
+        evidence[key] = [{k: item[k] for k in ('id', 'name', 'processes', 'authorization', 'er') if k in item}
+            for item in evidence.get(key, [])]
+    direct = set(evidence.get('requirement', {}).get('processes', []))
+    evidence['processes'] = {pid: process if pid in direct else
+        {key: process[key] for key in ('id', 'name', 'source') if key in process}
+        for pid, process in evidence.get('processes', {}).items()}
+    authorization = evidence.get('authorization', {})
+    if authorization:
+        authorization.pop('model', None)
+        authorization['model_reference'] = 'reference/authorization/model.conf (already installed in fixed platform)'
+    context['full_evidence_reference'] = 'references/context/' + evidence_filename(rid)
     context['backend_evidence'] = evidence
     return context
 
 
 def schema_context(schema, rid):
     """Only table definitions; never repeat ER import metadata or all allocations."""
-    return {'entities': requirement_schema(schema, rid),
+    def compact(entity):
+        return {**{key: value for key, value in entity.items() if key != 'fields'},
+            'fields': {name: {key: value for key, value in field.items() if key in
+                {'type', 'source_type', 'sqlite_type', 'primary_key', 'nullable', 'unique', 'references'}}
+                for name, field in entity['fields'].items()}}
+    return {'entities': {name: compact(entity) for name, entity in requirement_schema(schema, rid).items()},
         'discovery': 'Additional authoritative DDL: backend/src/db/tables/*.sql. '
                      'Read named dependencies if needed; omitted tables are not prohibited.'}
 
@@ -28,17 +52,20 @@ def schema_context(schema, rid):
 def api_index(items):
     """Transport and source location index, without repeating complete API descriptions."""
     return {key: {field: item[field] for field in (
-        'purpose', 'method', 'path', 'implementation_hint', 'signature', 'implementation') if field in item}
+        'kind', 'purpose', 'method', 'path', 'implementation_hint', 'signature', 'implementation', 'depends_on', 'consumers', 'exports', 'callers') if field in item}
         for key, item in items.items()}
 
 
 def implementation_context(tree, schema, design, rid):
-    selected = design.get('requirements', {}).get(rid, [])
+    work = backend_items(design, rid)
+    selected = set(work)
     return {'requirement': source_context(tree, rid), 'db_schema': schema_context(schema, rid),
-        'api_design': {'items': {aid: design.get('items', {}).get(aid, {'purpose': aid}) for aid in selected},
+        'backend_design': {'items': work,
             'notes': design.get('notes', {}).get(rid, '')},
-        'api_inventory': api_index({aid: item for aid, item in design.get('items', {}).items() if aid not in selected}),
-        'backend_foundation': tree.backend_foundation,
+        'api_inventory': api_index({aid: item for aid, item in design.get('items', {}).items() if aid not in selected
+            and (aid.startswith('platform-') or any(aid in design.get('requirements', {}).get(dep, [])
+                for dep in tree.raw[rid].get('dependencies', [])))}),
+        'backend_foundation': {key: tree.backend_foundation[key] for key in ('enabled', 'default_boundary', 'registration', 'business_configuration', 'global_design') if key in tree.backend_foundation},
         'endpoint_documentation': 'backend/src/api/endpoints.json',
         'registry': 'backend/src/api/register.ts',
         'business_configuration': 'backend/src/business/platform.ts',
@@ -58,8 +85,8 @@ def acceptance_context(tree, schema, inventory, rid, oracle, accounts, test_path
     return {'requirement': requirement, 'source_expectations': oracle,
         'schema': schema_context(schema, rid),
         'implemented_endpoints': {aid: api for aid, api in inventory.get('apis', {}).items() if aid in selected},
-        'supporting_endpoint_index': api_index({aid: api for aid, api in inventory.get('apis', {}).items() if aid not in selected}),
-        'backend_foundation': tree.backend_foundation,
+        'supporting_endpoint_index': {},
+        'backend_foundation': {key: tree.backend_foundation[key] for key in ('enabled', 'default_boundary', 'registration', 'business_configuration', 'global_design') if key in tree.backend_foundation},
         'test_path': test_path, 'support_module': support, 'test_accounts': accounts,
         'discovery': 'Read related route handlers/DDL only for a missing transport or fixture fact. '
                      'Endpoint documentation is at backend/src/api/endpoints.json. '

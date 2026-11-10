@@ -18,13 +18,14 @@ These examples describe compiler-owned helper APIs, not new business requirement
 Use the compiler-owned backend/tests/support/context.ts, which reexports fixed helpers:
 createApiTest(t), fixturePasswordHash(password), loginSession(baseURL,account),
 sessionRequest(session,path,options), insertGiven(db,table,values), ownGiven(db,ownership)
-and prepareGiven(callback). Do not regenerate these helper implementations in each suite.
+findGiven(db,table,locator), ensureGiven(db,table,uniqueLocator,values),
+sessionIdentity(session), readResponse(response) and prepareGiven(callback). Do not regenerate these helper implementations in each suite.
 
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApiTest, loginSession, sessionRequest, prepareGiven,
-  insertGiven, ownGiven } from '../support/context.js';
+  insertGiven, ownGiven, findGiven, ensureGiven, sessionIdentity, readResponse } from '../support/context.js';
 test('SOURCE-SCENARIO-ID source behavior', async t => {
   const {database, baseURL} = createApiTest(t);
   const given = await prepareGiven(async () => {
@@ -35,7 +36,10 @@ test('SOURCE-SCENARIO-ID source behavior', async t => {
   // Substitute an actual task.test_accounts account. Use normal fetch when login
   // itself is the When action or a rejection response must be observed.
   const session = await loginSession(baseURL, {username:'SOURCE_USERNAME',password:'SOURCE_PASSWORD'});
+  const identity = await sessionIdentity(session); // actual persisted IDs, not catalog codes
   const response = await sessionRequest(session, '/SOURCE_ROUTE', {method:'GET'});
+  const result = await readResponse(response); // {status, body, text, headers}; cached per Response
+  // Assert result.status/body and source-required database effects. Never consume the raw body again.
   // Assert the original Then, including relevant database observations.
 });
 ```
@@ -65,7 +69,8 @@ test('SOURCE-SCENARIO-ID visible behavior', async ({page,database}) => {
 });
 ```
 
-loginGiven returns {request,csrfToken}. browserRequest(session,path,{method,data,
+loginGiven returns {request,csrfToken}. browserIdentity(session) obtains actual persisted
+user/unit IDs from the fixed /api/auth/me endpoint when that platform is enabled. browserRequest(session,path,{method,data,
 idempotencyKey,headers}) performs Given-only API setup with current CSRF and browser
 cookies and returns APIResponse. UI When must not be replaced by this helper. Use a
 separate browser context/token per actor. HttpOnly cookies are browser-managed.
@@ -99,3 +104,23 @@ Default admin has full permissions; ordinary accounts have source-defined permis
 Exact resource/action/machine IDs and additional policy come from the supplied source
 and foundation, not these examples. Infrastructure tables may be used for isolated Given
 setup only when the original scenario requires it; do not fabricate extra memberships.
+
+## fixture_mechanics
+
+createApiTest already restores source SEED records and fixed platform accounts/memberships.
+Do not insert these rows again blindly. findGiven(db,table,locator) looks up one explicit
+row and rejects ambiguous matches. ensureGiven accepts only an actual non-null PK/UNIQUE
+locator and explicit source values: it reuses a matching row, inserts an absent row,
+and rejects mismatched values. It never updates existing data, ignores uniqueness
+errors, invents business values or prepares the When outcome. Use insertGiven when
+an explicitly new Given record is required. Reusing startup SEED and testing creation
+of a new business record are different source scenarios; choose values accordingly.
+For fixed authentication, sessionIdentity(session) resolves the current persisted user
+and unit IDs from /api/auth/me. Catalog codes are not necessarily database primary keys.
+Additional actors/teams/roles require explicit source-authorized isolated Given data;
+never manufacture memberships or remove seed data just to pass a test.
+readResponse(response) consumes a fetch body once and caches {status,body,text,headers}.
+Use this object for assertions and failure messages. Never use assert.equal(r.status,
+expected,await r.text()) then r.json(): assertion-message arguments run even on success.
+Browser APIResponse is already reusable; findGiven/ensureGiven are reexported for browser
+Given setup. All helpers are domain-independent and operate on actual schema/records.

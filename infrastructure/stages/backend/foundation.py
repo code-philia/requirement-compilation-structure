@@ -24,6 +24,9 @@ Return one JSON object:
    "instruction":"short shared integration guidance"}]
 }
 Keep global_design lightweight: module boundaries, reusable owners and shared concerns.
+Include source-required shared services, persistence, validation/calculation or integration
+responsibilities where useful; the backend design stage plans their concrete modules
+alongside APIs. Do not impose a fixed architecture or prebuild an unused utility library.
 Do NOT enumerate API signatures, permission matrices, machines, guards, effects or process dispositions.
 These are implemented incrementally in backend/src/business/platform.ts beside actual APIs.
 Source authorization and BPMN are already imported unchanged; never transcribe them here.

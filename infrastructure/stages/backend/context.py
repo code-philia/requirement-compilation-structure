@@ -86,13 +86,16 @@ def related_schema(schema, records):
 
 def requirement_schema(schema, rid):
     """Source-linked tables and FK parents, without unrelated system table definitions."""
-    names = {symbol.split('.', 1)[0] for symbol in schema.get('requirements', {}).get(rid, [])}
+    names = {symbol.split('.', 1)[0] for symbol in schema.get('requirements', {}).get(rid, [])
+        if schema['entities'].get(symbol.split('.', 1)[0], {}).get('origin') not in {'backend_platform', 'reference_target'}}
     pending = list(names)
     while pending:
         for field in schema['entities'].get(pending.pop(), {}).get('fields', {}).values():
             reference = field.get('references')
             if reference:
                 target = reference.split('.', 1)[0]
+                if schema['entities'].get(target, {}).get('origin') in {'backend_platform', 'reference_target'}:
+                    continue
                 if target not in names:
                     names.add(target)
                     pending.append(target)

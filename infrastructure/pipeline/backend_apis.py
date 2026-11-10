@@ -1,4 +1,4 @@
-"""Stage 05: lightweight API design before implementation, without detailed contracts."""
+"""Stage 05: outline backend APIs, shared capabilities and their implementation locations."""
 
 from pathlib import Path
 
@@ -7,7 +7,7 @@ from infrastructure.stages.backend.context import load_context, requirement_cont
 
 
 def design_backend_joint(arc_dir: Path, pause: bool = False) -> dict:
-    """Describe API purposes, routes and suggested files; implementation owns details."""
+    """Describe APIs, shared module responsibilities/dependencies and suggested files."""
     tree, _ = load_context(arc_dir, validate_seeds=False)
     inventory = {}
     if tree.backend_foundation.get('enabled'):
@@ -16,7 +16,7 @@ def design_backend_joint(arc_dir: Path, pause: bool = False) -> dict:
                 ('registration-options', 'GET', '/api/auth/registration-options'),
                 ('register', 'POST', '/api/auth/register')):
             inventory['platform-' + name] = {
-                'purpose': 'Existing platform ' + name,
+                'kind': 'api', 'purpose': 'Existing platform ' + name,
                 'method': method, 'path': route,
                 'implementation_hint': 'backend/src/platform/runtime.ts'}
     return plan_requirements(arc_dir, 'backend', tree,

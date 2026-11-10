@@ -7,33 +7,37 @@ from pathlib import Path
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.files import editable_application_path
 from infrastructure.shared.agent.loop import run_file_agent
-from infrastructure.shared.agent.outlines import load_outline
+from infrastructure.shared.agent.outlines import load_outline, backend_items
 from infrastructure.shared.agent.incremental import RequirementCheckpoints
 from infrastructure.shared.agent.recovery import implementation_task, final_checks, complete_report
-from infrastructure.shared.agent.feedback import CheckFailure
+from infrastructure.shared.agent.feedback import CheckFailure, TestSetupRequired
+from infrastructure.shared.agent.loop import RepairStalled
 from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.stages.backend.context import load_context
-from infrastructure.stages.backend.implementation_context import implementation_context, acceptance_context
+from infrastructure.stages.backend.implementation_context import implementation_context, schema_context, evidence_filename
 from infrastructure.stages.backend.check_cache import BackendCheckCache
 from infrastructure.stages.backend.runtime import prepare_runtime, REGISTER_PATH, TEST_SUPPORT_PATH
 from infrastructure.stages.backend.platform_files import publish_business_runtime
 from infrastructure.stages.backend.testing import BackendChecks, require_green
-from infrastructure.stages.requirements.acceptance import source_expectations, test_accounts
+from infrastructure.stages.requirements.acceptance import source_expectations, test_accounts, require_scenario_coverage
+from infrastructure.stages.backend.capabilities import normalize_inventory
+from infrastructure.stages.backend.modules import implementation_groups, publish_registries, AGGREGATOR
+from infrastructure.stages.backend.maintenance import RULES as MAINTENANCE_RULES, reject_mechanics, diagnose_failure
 from infrastructure.utils.files import read_artifact, save_json
 from infrastructure.utils.presentation.console import DemoConsole
 
 INVENTORY = 'backend/src/api/endpoints.json'
 
-IMPLEMENT_RULES = '''Implement task.api_design from the preceding API design stage in real backend source files.
+IMPLEMENT_RULES = '''Implement the supplied backend_design (API and non-HTTP capabilities in task.requirements) from the preceding backend design stage in real backend source files.
 Reuse its API IDs, purposes and proposed routes, resolving unspecified transport details
-while coding. api_inventory describes shared APIs planned for other requirements; reuse
+while coding. The supporting capability index describes shared code/APIs planned for other requirements; reuse
 owners and consistent interfaces without implementing every future requirement now.
 Implementation hints are suggested locations; inspect actual existing owners before edits.
 There is no second design proposal, JSON Schema, P/Q, obligation inference or detailed
 contract preparation/validation phase. Never regenerate the API design here.
 If original source evidence requires changing a planned detail, explain why in diagnosis
-and update actual endpoint documentation. Do not silently ignore planned API behavior. Briefly locate the entrypoints and existing owners in diagnosis, then
+and update actual endpoint documentation. Do not silently ignore planned API or module behavior. Briefly locate the entrypoints and existing owners in diagnosis, then
 write the implementation, shared services and route registration in the same edit batch.
 Choose concrete request/response shapes and status codes while implementing. Preserve
 source names, decimals, lifecycles and all earlier API callers. Use source ER/DDL, source
@@ -42,20 +46,27 @@ Reuse existing operations; a requirement may span several APIs/files. Include re
 for refresh, selectors and related objects. Implement validation, business guards/effects,
 foreign-key lookups, rollback on rejection and coherent cross-module behavior.
 
-Maintain backend/src/api/endpoints.json as short documentation of ACTUAL implemented APIs:
+Maintain backend/src/api/endpoints.json as short documentation of ACTUAL APIs and reusable backend modules:
 {"apis":{"API-ID":{"description":"purpose","signature":{"name":"operation",
 "method":"POST","path":"/api/..."},"implementation":"backend/src/...",
 "usage":"concise concrete inputs, output fields and important errors"}},
-"requirements":{"REQ-ID":["API-ID"]}}.
+"requirements":{"REQ-ID":["API-ID"]},
+"modules":{"MODULE-ID":{"kind":"service|repository|policy|workflow|validator|utility|integration|other",
+"description":"responsibility","implementation":"backend/src/...","exports":["symbol"],
+"callers":["actual importing API/module/file"],"depends_on":["capability IDs"]}},
+"module_requirements":{"REQ-ID":["MODULE-ID"]}}.
 Preserve previous entries and associations. This index is documentation for frontend and
 acceptance, not a design contract or executable route generator. Keep it in sync with
-actual code. Do not write a giant schema or create unused placeholder handlers.
+actual code. Shared code needs real exports and callers, or a documented planned consumer
+implemented in a later requirement. Do not create fake HTTP endpoints for internal code,
+a giant schema, unused generic helpers or placeholder handlers. Do not duplicate protected
+platform auth/transaction/audit machinery. Actual function signatures are decided in code.
 
 For outputs generated by the former compiler, migrate guardedRoute/ApiContract imports
 and registrations to businessRoute/RoutePolicy as part of this same code edit; do not
 regenerate old backend_apis.json or db_obligations.json.
-Register the actual handlers in backend/src/api/register.ts; preserve all earlier routes
-and export registerApis(app, connection). All current requirements must reach real code.
+Register actual handlers in task.registry; preserve existing owners and the module registrar ABI.
+The compiler wires module registrars into registerApis(app, connection). All current requirements must reach real code.
 When backend_foundation.enabled is true, use businessRoute from ../platform/runtime.js
 for EVERY business route. Export/use normal ApiHandler functions receiving request and
 connection. The platform owns authentication, CSRF, transactions, scope, ownership,
@@ -114,13 +125,18 @@ and security directly from the source, preserving the existing ApiRequest/ApiRes
 Use parameterized SQL and exact decimal handling. If this requirement has no backend work, retain its empty endpoint association and explain
 that in endpoint documentation. Do not invent an API solely for a frontend-only action.
 No schema/seed changes, production
-fixtures, mocks or test-sensitive code. Tests and shared infrastructure are read-only.
+fixtures, mocks or test-sensitive code. Earlier accepted tests and fixed infrastructure are read-only; current initial test_paths are explicitly writable only during joint creation.
 Read enough to locate the owner, then implement; do not repeatedly scan the repository.
 Errors in code, paths, route policy or endpoint documentation are repaired here. Only a
 contradiction in original ER/source or shared infrastructure requires upstream revision.
 '''
 
-TEST_RULES = '''Write HTTP acceptance tests for the supplied original requirement and scenarios.
+TEST_RULES = '''For a joint module task, the explicitly supplied test_paths are writable during initial creation.
+Write source-based acceptance for the supplied original requirement and scenarios.
+For public behavior use real HTTP. For a genuinely non-HTTP shared capability, test its
+actual exported operations with node:test (using the isolated database if needed). Such
+tests may import services/repositories/utilities, never API handlers to bypass required
+HTTP, permissions or sessions. Do not invent an API just to exercise an internal module.
 There is no generated API contract. Supplied endpoint usage and fixed fixture examples
 normally suffice for transport. Inspect a specific route/handler only for missing facts;
 do not read all historical tests or platform runtime by default. Derive expected business
@@ -132,7 +148,9 @@ results, source-required rejection, unchanged state on rejection, permission/ten
 isolation and workflow effects. Include cross-module supporting reads/foreign IDs.
 Use fixed loginSession/sessionRequest/insertGiven/ownGiven/prepareGiven from the supplied
 support module; do not regenerate login or SQL fixture wrappers. These are Given helpers,
-not substitutes for source-required When/Then assertions.
+not substitutes for source-required When/Then assertions. Login/sessionIdentity helpers
+apply only to the enabled fixed platform and Given authentication; otherwise use actual
+source transport or no authentication as required, never invent a login requirement.
 Use node:test and node:assert/strict. Import createApiTest and fixturePasswordHash from
 task.support_module using relative .js imports. Call createApiTest(t) inside each test;
 use its database for isolated Given setup and SQL observations, and baseURL for real fetch.
@@ -141,191 +159,333 @@ change source expectations to match existing incorrect behavior. Fixture startup
 explicit source seed; CREATED/DERIVED data must be produced by the actual operation.
 Use actual /api/auth/login cookies and csrfToken, forward Cookie and X-CSRF-Token on
 mutations and Idempotency-Key on workflow/bulk commands. Never forge identity headers.
-The host owns the server and temporary database. Write only task.test_path. A business
+The host owns the server and temporary database. Write only the supplied current test_path/test_paths suites when creating or maintaining tests; application implementation follows the phase-specific source scope. A business
 assertion failure is implementation feedback, not permission to weaken or skip tests.
 '''
 
 
 def read_inventory(output):
-    """Documentation handoff only; no design semantics validation/rejection loop."""
+    """Read actual endpoints/modules; malformed documentation is a repairable gap."""
     path = output / INVENTORY
-    if not path.is_file():
-        return {'apis': {}, 'requirements': {}}
     try:
-        value = json.loads(path.read_text(encoding='utf-8-sig'))
+        value = json.loads(path.read_text(encoding='utf-8-sig')) if path.is_file() else {}
     except ValueError:
-        # Keep the source document available to the agent; malformed handoff
-        # metadata cannot waive source acceptance or abort the whole stage.
-        return {'apis': {}, 'requirements': {}}
-    if not isinstance(value, dict):
-        return {'apis': {}, 'requirements': {}}
-    raw_apis = value.get('apis', {})
-    apis = {str(aid): api if isinstance(api, dict) else {'description': str(api)}
-        for aid, api in raw_apis.items()} if isinstance(raw_apis, dict) else {}
-    raw_uses = value.get('requirements', {})
-    uses = {str(rid): [ids] if isinstance(ids, str) else [str(aid) for aid in ids] if isinstance(ids, list) else []
-        for rid, ids in raw_uses.items()} if isinstance(raw_uses, dict) else {}
-    return {'apis': apis, 'requirements': uses}
+        value = {}
+    return normalize_inventory(value)
 
 
 def publish_inventory(arc_dir, inventory):
-    inventory = {"apis": dict(inventory["apis"]), "requirements": dict(inventory["requirements"])}
+    inventory = normalize_inventory(inventory)
     if (arc_dir.parent / 'backend/src/platform/settings.ts').is_file():
         for name, method, route, usage in (
             ('login', 'POST', '/api/auth/login', 'Body username/password; returns csrfToken and server-managed session cookie.'),
-            ('me', 'GET', '/api/auth/me', 'Returns current principal and csrfToken using the session cookie.'),
+            ('me', 'GET', '/api/auth/me', 'Returns user and csrfToken using the session cookie.'),
             ('logout', 'POST', '/api/auth/logout', 'Send session cookie and X-CSRF-Token; invalidates current session.'),
             ('registration-options', 'GET', '/api/auth/registration-options', 'Public: enabled and allowed userTypes [{id,label}].'),
             ('register', 'POST', '/api/auth/register', 'When enabled: username,password,userType -> 201 user; 400 invalid type, 409 duplicate. No auto-login.')):
-            inventory['apis']['platform-' + name] = {'description': name, 'platform_builtin': True,
+            inventory['apis']['platform-' + name] = {'description': name, 'kind': 'api', 'platform_builtin': True,
                 'signature': {'name': name, 'method': method, 'path': route}, 'usage': usage,
                 'implementation': 'backend/src/platform/runtime.ts'}
-    save_json(arc_dir / 'backend_endpoints.json', inventory)
-    save_json(arc_dir / 'backend_implementation_files.json', {
-        aid: api['implementation'] for aid, api in inventory['apis'].items()
-        if isinstance(api.get('implementation'), str)})
+    # Frontend transport stays HTTP-only. Shared modules have their own discovery
+    # handoff; documenting an internal service must not fabricate a REST endpoint.
+    save_json(arc_dir / 'backend_endpoints.json', {key: inventory[key] for key in ('apis', 'requirements')})
+    save_json(arc_dir / 'backend_capabilities.json', {'modules': inventory['modules'], 'requirements': inventory['module_requirements'],
+        'unresolved_requirements': inventory.get('unresolved_requirements', {})})
+    for section, filename in (('apis', 'backend_implementation_files.json'), ('modules', 'backend_module_implementation_files.json')):
+        save_json(arc_dir / filename, {identity: record['implementation'] for identity, record in inventory[section].items()
+            if isinstance(record.get('implementation'), str)})
+    save_json(arc_dir.parent / INVENTORY, inventory)
+
+
+JOINT_RULES = """
+This task implements ONE source-derived module batch. task.requirements contains the
+small per-requirement backend capability outlines (APIs and shared modules), task.source_expectations the original independent
+business oracle. Shared schema, source bindings and test helpers are supplied once.
+Implement application code AND each task.test_paths suite in the same initial edit
+session. Do not run a second API design or separate test-generation discovery session.
+Use task.registry for this module's registerModuleApis(app,connection), automatically
+called by the compiler-owned aggregator for HTTP or explicit source initialization.
+It may remain empty for a shared-only batch; shared exports are used by their real callers.
+Non-HTTP service/repository/calculation/policy code is first-class work, not NO_DIRECT_APIS. Preserve existing owners; never duplicate an
+existing endpoint or rewrite the shared root register.ts/compiled-modules.ts. A legacy
+root needing an explicit wiring fix is identified by task.registry_wired=false.
+Document actual HTTP endpoints and non-HTTP modules separately in endpoints.json,
+including module exports, actual callers, dependencies and per-requirement ownership.
+Only the explicitly listed new/current test files are writable during initial creation.
+After compilation the compiler freezes them; subsequent business repair cannot alter
+assertions. All initial tests must cover original scenario IDs, meaningful When/Then,
+permissions, persistence and rejection effects. Helpers supply mechanics, never business
+values: reuse existing SEED via explicit findGiven/ensureGiven and actual sessionIdentity;
+use readResponse once for statuses, JSON and failure messages. No guessed catalog IDs,
+duplicate bootstrap rows, fake APIs, mocks, seeded When results or vacuous assertions.
+Implement promptly from supplied landing files; precise extra reads remain available.
+"""
 
 
 def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=None):
-    # Read the explicit stage-05 design before preparing or changing application sources.
     design = load_outline(arc_dir, 'backend')
     tree, schema = load_context(arc_dir)
     output = arc_dir.parent.resolve()
-    foundation = tree.backend_foundation
     publish_business_runtime(output)
     prepare_runtime(output)
+    groups = implementation_groups(tree, design)
+    registry_wired = publish_registries(output, groups)
     install_dependencies(output)
     model, console, checks = TextModel(), DemoConsole(pause), BackendChecks(output)
-    prior_report = read_artifact(arc_dir, 'backend_tdd.json') if (arc_dir / 'backend_tdd.json').is_file() else {}
-    report = {'mode': 'source_implementation', 'status': 'IMPLEMENTING', 'requirements': {}, 'tests': {}}
-    accepted = []
+    # Bounded edit batches; never send hundreds of thousands of output tokens for one edit.
+    model.max_output_tokens = min(model.max_output_tokens, 24576)
     cached = BackendCheckCache(output, checks)
     raw = read_artifact(arc_dir, 'requirements.json')
+    previous = read_artifact(arc_dir, 'backend_tdd.json') if (arc_dir / 'backend_tdd.json').is_file() else {}
+    report = {'mode': 'source_implementation', 'status': 'IMPLEMENTING', 'requirements': {}, 'tests': {}, 'modules': []}
+    references = {'references/context': arc_dir / 'source_context'}
+    for rid in tree.requirements:
+        ancestors, parent = [], tree.parents.get(rid)
+        while parent:
+            ancestors.append(tree.backend_evidence.get('nodes', {}).get(parent, {}))
+            parent = tree.parents.get(parent)
+        save_json(arc_dir / 'source_context' / evidence_filename(rid), {
+            'requirement': tree.raw[rid],
+            'backend_evidence': tree.backend_evidence.get('nodes', {}).get(rid, {}),
+            'ancestor_rules': ancestors})
+    if (output / 'reference').is_dir():
+        references['references/source'] = output / 'reference'
     resume = RequirementCheckpoints(arc_dir, 'backend', raw, lambda rid: {
-        'schema': schema, 'foundation': foundation,
-        'apis': {aid: design.get('items', {}).get(aid) for aid in design.get('requirements', {}).get(rid, [])},
-        'notes': design.get('notes', {}).get(rid),
-        'recipe': Path(__file__).read_text()})
-    sources = [REGISTER_PATH, 'backend/src/api/types.ts']
-    if foundation.get('enabled'):
-        sources += ['backend/src/platform/types.ts']
-        if (output / 'backend/src/business/platform.ts').is_file():
-            sources += ['backend/src/business/platform.ts']
-    for rid in tree.leaves:
-        reused = resume.reuse(rid)
-        if reused:
-            relative = reused['test_path']
-            report['requirements'][rid] = reused
-            report['tests'][rid] = {rid: relative}
-            accepted.append(relative)
-            console.show(rid + ' | Reuse accepted backend checkpoint', 'Inputs and implementation files are unchanged; final regression remains enabled.')
-            save_json(arc_dir / 'backend_tdd.json', report)
+        'schema': schema_context(schema, rid),
+        'foundation': {key: tree.backend_foundation.get(key) for key in ('enabled', 'default_boundary', 'registration')},
+        'capabilities': backend_items(design, rid),
+        'notes': design.get('notes', {}).get(rid), 'recipe': Path(__file__).read_text()})
+    accepted = []
+    for group in groups:
+        active = []
+        for rid in group['requirements']:
+            reused = resume.reuse(rid)
+            if reused:
+                report['requirements'][rid] = reused
+                report['tests'][rid] = {rid: reused['test_path']}
+                accepted.append(reused['test_path'])
+                console.show(rid + ' | Reuse implementation checkpoint',
+                    'Owned implementation is unchanged; shared wiring changes are covered by real regression, not regeneration.')
+            elif not design.get('requirements', {}).get(rid):
+                report['requirements'][rid] = {'status': 'NO_DIRECT_APIS', 'requirements': [rid]}
+            else:
+                active.append(rid)
+        if not active:
             continue
-        entry = report['requirements'][rid] = {'status': 'IMPLEMENTING', 'requirements': [rid]}
+        entry = {'status': 'IMPLEMENTING', 'requirements': active, 'module': group['id']}
+        report['modules'].append(entry)
+        for rid in active:
+            report['requirements'][rid] = {'status': 'IMPLEMENTING', 'requirements': [rid], 'module': group['id']}
         save_json(arc_dir / 'backend_tdd.json', report)
-        with implementation_task(output, entry, console, rid):
-            context = implementation_context(tree, schema, design, rid)
-            previous = prior_report.get('requirements', {}).get(rid, {})
-            if previous.get('status') == 'FAILED':
-                context['previous_failure'] = {key: previous[key] for key in ('error', 'feedback', 'archive') if key in previous}
-            workspace = FileTools(output, ['backend'], requirements=[rid], stage='backend',
-                discovery=True, files=sources,
-                allow_write=lambda path: path.startswith('backend/src/') and editable_application_path(output, path))
-            workspace.preferred_files = set(sources) | {path for path in workspace.related_files
-                if path.startswith('backend/src/') and not path.startswith(('backend/src/db/', 'backend/src/platform/'))
-                and path != INVENTORY}
+        paths = {rid: 'backend/tests/requirements/' + hashlib.sha256(rid.encode()).hexdigest()[:16] + '.test.ts' for rid in active}
+        oracles = [source_expectations(raw, rid) for rid in active]
+        with implementation_task(output, entry, console, 'Backend module ' + group['id'] + ' / ' + ','.join(active)):
+            contexts = [implementation_context(tree, schema, design, rid) for rid in active]
+            entities, supporting_apis = {}, {}
+            for context in contexts:
+                entities.update(context.pop('db_schema')['entities'])
+                # Source expectations below already contain prose and scenarios.
+                context['requirement'].pop('description', None)
+                context['requirement'].pop('steps', None)
+                context.pop('backend_foundation', None)
+                supporting_apis.update(context.pop('api_inventory', {}))
+            foundation = tree.backend_foundation
+            task = {'requirements': contexts, 'source_expectations': oracles,
+                'db_schema': {'entities': entities}, 'module': group['owner'],
+                'supporting_capability_index': supporting_apis,
+                'registry': group['registry'], 'registry_wired': registry_wired,
+                'global_design': foundation.get('global_design', {}),
+                'backend_foundation': {key: foundation.get(key) for key in ('enabled', 'default_boundary', 'registration', 'business_configuration')},
+                'test_paths': paths, 'test_path': next(iter(paths.values())),
+                'support_module': TEST_SUPPORT_PATH, 'test_accounts': test_accounts(raw),
+                'endpoint_documentation': INVENTORY,
+                'evidence_discovery': 'references/context holds original requirements/ancestor rules; references/source maps to published reference/ files. Read named missing source facts, not all documents.',
+                'previous_failures': {rid: {key: previous['requirements'][rid].get(key) for key in ('error', 'feedback', 'archive')}
+                    for rid in active if previous.get('requirements', {}).get(rid, {}).get('status') == 'FAILED'}}
+            frozen_tests = False
+            def writable(path):
+                if path in paths.values():
+                    return not frozen_tests
+                if path == AGGREGATOR or path == REGISTER_PATH and task['registry_wired']:
+                    return False
+                return path.startswith('backend/src/') and editable_application_path(output, path)
+            existing = read_inventory(output)
+            selected_work_ids = {identity for rid in active for identity in backend_items(design, rid)}
+            implemented_work = {**existing['modules'], **existing['apis']}
+            owners = [api['implementation'] for aid, api in implemented_work.items()
+                if aid in selected_work_ids and isinstance(api.get('implementation'), str)]
+            hints = [item.get('implementation_hint') for rid in active for item in backend_items(design, rid).values()]
+            hinted_files = [hint for hint in hints if isinstance(hint, str) and hint.startswith('backend/src/')
+                and Path(hint).suffix == '.ts' and (output / hint).resolve().is_relative_to(output)]
+            landing = [*hinted_files, group['registry'], 'backend/src/api/types.ts', 'backend/src/platform/types.ts',
+                'backend/src/business/platform.ts', TEST_SUPPORT_PATH, 'backend/tests/support/helpers.ts', *owners, *paths.values()]
+            workspace = FileTools(output, ['backend'], requirements=active, stage='backend', discovery=True,
+                files=[path for path in landing if path in paths.values() or path in hinted_files or (output / path).is_file()],
+                allow_write=writable, references=references)
+            workspace.preferred_files = set(landing)
             workspace.defer_context_files = True
 
-            def endpoint_gate():
-                inventory = read_inventory(output)
-                planned = design.get('requirements', {}).get(rid, [])
-                linked = inventory['requirements'].get(rid, [])
-                # Recover an omitted association to documented planned APIs without
-                # rejecting a working handler over its metadata. Missing business
-                # behavior is still exercised by original source acceptance below.
-                if planned and not linked:
-                    linked = [aid for aid in planned if aid in inventory['apis']]
-                    inventory['requirements'][rid] = linked
-                inventory['requirements'][rid] = [aid for aid in linked if aid in inventory['apis'] or aid.startswith('platform-')]
-                return inventory
-
-            def code_gate():
-                typed = cached.run('typecheck', [])
-                if typed['returncode']:
-                    raise CheckFailure('Backend source compilation failed', typed)
-                return {'typecheck': typed, 'inventory': endpoint_gate()}
-
-            # Stage 05 already designed the APIs. Implement now without another proposal loop.
-            implemented = run_file_agent(model, IMPLEMENT_RULES, context, workspace,
-                code_gate, max_turns, console, rid + ' / Implement backend')
-            inventory = implemented['checks']['inventory']
-            if not inventory['requirements'].get(rid) and not design.get('requirements', {}).get(rid):
-                entry.update(status='NO_DIRECT_APIS')
-                publish_inventory(arc_dir, inventory)
-                save_json(arc_dir / 'backend_tdd.json', report)
-                continue
-            relative = 'backend/tests/requirements/' + hashlib.sha256(rid.encode()).hexdigest()[:16] + '.test.ts'
-            test_context = acceptance_context(tree, schema, inventory, rid,
-                source_expectations(raw, rid), test_accounts(raw), relative, TEST_SUPPORT_PATH)
-            # Supply the fixed helper and current handlers, not all application wiring
-            # or historical tests. Related extra files remain discoverable metadata.
-            current_paths = [api.get('implementation') for aid, api in inventory['apis'].items()
-                if aid in inventory['requirements'].get(rid, []) and api.get('implementation')]
-            suite = FileTools(output, ['backend'], requirements=[rid], stage='backend',
-                discovery=True, files=[relative, TEST_SUPPORT_PATH, *current_paths], writable=[relative])
-            suite.preferred_files = {relative, TEST_SUPPORT_PATH, *current_paths}
-            suite.defer_context_files = True
-
-            def test_gate():
-                result = cached.run('typecheck', [relative])
+            def compile_gate():
+                missing = [path for path in paths.values() if not (output / path).is_file()]
+                if missing:
+                    raise CheckFailure('Implement the source scenario suites in this same batch', {'missing_tests': missing})
+                result = cached.run('typecheck', list(paths.values()))
                 if result['returncode']:
-                    raise CheckFailure('HTTP acceptance compilation failed', result)
-                return result
+                    raise CheckFailure('Module source/test compilation failed', result)
+                return {'typecheck': result}
 
-            run_file_agent(model, TEST_RULES, test_context, suite, test_gate,
-                max_turns, console, rid + ' / Source HTTP acceptance')
-            workspace.files.add(relative)
-            workspace.available_paths.add(relative)
-            workspace.preferred_files.add(relative)
-
-            cumulative = False
+            initial = run_file_agent(model, IMPLEMENT_RULES + JOINT_RULES + TEST_RULES, task,
+                workspace, compile_gate, max_turns, console, group['id'] + ' / Implement module and scenarios')
+            frozen_tests = True
+            task['phase'] = 'Business repair: tests are frozen; only application sources are writable'
+            maintenance_count = 0
+            current = list(paths.values())
+            selected = current
 
             def acceptance_gate():
-                selected = [*accepted, relative] if cumulative else [relative]
-                # Compile exactly the tested suites; code_gate already handles docs.
-                result = {'inventory': endpoint_gate()}
                 typed = cached.run('typecheck', selected)
                 if typed['returncode']:
-                    raise CheckFailure('Backend acceptance compilation failed', typed)
-                result['typecheck'] = typed
+                    raise CheckFailure('Module/regression compilation failed', typed)
                 tested = cached.run('tests', selected)
+                reject_mechanics(tested)
                 require_green(tested)
-                result['tests'] = tested
-                return result
+                for oracle in oracles:
+                    try:
+                        require_scenario_coverage(tested, oracle)
+                    except ValueError as error:
+                        raise TestSetupRequired(str(error), {'tests': tested, 'missing_coverage': str(error)}) from error
+                return {'typecheck': typed, 'tests': tested}
 
-            # Repair current behavior first. Only then regress accepted requirements.
-            # Cache successful calls by all backend source/test/config content, so an
-            # unchanged suite is not executed again during final verification.
-            for cumulative in ((False, True) if accepted else (False,)):
-                try:
-                    verified = acceptance_gate()
-                except (ValueError, RuntimeError) as error:
-                    repaired = run_file_agent(model, IMPLEMENT_RULES, context, workspace,
-                        acceptance_gate, max_turns, console,
-                        rid + (' / Regression repair' if cumulative else ' / Repair backend'),
-                        feedback=getattr(error, 'feedback', {'error': str(error)}))
-                    verified = repaired['checks']
-            # Publish only accepted implementation docs; rejected task files roll back.
-            publish_inventory(arc_dir, verified['inventory'])
-            accepted.append(relative)
-            report['tests'][rid] = {rid: relative}
-            entry.update(status='GREEN', test_path=relative)
-            resume.refresh_accepted(report['requirements'], lambda key: [
-                report['requirements'][key]['test_path'], 'backend/tests/support/context.ts',
-                'backend/tests/support/helpers.ts', 'backend/scripts/test-api.mjs', INVENTORY])
+            for selected in ([current, list(dict.fromkeys([*accepted, *current]))] if accepted else [current]):
+                while True:
+                    try:
+                        try:
+                            verified = acceptance_gate()
+                        except TestSetupRequired:
+                            raise
+                        except (ValueError, RuntimeError) as error:
+                            verified = run_file_agent(model, IMPLEMENT_RULES + JOINT_RULES, task, workspace,
+                                acceptance_gate, max_turns, console, group['id'] + ' / Repair business behavior',
+                                feedback=getattr(error, 'feedback', {'error': str(error)}))['checks']
+                        break
+                    except (TestSetupRequired, RepairStalled) as error:
+                        feedback = getattr(error, 'feedback', {'error': str(error)})
+                        evidence_text = json.dumps(feedback, ensure_ascii=False).replace('\\', '/')
+                        maintenance_paths = [path for path in selected if path in evidence_text] or current
+                        oracle_by_path = {paths[rid]: oracle for rid, oracle in zip(active, oracles)}
+                        oracle_by_path.update({record['test_path']: source_expectations(raw, rid)
+                            for rid, record in report['requirements'].items() if record.get('status') == 'GREEN'})
+                        maintenance_oracles = [oracle_by_path[path] for path in maintenance_paths if path in oracle_by_path]
+                        decision = diagnose_failure(model, maintenance_oracles or oracles, feedback)
+                        if isinstance(error, TestSetupRequired) and isinstance(feedback, dict) and feedback.get('missing_coverage'):
+                            decision = {'cause': 'test_mechanics', 'reason': feedback['missing_coverage'], 'source_refs': active}
+                        entry.setdefault('diagnoses', []).append(decision)
+                        if maintenance_count or decision.get('cause') not in {'test_setup', 'test_mechanics', 'test_mismatch'}:
+                            raise
+                        maintenance_count += 1
+                        suite = FileTools(output, ['backend'], requirements=active, stage='backend', discovery=True,
+                            files=[*maintenance_paths, TEST_SUPPORT_PATH, 'backend/tests/support/helpers.ts'], writable=maintenance_paths, references=references)
+                        suite.preferred_files = set(maintenance_paths) | {TEST_SUPPORT_PATH, 'backend/tests/support/helpers.ts'}
+                        suite.defer_context_files = True
+                        def maintenance_gate():
+                            typed = cached.run('typecheck', maintenance_paths)
+                            if typed['returncode']:
+                                raise CheckFailure('Test maintenance compilation failed', typed)
+                            observed = cached.run('tests', maintenance_paths)
+                            reject_mechanics(observed)
+                            for oracle in maintenance_oracles or oracles:
+                                require_scenario_coverage(observed, oracle)
+                            # A remaining business RED belongs to implementation, never assertion relaxation.
+                            return {'typecheck': typed, 'tests': observed}
+                        run_file_agent(model, MAINTENANCE_RULES,
+                            {**task, 'phase': 'Source-cited test-only maintenance', 'source_expectations': maintenance_oracles or oracles,
+                                'writable_test_paths': maintenance_paths, 'diagnosis': decision},
+                            suite, maintenance_gate, min(3, max_turns), console,
+                            group['id'] + ' / Repair test mechanics', feedback=feedback)
+            inventory = read_inventory(output)
+            for rid in active:
+                work = backend_items(design, rid)
+                inventory['requirements'][rid] = list(dict.fromkeys([*inventory['requirements'].get(rid, []),
+                    *(identity for identity in work if identity in inventory['apis'])]))
+                inventory['module_requirements'][rid] = list(dict.fromkeys([*inventory['module_requirements'].get(rid, []),
+                    *(identity for identity in work if identity in inventory['modules'])]))
+            publish_inventory(arc_dir, inventory)
+            entry.update(status='GREEN', test_paths=paths, initial_turns=initial['turns'], test_maintenance_passes=maintenance_count)
+        if entry['status'] == 'GREEN':
+            for rid in active:
+                report['requirements'][rid] = {'status': 'GREEN', 'requirements': [rid], 'module': group['id'], 'test_path': paths[rid]}
+                report['tests'][rid] = {rid: paths[rid]}
+                accepted.append(paths[rid])
+            resume.refresh_accepted(report['requirements'], lambda rid: [report['requirements'][rid]['test_path'],
+                'backend/tests/support/context.ts', 'backend/tests/support/helpers.ts', 'backend/scripts/test-api.mjs'])
+        else:
+            for rid in active:
+                report['requirements'][rid] = {**entry, 'requirements': [rid], 'module': group['id']}
         save_json(arc_dir / 'backend_tdd.json', report)
-    verification = final_checks(console, typecheck=(lambda: cached.run('typecheck'), None),
+    def final_gate():
+        typed = cached.run('typecheck', accepted)
+        if typed['returncode']:
+            raise CheckFailure('Final backend integration compilation failed', typed)
+        tested = cached.run('tests', accepted)
+        reject_mechanics(tested)
+        require_green(tested)
+        for rid, record in report['requirements'].items():
+            if record.get('status') == 'GREEN':
+                require_scenario_coverage(tested, source_expectations(raw, rid))
+        return {'typecheck': typed, 'tests': tested}
+
+    # Shared-only changes need verification first, not wholesale regeneration of
+    # accepted modules. One integration repair can fix an actual observed break.
+    if accepted:
+        try:
+            final_gate()
+        except (ValueError, RuntimeError) as error:
+            failure = getattr(error, 'feedback', {'error': str(error)})
+            text = json.dumps(failure, ensure_ascii=False)
+            all_oracles = [source_expectations(raw, rid) for rid, record in report['requirements'].items() if record.get('status') == 'GREEN']
+            relevant = [oracle for oracle in all_oracles if any(row['id'] in text for row in oracle['scenarios'])]
+            relevant = relevant or all_oracles
+            ids = [oracle['requirement'] for oracle in relevant]
+            integration = report['integration_repair'] = {'status': 'IMPLEMENTING', 'requirements': ids}
+            with implementation_task(output, integration, console, 'Backend shared integration repair'):
+                decision = diagnose_failure(model, relevant, failure)
+                repair_task = {'source_expectations': relevant, 'test_path': accepted[0],
+                    'test_paths': {rid: report['requirements'][rid]['test_path'] for rid in ids},
+                    'support_module': TEST_SUPPORT_PATH, 'test_accounts': test_accounts(raw),
+                    'diagnosis': decision, 'backend_foundation': {'enabled': tree.backend_foundation.get('enabled')}}
+                if decision.get('cause') in {'test_setup', 'test_mechanics', 'test_mismatch'}:
+                    editable_tests = list(repair_task['test_paths'].values())
+                    owner = FileTools(output, ['backend'], requirements=ids, stage='backend', discovery=True,
+                        files=[*editable_tests, TEST_SUPPORT_PATH, 'backend/tests/support/helpers.ts'],
+                        writable=editable_tests, references=references)
+                    def mechanics_gate():
+                        compiled = cached.run('typecheck', accepted)
+                        if compiled['returncode']:
+                            raise CheckFailure('Final test mechanics compilation failed', compiled)
+                        observed = cached.run('tests', accepted)
+                        reject_mechanics(observed)
+                        for oracle in all_oracles:
+                            require_scenario_coverage(observed, oracle)
+                        return observed
+                    run_file_agent(model, MAINTENANCE_RULES, repair_task, owner, mechanics_gate,
+                        min(3, max_turns), console, 'Backend shared test mechanics', feedback=failure)
+                owner = FileTools(output, ['backend'], requirements=ids, stage='backend', discovery=True,
+                    files=[REGISTER_PATH, 'backend/src/api/types.ts', 'backend/src/business/platform.ts'],
+                    allow_write=lambda path: path != AGGREGATOR and path.startswith('backend/src/') and editable_application_path(output, path), references=references)
+                owner.preferred_files = set(owner.related_files) - {REGISTER_PATH}
+                owner.defer_context_files = True
+                try:
+                    final_gate()
+                except (ValueError, RuntimeError) as observed:
+                    run_file_agent(model, IMPLEMENT_RULES + '\nRepair actual integration failures; accepted tests are read-only. Original source remains authoritative.',
+                        repair_task, owner, final_gate, min(3, max_turns), console, 'Backend shared behavior repair',
+                        feedback=getattr(observed, 'feedback', {'error': str(observed)}))
+                integration['status'] = 'GREEN'
+    verification = final_checks(console, typecheck=(lambda: cached.run('typecheck', accepted), None),
         tests=(lambda: cached.run('tests', accepted), require_green if accepted else None), build=(checks.build, None))
+    if accepted and all(check['status'] == 'GREEN' for check in verification.values()):
+        resume.refresh_accepted(report['requirements'], lambda rid: [report['requirements'][rid]['test_path'],
+            'backend/tests/support/context.ts', 'backend/tests/support/helpers.ts', 'backend/scripts/test-api.mjs'])
     publish_inventory(arc_dir, read_inventory(output))
     report['incremental'] = {'checkpoint': resume.path.name, 'reused_requirements': sum(
         bool(entry.get('reused_checkpoint')) for entry in report['requirements'].values())}
