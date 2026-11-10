@@ -158,10 +158,15 @@ class Compiler:
                 # One bounded recovery sweep after neighboring requirements have
                 # produced new shared owners. Accepted requirements are reused by
                 # the existing content/dependency checkpoints, not regenerated.
+                # Design requirements map to API/page ID lists, not status records.
+                # Inspect requirement outcomes only for implementation reports.
+                if function not in (implement_backend_tdd, implement_frontend_joint):
+                    continue
                 entries = result.get('requirements', {}) if isinstance(result, dict) else {}
-                failed = any(entry.get('status') == 'FAILED' for entry in entries.values())
-                progressed = any(entry.get('status') == 'GREEN' for entry in entries.values())
-                if function in (implement_backend_tdd, implement_frontend_joint) and failed and progressed:
+                outcomes = [entry for entry in entries.values() if isinstance(entry, dict)] if isinstance(entries, dict) else []
+                failed = any(entry.get('status') == 'FAILED' for entry in outcomes)
+                progressed = any(entry.get('status') == 'GREEN' for entry in outcomes)
+                if failed and progressed:
                     previous = dict(self.report['stages'][name])
                     show_panel('Incremental recovery | ' + name,
                         'Retry unresolved requirements once using new shared implementations and saved failure feedback. Accepted checkpoints are reused.')
