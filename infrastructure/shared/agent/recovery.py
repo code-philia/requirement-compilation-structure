@@ -32,7 +32,7 @@ def implementation_task(output, entry, console, label):
         before = _snapshot(output)
         try:
             yield
-        except ValueError as error:
+        except (ValueError, RuntimeError, TypeError, KeyError, AttributeError, IndexError) as error:
             after = _snapshot(output)
             changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
             name = re.sub(r"[^\w.-]+", "_", label).strip("._")[:100] or "task"
@@ -41,7 +41,7 @@ def implementation_task(output, entry, console, label):
                 if path in after:
                     save_bytes(directory / "files" / path, after[path])
             failure = {"status": "FAILED", "task": label, "phase": entry.get("status"),
-                "error": str(error), "turns": getattr(error, "turns", 0),
+                "error": str(error), "error_type": type(error).__name__, "turns": getattr(error, "turns", 0),
                 "feedback": getattr(error, "feedback", None), "changed_files": sorted(changed),
                 "deleted_files": sorted(changed - after.keys()),
                 "archive": directory.relative_to(output).as_posix()}

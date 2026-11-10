@@ -48,7 +48,7 @@ class Compiler:
         self.report = {"status": "NOT_STARTED", "stages": {}}
 
     def _run(self, stage: str, function, *arguments, **options):
-        """Run a pass and preserve explicit failures for the pipeline stop gate."""
+        """Run a pass and preserve diagnostics for dependency-aware continuation."""
         self.current_stage = stage
         stage_event = begin_stage(stage)
         self.report["stages"][stage] = {"status": "RUNNING", "started_at": timestamp()}
@@ -68,22 +68,63 @@ class Compiler:
         except Exception as error:
             result = {"status": "FAILED", "error": str(error),
                 "error_type": type(error).__name__, "traceback": traceback.format_exc()}
+            if getattr(error, 'usable_artifacts', None):
+                result['usable_artifacts'] = error.usable_artifacts
             if getattr(error, "failures", None):
                 result.update(status="COMPLETED_WITH_FAILURES", failures=error.failures)
             show_panel("[FAILED] " + stage,
-                result["error"] + "\nAccepted artifacts remain available. Dependent passes will not run.", tone="error")
+                result["error"] + "\nAccepted artifacts remain available. Other passes with usable prerequisites will continue.", tone="error")
         except BaseException:
             finish_stage(stage_event, "FAILED")
             raise
         status = result.get("status", "GREEN") if isinstance(result, dict) else "GREEN"
         self.report["stages"][stage] = {"status": status, **finish_stage(stage_event, status)}
         if isinstance(result, dict):
-            for key in ("failures", "verification", "error", "error_type", "traceback"):
+            for key in ("failures", "verification", "error", "error_type", "traceback", "diagnostics", "usable_artifacts"):
                 if key in result:
                     self.report["stages"][stage][key] = result[key]
         save_json(self.arc_dir / "compilation.json", self.report)
         checkpoint(self.output_dir, stage=stage, task="stage report", action="Publish pass result",
             status=status, details=self.report["stages"][stage])
+        return result
+
+    def _missing_prerequisites(self, stage):
+        required = {
+            "01_explore_requirement": ["backend/package.json", "frontend/package.json"],
+            "02_design_backend_foundation": [".arc/requirements.json"],
+            "04_implement_db": [".arc/db_schema.json", ".arc/backend_foundation.json", "backend/package.json"],
+            "05_design_backend_joint": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
+            "06_implement_backend_tdd": [".arc/backend_plan.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
+            "07_design_frontend_joint": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
+            "10_implement_frontend_joint": [".arc/frontend_plan.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
+        }
+        missing = [path for path in required.get(stage, []) if not (self.output_dir / path).is_file()]
+        # Do not use stale deployment/DDL artifacts after a failed current import.
+        gates = {
+            "01_explore_requirement": ["00_project_initialization"],
+            "04_implement_db": ["02_design_backend_foundation"],
+            "05_design_backend_joint": ["02_design_backend_foundation"],
+            "06_implement_backend_tdd": ["02_design_backend_foundation", "04_implement_db"],
+            "07_design_frontend_joint": ["02_design_backend_foundation"],
+            "10_implement_frontend_joint": ["02_design_backend_foundation", "04_implement_db"],
+        }
+        input_pass = self.report['stages'].get('01_explore_requirement', {})
+        if stage not in {'00_project_initialization', '01_explore_requirement'} and input_pass.get('status') in {'FAILED', 'BLOCKED'}:
+            if not input_pass.get('usable_artifacts', {}).get('requirements'):
+                missing.append('current requirement import did not complete')
+        for owner in gates.get(stage, []):
+            result = self.report['stages'].get(owner, {})
+            if result.get('status') in {'FAILED', 'COMPLETED_WITH_FAILURES', 'BLOCKED'}:
+                missing.append('prerequisite stage ' + owner + ' needs repair')
+        return missing
+
+    def _blocked(self, stage, missing):
+        event = begin_stage(stage)
+        result = {'status': 'BLOCKED', 'error': 'Required executable inputs are unavailable',
+            'missing_prerequisites': missing, **finish_stage(event, 'BLOCKED')}
+        self.report['stages'][stage] = result
+        save_json(self.arc_dir / 'compilation.json', self.report)
+        show_panel('[BLOCKED] ' + stage, '\n'.join(missing) + '\nContinuing independent planning/tasks.', tone='waiting')
         return result
 
     def compile(self, stage: str | None = None) -> Path:
@@ -101,6 +142,10 @@ class Compiler:
         self.report.update(run_id=run_id, started_at=timestamp())
         try:
             for name, function, artifact in passes:
+                missing = self._missing_prerequisites(name)
+                if missing:
+                    self.artifacts[artifact] = self._blocked(name, missing)
+                    continue
                 if function is project_initialization:
                     result = self._run(name, function, self.input_dir, self.output_dir, port=self.port, pause=self.pause)
                 elif function is design_backend_foundation:
@@ -110,12 +155,36 @@ class Compiler:
                 else:
                     result = self._run(name, function, self.arc_dir, pause=self.pause)
                 self.artifacts[artifact] = result
-                if self.report["stages"][name]["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}:
-                    # No downstream generation from stale or partially accepted designs.
-                    break
+                # One bounded recovery sweep after neighboring requirements have
+                # produced new shared owners. Accepted requirements are reused by
+                # the existing content/dependency checkpoints, not regenerated.
+                entries = result.get('requirements', {}) if isinstance(result, dict) else {}
+                failed = any(entry.get('status') == 'FAILED' for entry in entries.values())
+                progressed = any(entry.get('status') == 'GREEN' for entry in entries.values())
+                if function in (implement_backend_tdd, implement_frontend_joint) and failed and progressed:
+                    previous = dict(self.report['stages'][name])
+                    show_panel('Incremental recovery | ' + name,
+                        'Retry unresolved requirements once using new shared implementations and saved failure feedback. Accepted checkpoints are reused.')
+                    if function is implement_backend_tdd:
+                        result = self._run(name, function, self.arc_dir, pause=self.pause)
+                    else:
+                        result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
+                    self.artifacts[artifact] = result
+                    self.report['stages'][name]['recovery_attempts'] = [previous]
+                    save_json(self.arc_dir / 'compilation.json', self.report)
             self.current_stage = None
             incomplete = [name for name, result in self.report["stages"].items()
-                if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
+                if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES", "BLOCKED"}]
+            self.report['attempted_all_stages'] = len(self.report['stages']) == len(passes)
+            queue = [{'stage': name, 'status': self.report['stages'][name]['status'],
+                'error': self.report['stages'][name].get('error'),
+                'missing_prerequisites': self.report['stages'][name].get('missing_prerequisites', []),
+                'failures': self.report['stages'][name].get('failures', []),
+                'verification': self.report['stages'][name].get('verification', {}),
+                'resume': '--stage ' + name} for name in incomplete]
+            save_json(self.arc_dir / 'repair_queue.json', {'pending': queue,
+                'instruction': 'Repair prerequisites before blocked stages; reuse accepted requirement checkpoints. Never waive source acceptance.'})
+            self.report['repair_queue'] = '.arc/repair_queue.json'
             self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
             save_json(self.arc_dir / "compilation.json", self.report)
             checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",

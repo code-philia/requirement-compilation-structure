@@ -8,7 +8,7 @@ from infrastructure.stages.backend.context import load_context, requirement_cont
 
 def design_backend_joint(arc_dir: Path, pause: bool = False) -> dict:
     """Describe API purposes, routes and suggested files; implementation owns details."""
-    tree, _ = load_context(arc_dir)
+    tree, _ = load_context(arc_dir, validate_seeds=False)
     inventory = {}
     if tree.backend_foundation.get('enabled'):
         for name, method, route in (('login', 'POST', '/api/auth/login'),

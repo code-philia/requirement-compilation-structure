@@ -2,7 +2,7 @@
 
 from infrastructure.stages.frontend.context import load_frontend_context
 from infrastructure.shared.agent.outlines import plan_requirements, load_outline
-from infrastructure.utils.files import save_json
+from infrastructure.utils.files import save_json, read_artifact
 
 
 def design_frontend_joint(input_dir, arc_dir, pause=False, max_attempts=5):
@@ -24,7 +24,10 @@ def implement_frontend_joint(input_dir, arc_dir, pause=False):
     ui = {"outline": True, "pages": plan["items"], "elements": {},
         "requirements": plan["requirements"], "notes": plan["notes"]}
     interactions = {"triggers": {}, "requirements": {rid: [] for rid in tree.leaves}}
-    report = {"status": "PREPARING", "requirements": {rid: {"status": "PENDING"} for rid in tree.leaves}}
+    previous = read_artifact(arc_dir, "frontend_e2e.json") if (arc_dir / "frontend_e2e.json").is_file() else {}
+    report = {"previous_failures": {rid: {key: entry[key] for key in ("error", "feedback", "archive") if key in entry}
+        for rid, entry in previous.get("requirements", {}).items() if entry.get("status") == "FAILED"},
+        "status": "PREPARING", "requirements": {rid: {"status": "PENDING"} for rid in tree.leaves}}
     save_json(arc_dir / 'frontend_e2e.json', report)
     try:
         return run_trigger_tdd(arc_dir, tree, schema, backend, ui, interactions, images,

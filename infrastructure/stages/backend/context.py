@@ -9,7 +9,7 @@ from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.stages.requirements.data import load_data, data_context
 
 
-def load_context(arc_dir: Path):
+def load_context(arc_dir: Path, *, validate_seeds=True):
     """Load original evidence and implemented schema, without an API contract artifact."""
     tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
     tree.backend_evidence = load_evidence(arc_dir)
@@ -29,7 +29,7 @@ def load_context(arc_dir: Path):
     schema = read_artifact(arc_dir, "db_schema.json")
     from infrastructure.stages.database.seeds import MANIFEST, seed_assertions
     seed_path = arc_dir.parent / MANIFEST
-    if seed_path.is_file():
+    if seed_path.is_file() and validate_seeds:
         seed_assertions(arc_dir.parent, schema, tree.validation_data)
         import json
         resolutions = json.loads(seed_path.read_text(encoding="utf-8-sig"))["records"]

@@ -354,7 +354,9 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
                         json.dumps(result, ensure_ascii=False, indent=2))
             if failures:
                 names = ", ".join(reference for reference, _ in failures)
-                raise RuntimeError(f"Image analysis failed for {len(failures)} unique images: {names}. Completed results were saved.") from failures[0][1]
+                error = RuntimeError(f"Image analysis failed for {len(failures)} unique images: {names}. Completed results were saved.")
+                error.usable_artifacts = {"requirements": True, "analyzed_references": len(analysis)}
+                raise error from failures[0][1]
         finally:
             for model in models:
                 model.client.close()

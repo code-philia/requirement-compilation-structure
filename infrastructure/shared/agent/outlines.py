@@ -33,7 +33,7 @@ def input_hashes(arc_dir, kind):
     names = ['requirements.json', 'db_schema.json', 'backend_foundation.json']
     if kind == 'frontend':
         names += ['backend_endpoints.json', 'ui_evidence.json', 'visual_analysis.json']
-    return {name: fingerprint(read_artifact(arc_dir, name)) for name in names}
+    return {name: hashlib.sha256((arc_dir / name).read_bytes()).hexdigest() if (arc_dir / name).is_file() else None for name in names}
 
 
 def load_outline(arc_dir, kind):
@@ -95,9 +95,14 @@ Use Arco; choose components and callback wiring during implementation.
 When registration is enabled by source/foundation, plan a registration page using the
 fixed frontend/src/auth/RegisterPage.tsx and shared /api/auth/registration-options/register
 endpoints. User type labels/options come from the server; never duplicate role selection.'''
-    backend = read_artifact(arc_dir, 'backend_endpoints.json') if kind == 'frontend' else None
+    backend_path = arc_dir / 'backend_endpoints.json'
+    backend = read_artifact(arc_dir, backend_path.name) if kind == 'frontend' and backend_path.is_file() else None
+    foundation = read_artifact(arc_dir, 'backend_foundation.json')
+    plan['global_design'] = foundation.get('global_design', {})
+    plan['diagnostics'] = []
     for rid in tree.leaves:
         request = {'requirement': contexts[rid], 'inventory': plan['items'],
+            'global_design': plan['global_design'],
             'existing_sources': {key: read_artifact(arc_dir, key) for key in
                 ('requirement_files.json', 'backend_implementation_files.json') if (arc_dir / key).is_file()}}
         if backend:
@@ -106,7 +111,27 @@ endpoints. User type labels/options come from the server; never duplicate role s
 
         console.show(f'{kind.title()} outline {rid}',
             'Collect one outline; implementation resolves missing details and associations.')
-        proposal = model.generate_json(RULES + shape, request)
+        proposal = None
+        # A malformed outline must not abort all remaining requirements. One short
+        # protocol repair, then an explicit source-backed implementation handoff.
+        for attempt in range(2):
+            try:
+                proposal = model.generate_json(RULES + shape, request)
+                break
+            except (ValueError, TypeError, KeyError, AttributeError) as error:
+                diagnostic = {'requirement': rid, 'attempt': attempt + 1,
+                    'error_type': type(error).__name__, 'error': str(error)[:1000]}
+                plan['diagnostics'].append(diagnostic)
+                request['format_repair'] = 'Return one small JSON object with items, uses and notes. No prose or tool tags.'
+                console.show(f'{kind.title()} outline {rid} | Recoverable format issue', diagnostic['error'])
+        if proposal is None:
+            identity = kind + '-source-' + rid
+            proposal = {'items': {identity: {
+                'purpose': 'Implement original requirement ' + rid,
+                'implementation_hint': 'backend/src/api/register.ts' if kind == 'backend' else 'frontend/src/App.tsx',
+                'needs_implementation_refinement': True}}, 'uses': [identity],
+                'notes': 'Outline response was unusable. Resolve actual APIs/pages and owners from the original requirement and global design during implementation; no behavior is waived.'}
+
         # Retain the exact response as evidence. Normalization is only an adapter to
         # downstream dictionaries; it must not reject or silently lose model suggestions.
         plan.setdefault('source_proposals', {})[rid] = proposal
@@ -118,6 +143,6 @@ endpoints. User type labels/options come from the server; never duplicate role s
         plan['requirements'][rid] = uses
         plan['notes'][rid] = notes
         save_json(path, plan)
-    plan['status'] = 'GREEN'
+    plan['status'] = 'READY_WITH_WARNINGS' if plan['diagnostics'] else 'GREEN'
     save_json(path, plan)
     return plan

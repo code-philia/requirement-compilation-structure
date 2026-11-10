@@ -23,22 +23,25 @@ def load_ui_context(arc_dir, input_dir):
     if (arc_dir / "backend_evidence.json").is_file():
         tree.backend_evidence = read_artifact(arc_dir,"backend_evidence.json")
         tree.backend_foundation = read_artifact(arc_dir,"backend_foundation.json")
-    analysis = read_artifact(arc_dir, "visual_analysis.json")
+    analysis = read_artifact(arc_dir, "visual_analysis.json") if (arc_dir / "visual_analysis.json").is_file() else {}
     catalog = build_image_catalog(raw, input_dir)
     source_path = arc_dir / "visual_analysis_sources.json"
     sources = read_artifact(arc_dir, source_path.name) if source_path.is_file() else {}
-    if not isinstance(analysis, dict) or not isinstance(sources, dict):
-        raise ValueError("Invalid image analysis artifacts; rerun stage 01")
+    if not isinstance(analysis, dict):
+        analysis = {}
+    if not isinstance(sources, dict):
+        sources = {}
     images = {}
     for iid, image in catalog["images"].items():
         reference = image["reference"]
-        if image["source_field"] == "ui" and reference not in analysis:
-            raise ValueError(f"Missing UI image analysis for {reference}; rerun stage 01")
+        if reference not in analysis:
+            image = {**image, "analysis_gap": "Image analysis unavailable; use original screenshot and requirement UI evidence. Do not invent unseen details."}
         if reference in analysis and (
             (image["source_field"] == "ui" or reference in sources)
             and sources.get(reference) != image["sha256"]
         ):
-            raise ValueError(f"Image analysis is stale or unverified for {reference}; rerun stage 01")
+            analysis.pop(reference, None)
+            image = {**image, "analysis_gap": "Stale image analysis excluded; use original screenshot and requirement evidence."}
         images[iid] = {**image, "analysis": analysis.get(reference, {})}
     contexts = {}
     for rid in tree.leaves:
@@ -61,7 +64,8 @@ def load_frontend_context(arc_dir, input_dir):
     """Combine visual requirements with database and API artifacts for design stages."""
     tree, images, contexts = load_ui_context(arc_dir, input_dir)
     schema = read_artifact(arc_dir, "db_schema.json")
-    contracts = read_artifact(arc_dir, "backend_endpoints.json")
+    contracts = read_artifact(arc_dir, "backend_endpoints.json") if (arc_dir / "backend_endpoints.json").is_file() else {
+        "apis": {}, "requirements": {}, "diagnostics": ["Backend endpoint handoff is unavailable; implement from original source and inspect actual handlers. Missing backend capabilities are repair items, never frontend mocks."]}
     return tree, schema, contracts, images, contexts
 
 

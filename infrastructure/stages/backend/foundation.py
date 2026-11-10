@@ -17,10 +17,14 @@ Return one JSON object:
  "registration":{"enabled":false,"user_types":[]},
  "schema_adjustments":[{"field":"Table.generated_fk","nullable":true,
    "requirements":["owning requirement node ID"],"reason":"explicit ordinary-create scenario conflicts with mandatory generated-parent relationship"}],
+ "global_design":{"modules":[{"name":"business module","requirements":["REQ-ID"],
+   "responsibility":"brief responsibility","implementation_locations":["backend/src/...","frontend/src/..."]}],
+   "shared_concerns":["short cross-module integration guidance"]},
  "implementation_notes":[{"requirements":["owning requirement node ID"],
    "instruction":"short shared integration guidance"}]
 }
-Do NOT design APIs, permissions, features, machines, guards, effects or process dispositions.
+Keep global_design lightweight: module boundaries, reusable owners and shared concerns.
+Do NOT enumerate API signatures, permission matrices, machines, guards, effects or process dispositions.
 These are implemented incrementally in backend/src/business/platform.ts beside actual APIs.
 Source authorization and BPMN are already imported unchanged; never transcribe them here.
 Keep notes short; no note is needed just to repeat source behavior.
@@ -87,6 +91,7 @@ def validate_foundation(value, evidence, schema):
     plan = {"format_version": 2, "default_boundary": boundary, "boundary_requirements": refs,
         "additional_permissions": [], "features": [], "machines": {}, "decisions": [],
         "schema_adjustments": [], "implementation_notes": [],
+        "global_design": value.get("global_design", {}),
         "business_configuration": "backend/src/business/platform.ts"}
     generated = {item["field"]: item for item in schema.get("er_import", {}).get("generated", []) if item.get("references")}
     for adjustment in value.get("schema_adjustments", []) or []:
@@ -185,6 +190,8 @@ def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
         "requirements": {rid: {key: node[key] for key in ("name", "text", "scenarios")}
             for rid, node in evidence["nodes"].items()},
         "identity_catalog": {key: evidence["authorization"]["catalog"][key] for key in ("roles", "units")},
+        "entity_index": list(schema["entities"]),
+        "process_index": {pid: process.get("name", pid) for pid, process in evidence["processes"].items()},
         "generated_relationship_fields": [item for item in schema.get("er_import", {}).get("generated", []) if item.get("references")],
     }
     console = DemoConsole(pause)

@@ -150,9 +150,22 @@ def read_inventory(output):
     """Documentation handoff only; no design semantics validation/rejection loop."""
     path = output / INVENTORY
     if not path.is_file():
-        raise ValueError('Document implemented routes in ' + INVENTORY)
-    value = json.loads(path.read_text(encoding='utf-8-sig'))
-    return {'apis': value.get('apis', {}), 'requirements': value.get('requirements', {})}
+        return {'apis': {}, 'requirements': {}}
+    try:
+        value = json.loads(path.read_text(encoding='utf-8-sig'))
+    except ValueError:
+        # Keep the source document available to the agent; malformed handoff
+        # metadata cannot waive source acceptance or abort the whole stage.
+        return {'apis': {}, 'requirements': {}}
+    if not isinstance(value, dict):
+        return {'apis': {}, 'requirements': {}}
+    raw_apis = value.get('apis', {})
+    apis = {str(aid): api if isinstance(api, dict) else {'description': str(api)}
+        for aid, api in raw_apis.items()} if isinstance(raw_apis, dict) else {}
+    raw_uses = value.get('requirements', {})
+    uses = {str(rid): [ids] if isinstance(ids, str) else [str(aid) for aid in ids] if isinstance(ids, list) else []
+        for rid, ids in raw_uses.items()} if isinstance(raw_uses, dict) else {}
+    return {'apis': apis, 'requirements': uses}
 
 
 def publish_inventory(arc_dir, inventory):
@@ -183,6 +196,7 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
     prepare_runtime(output)
     install_dependencies(output)
     model, console, checks = TextModel(), DemoConsole(pause), BackendChecks(output)
+    prior_report = read_artifact(arc_dir, 'backend_tdd.json') if (arc_dir / 'backend_tdd.json').is_file() else {}
     report = {'mode': 'source_implementation', 'status': 'IMPLEMENTING', 'requirements': {}, 'tests': {}}
     accepted = []
     cached = BackendCheckCache(output, checks)
@@ -211,6 +225,9 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
         save_json(arc_dir / 'backend_tdd.json', report)
         with implementation_task(output, entry, console, rid):
             context = implementation_context(tree, schema, design, rid)
+            previous = prior_report.get('requirements', {}).get(rid, {})
+            if previous.get('status') == 'FAILED':
+                context['previous_failure'] = {key: previous[key] for key in ('error', 'feedback', 'archive') if key in previous}
             workspace = FileTools(output, ['backend'], requirements=[rid], stage='backend',
                 discovery=True, files=sources,
                 allow_write=lambda path: path.startswith('backend/src/') and editable_application_path(output, path))
@@ -223,15 +240,13 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
                 inventory = read_inventory(output)
                 planned = design.get('requirements', {}).get(rid, [])
                 linked = inventory['requirements'].get(rid, [])
+                # Recover an omitted association to documented planned APIs without
+                # rejecting a working handler over its metadata. Missing business
+                # behavior is still exercised by original source acceptance below.
                 if planned and not linked:
-                    raise CheckFailure('Implemented endpoint documentation omitted this backend requirement', {
-                        'requirement': rid, 'planned_apis': planned, 'file': INVENTORY,
-                        'repair': 'Implement the planned source behavior and associate its actual endpoint IDs. '
-                                  'A missing association does not mean NO_DIRECT_APIS. Keep original scenarios for HTTP acceptance.'})
-                missing = [aid for aid in linked if aid not in inventory['apis'] and not aid.startswith('platform-')]
-                if missing:
-                    raise CheckFailure('Document the actual implemented endpoints before acceptance',
-                        {'requirement': rid, 'missing_endpoint_ids': missing, 'file': INVENTORY})
+                    linked = [aid for aid in planned if aid in inventory['apis']]
+                    inventory['requirements'][rid] = linked
+                inventory['requirements'][rid] = [aid for aid in linked if aid in inventory['apis'] or aid.startswith('platform-')]
                 return inventory
 
             def code_gate():
@@ -244,7 +259,7 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
             implemented = run_file_agent(model, IMPLEMENT_RULES, context, workspace,
                 code_gate, max_turns, console, rid + ' / Implement backend')
             inventory = implemented['checks']['inventory']
-            if not inventory['requirements'].get(rid):
+            if not inventory['requirements'].get(rid) and not design.get('requirements', {}).get(rid):
                 entry.update(status='NO_DIRECT_APIS')
                 publish_inventory(arc_dir, inventory)
                 save_json(arc_dir / 'backend_tdd.json', report)
@@ -311,6 +326,7 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
         save_json(arc_dir / 'backend_tdd.json', report)
     verification = final_checks(console, typecheck=(lambda: cached.run('typecheck'), None),
         tests=(lambda: cached.run('tests', accepted), require_green if accepted else None), build=(checks.build, None))
+    publish_inventory(arc_dir, read_inventory(output))
     report['incremental'] = {'checkpoint': resume.path.name, 'reused_requirements': sum(
         bool(entry.get('reused_checkpoint')) for entry in report['requirements'].values())}
     report['check_cache'] = cached.stats

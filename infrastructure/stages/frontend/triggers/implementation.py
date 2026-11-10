@@ -335,6 +335,8 @@ def run_trigger_tdd(arc_dir, tree, schema, backend, ui, design, images, contexts
                 'backend_entrypoints': {'registry': 'backend/src/api/register.ts'},
                 'visual_references': {iid: images[iid] for page in pages.values()
                     for iid in page.get('images', []) if iid in images}}
+            if rid in report.get('previous_failures', {}):
+                task['previous_failure'] = report['previous_failures'][rid]
             workspace = FileTools(output, ['frontend', 'backend'], requirements=[rid], stage='frontend',
                 discovery=True, references=arco_references(),
                 files=[PROVIDER_PATH, *APPLICATION_ENTRYPOINTS, 'frontend/src/style.css',
