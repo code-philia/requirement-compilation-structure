@@ -75,7 +75,22 @@ def publish_platform(output, evidence, plan, schema, raw):
     config['registration'] = {'enabled': registration['enabled'], 'userTypes': [
         {'id': row['id'], 'label': row['label'], 'role': row['role'], 'unitId': units[row['unit']]}
         for row in registration['user_types']]}
-    save_text(output / "backend/src/platform/settings.ts", 'import type { PlatformSettings } from "./types.js";\nexport const settings: PlatformSettings = ' + json.dumps(config, ensure_ascii=False, indent=2) + ';\n')
+    # This extension is application code. Never overwrite accepted business work
+    # when rerunning infrastructure import or refreshing fixed runtime templates.
+    business_path = output / "backend/src/business/platform.ts"
+    if not business_path.is_file():
+        save_text(business_path, 'import type { BusinessConfiguration } from "../platform/types.js";\n'
+            '// Add source-backed permissions, feature limits and shared workflow machines while implementing APIs.\n'
+            '// Preserve previous modules. Guards/effects are real handler code inside businessRoute transactions.\n'
+            'export const businessConfiguration: BusinessConfiguration = {additionalPolicies: [], features: [], machines: {}};\n')
+    save_text(output / "backend/src/platform/settings.ts",
+        'import type { PlatformSettings } from "./types.js";\n'
+        'import { businessConfiguration } from "../business/platform.js";\n'
+        'const base: PlatformSettings = ' + json.dumps(config, ensure_ascii=False, indent=2) + ';\n'
+        'export const settings: PlatformSettings = {...base,\n'
+        '  policy: [base.policy, ...businessConfiguration.additionalPolicies.map(p => ["p",p.role,p.resource,p.action,p.scope,p.effect].join(", "))].join("\\n"),\n'
+        '  features: [...base.features.filter(f => !businessConfiguration.features.some(b => b.id === f.id)), ...businessConfiguration.features],\n'
+        '  machines: {...base.machines, ...businessConfiguration.machines}};\n')
     statements = []
     def insert(table, values, condition):
         statements.append(f'INSERT INTO "{table}" (' + ','.join('"'+key+'"' for key in values) + ') SELECT ' + ','.join(sql(v) for v in values.values()) + f' WHERE NOT EXISTS (SELECT 1 FROM "{table}" WHERE {condition});')

@@ -1,4 +1,4 @@
-"""Collect ER, identity, authorization and workflow infrastructure before API design."""
+"""Import source evidence and publish fixed infrastructure with minimal configuration."""
 
 import json
 import re
@@ -7,179 +7,120 @@ from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.agent.proposals import propose_json
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.files import read_artifact, save_json
-from infrastructure.stages.backend.evidence import compile_evidence, SCOPES
+from infrastructure.stages.backend.evidence import compile_evidence
 
-INSTRUCTIONS = '''Compile cross-cutting backend semantics from the original requirement evidence.
-Do not implement business code or redesign ER. Only a compiler-generated relationship FK may be made nullable when explicit ordinary-create scenarios contradict mandatory generated-parent cardinality. Record that exceptional adjustment and its source relation/requirements; never change original attributes, keys or types. Return one JSON object:
+INSTRUCTIONS = """Select only the small deployment configuration needed before database creation.
+Return one JSON object:
 {
  "default_boundary":"none|unit|unit_tree",
- "schema_adjustments":[{"field":"Table.generated_fk","nullable":true,"requirements":["REQ-ID"],"source_refs":["relation ID"],"reason":"resolve explicit source ER/prose conflict"}],
- "boundary_requirements":["REQ-ID"],
- "additional_permissions":[{"role":"catalog-role","resource":"catalog-resource","action":"catalog-action","scope":"all|own|unit|unit_tree|assigned","effect":"allow|deny","requirements":["REQ-ID"],"reason":"explicit evidence/correction"}],
- "features":[{"id":"stable-feature-id","allowed_roles":["role-id"],"denied_usernames":["explicitly identified account"],"requirements":["REQ-ID"],"reason":"..."}],
- "machines":{"MACHINE-ID":{"entity":"canonical-table","state_field":"existing-field","initial":"source initial state","states":["persisted-state"],"state_actions":{"persisted-state":["catalog-action"]},"requirements":["REQ-ID"],
-   "transitions":{"TRANSITION-ID":{"event":"stable-command","action":"catalog-action","roles":["catalog-role"],"assigned_only":false,"from":["persisted-state"],"to":"persisted-state","process_refs":["process-id"],"requirements":["REQ-ID"],
-     "guards":[{"id":"G-ID","description":"business precondition"}],"effects":[{"id":"E-ID","description":"observable transactional effect","fields":["Table.field"]}]}}}},
- "process_dispositions":{"process-id":{"mode":"state_machine|operation","machines":["MACHINE-ID"],"requirements":["REQ-ID"],"reason":"how this source process is implemented"}},
- "decisions":[{"requirements":["REQ-ID"],"source_refs":["source path or process/node"],"issue":"source gap/conflict","resolution":"effective behavior and rationale"}]
+ "boundary_requirements":["owning requirement node ID"],
+ "registration":{"enabled":false,"user_types":[]},
+ "schema_adjustments":[{"field":"Table.generated_fk","nullable":true,
+   "requirements":["owning requirement node ID"],"reason":"explicit ordinary-create scenario conflicts with mandatory generated-parent relationship"}],
+ "implementation_notes":[{"requirements":["owning requirement node ID"],
+   "instruction":"short shared integration guidance"}]
 }
-All keys are required. Empty collections are allowed when not supported by evidence.
-Normalize tenant/team boundaries from prose/scenarios separately from Casbin scope.
-'all' does not remove a source-required tenant boundary.
-Administrator cross-unit visibility is already provided by the platform's admin bypass;
-it is NOT evidence for granting ordinary members unit_tree access. Use unit for own-team
-isolation unless source requirements explicitly grant access to descendant units.
-Do not equate every team_member with a demo account. Keep feature entitlements separate from entity resource permissions.
-Source CSV remains immutable. additional_permissions are explicit, traceable effective
-policy supplements only when prose/scenarios require them. Never narrow administrator
-permissions. Missing permission defaults to deny. Do not invent organizational roles.
+Do NOT design APIs, permissions, features, machines, guards, effects or process dispositions.
+These are implemented incrementally in backend/src/business/platform.ts beside actual APIs.
+Source authorization and BPMN are already imported unchanged; never transcribe them here.
+Keep notes short; no note is needed just to repeat source behavior.
 
-BPMN is evidence: preserve its source graph, resolve conflicts against business/scenario
-requirements and record decisions. Natural-language conditions are not executable code. Bind human command roles from
-BPMN lanes and source roles; assigned_only is true only for explicit current-assignee restrictions.
-Model source-required commands/states and guards/effects; no mandatory multi-level approval,
-assignees or task center unless required. A generic exclusive branch must not suppress two
-independent effects both required by source scenarios. Distinguish creating adjustment
-records from applying their inventory effects; never double-apply them. State conversions,
-all effects and audit are one transaction; retries must not apply effects again. Describe
-compensation/reversal using original movements, not merely a status change.
-When a source defines missing derived/aggregate data as zero/empty, effects must include
-first-use initialization and its primary/association/required fields before applying the
-change. Do not turn this valid initial state into an invented rejection or rely on
-startup fixtures for every future business key. Include both initialization and update
-branches without granting an unrelated user-facing create permission.
+Use requirement_id_index keys as requirement citations. Embedded clause labels such as
+SYS-001, scenario IDs and BPMN IDs are not requirement node IDs; use their owning node.
+'all' policies do not cancel explicit tenant/team isolation. Use unit for own-team data,
+unit_tree ONLY for source-required descendant-unit visibility, none ONLY if isolation
+is not required. Administrator always has all permissions through fixed infrastructure.
 
-Use canonical schema fields exactly. Effects select fields that exist; if a business
-concept is absent from ER, record the gap in decisions rather than fabricating columns.
-Do not copy screenshot/example values into state definitions, policy or runtime fixtures.
-Every decision, machine and supplement must cite existing source requirement IDs.
-The compiler separately provides account/password sessions, domain roles, record ownership,
-feature checks, command receipts, audit, Casbin and XState. Their private tables are
-infrastructure; do not invent business workflows to exercise them.'''
+Schema adjustments may only optionalize a generated_relationship_fields entry that
+explicit ordinary-create scenarios need without its generated parent (e.g. independent
+orders versus orders generated by stocktake). Never alter original attributes, keys,
+types or add business fields. The compiler attaches the exact ER relation reference.
 
-
-INSTRUCTIONS += """
-Also include registration:{enabled:boolean,user_types:[{id,label,role,unit,requirements,source_refs}]}.
-Enable it only when source prose/scenarios explicitly require account registration.
-Use account/password registration without SMS/email verification. Types such as student,
-teacher, customer or supplier are source business identities, not arbitrary catalog roles.
-Derive each selectable user type label and its exact existing role/unit from source
-registration rules, with requirement IDs and concrete references. A sole source type is
-still one option; a source with no registration stays disabled. Never infer that all
-catalog roles are publicly selectable, grant admin via signup or let the client submit
-arbitrary memberships/organizations. If required mapping is ambiguous, keep registration
-disabled and record the missing evidence in decisions instead of guessing a default role.
-The fixed platform supplies GET /api/auth/registration-options and POST /api/auth/register.
-The latter accepts username,password,userType and atomically creates the allowed account
-and membership, returning 201 without auto-login. Existing login/me/logout remain shared.
-Registration UI uses the public options endpoint and source type labels, then returns to
-login after success. Do not implement a duplicate business registration endpoint.
+Authentication/session/CSRF/identity bootstrap are fixed account/password infrastructure.
+Enable registration ONLY if prose/scenarios explicitly require it. In that case use
+user_types:[{id,label,role,unit,requirements,source_refs}]. Derive selectable source user
+types and their exact existing role/unit bindings; never issue admin via public signup,
+infer every role is selectable or invent a mapping. If required registration is ambiguous,
+report the concrete gap in implementation_notes and leave it disabled. No SMS/email flows.
 """
 
 
-def require_refs(value, nodes):
-    refs = value.get("requirements")
-    if not isinstance(refs, list) or not refs or not set(refs) <= set(nodes):
-        raise ValueError("Backend semantic decisions require existing source requirement IDs")
+def _references(refs, evidence, location):
+    """Resolve exact node IDs or unambiguous source clause/scenario aliases."""
+    if isinstance(refs, str):
+        refs = [refs]
+    if not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs):
+        raise ValueError(f"{location}: expected requirement IDs as a list")
+    nodes, resolved = evidence["nodes"], []
+    for ref in refs:
+        if ref in nodes:
+            owners = [ref]
+        else:
+            owners = [rid for rid, node in nodes.items() if
+                re.search(r"(?<![\w.-])" + re.escape(ref) + r"(?![\w.-])", node.get("text", ""))
+                or any(scenario.get("id") == ref for scenario in node.get("scenarios", []) if isinstance(scenario, dict))]
+        if len(owners) != 1:
+            error = ValueError(f"{location}: citation {ref!r} has no unambiguous owner; use requirement_id_index keys")
+            error.feedback = {"requirement_id_index": {rid: node.get("name", "") for rid, node in nodes.items()},
+                "candidates": owners}
+            raise error
+        if owners[0] not in resolved:
+            resolved.append(owners[0])
+    return resolved
 
 
-def validate_foundation(plan, evidence, schema):
-    for key in ("schema_adjustments", "default_boundary", "boundary_requirements", "additional_permissions", "features", "machines", "process_dispositions", "decisions"):
-        if key not in plan:
-            raise ValueError(f"Missing backend foundation property {key}")
-    nodes = evidence["nodes"]
-    if plan["default_boundary"] not in {"none", "unit", "unit_tree"} or not set(plan["boundary_requirements"]) <= set(nodes):
-        raise ValueError("Invalid normalized data boundary")
-    if plan["default_boundary"] != "none" and not plan["boundary_requirements"]:
-        raise ValueError("A normalized data boundary requires source requirements")
-    catalog = evidence["authorization"]["catalog"]
-    known = {key: {x["id"] for x in catalog[key]} for key in ("roles", "resources", "actions")}
-    for permission in plan["additional_permissions"]:
-        require_refs(permission, nodes)
-        if permission.get("role") not in known["roles"] or permission.get("resource") not in known["resources"] or permission.get("action") not in known["actions"] or permission.get("scope") not in SCOPES or permission.get("effect") not in {"allow", "deny"} or not permission.get("reason"):
-            raise ValueError("Invalid effective permission supplement")
-        if permission["role"] == "admin" and permission["effect"] == "deny":
-            raise ValueError("Administrator permissions cannot be narrowed")
-    features = set()
-    for feature in plan["features"]:
-        require_refs(feature, nodes)
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", feature["id"]) or feature["id"] in features or not set(feature["allowed_roles"]) <= known["roles"]:
-            raise ValueError("Invalid feature entitlement")
-        if not all(isinstance(name, str) and name for name in feature["denied_usernames"]):
-            raise ValueError("Feature denied_usernames must contain explicit account names")
-        features.add(feature["id"])
-    generated = {item["field"]:item["reason"] for item in schema.get("er_import",{}).get("generated",[]) if item.get("references")}
-    for adjustment in plan["schema_adjustments"]:
-        require_refs(adjustment,nodes)
-        if adjustment.get("field") not in generated or adjustment.get("nullable") is not True or not adjustment.get("reason") or not adjustment.get("source_refs"):
-            raise ValueError("Only traceable optionalization of generated relationship FKs is supported")
-        if generated[adjustment["field"]] not in adjustment["source_refs"]:
-            raise ValueError("Schema adjustment must cite its canonical ER relationship")
-    assigned = set()
-    for mid, machine in plan["machines"].items():
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*",mid):
-            raise ValueError("Machine IDs must be stable safe identifiers")
-        require_refs(machine, nodes)
-        entity, state_field = machine["entity"], machine["state_field"]
-        if entity not in schema["entities"] or state_field not in schema["entities"][entity]["fields"]:
-            raise ValueError(f"Unknown state field in {mid}")
-        column = schema["entities"][entity]["fields"][state_field]
-        if column["primary_key"] or column["type"] != "string" or entity in assigned:
-            raise ValueError(f"State field must have one canonical string-state machine: {mid}")
-        assigned.add(entity)
-        states = machine["states"]
-        if not states or len(set(states)) != len(states) or not all(isinstance(s, str) and s for s in states) or machine["initial"] not in states:
-            raise ValueError(f"Invalid machine states: {mid}")
-        state_actions = machine.get("state_actions", {})
-        if set(state_actions) != set(states) or any(not set(actions) <= known["actions"] for actions in state_actions.values()):
-            raise ValueError(f"{mid}: every state needs explicit allowed catalog actions")
-        events = set()
-        for tid, transition in machine["transitions"].items():
-            require_refs(transition, nodes)
-            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*",tid) or not isinstance(transition.get("event"),str) or not transition["event"]:
-                raise ValueError("Invalid canonical transition/event identifier")
-            if not transition["from"] or not set(transition["from"]) <= set(states) or transition["to"] not in states:
-                raise ValueError(f"Invalid transition states: {mid}/{tid}")
-            for state in transition["from"]:
-                key = (state, transition["event"])
-                if key in events:
-                    raise ValueError(f"Ambiguous machine event: {mid}/{key}")
-                events.add(key)
-            if transition.get("action") not in known["actions"]:
-                raise ValueError(f"Invalid workflow action: {mid}/{tid}")
-            if not set(transition["roles"]) <= known["roles"] or not isinstance(transition["assigned_only"],bool):
-                raise ValueError(f"Invalid workflow actor binding: {mid}/{tid}")
-            if any(node["role"] for pid in transition["process_refs"] for node in evidence["processes"].get(pid,{}).get("nodes",{}).values()) and not transition["roles"]:
-                raise ValueError(f"{mid}/{tid}: bind human process roles explicitly")
-            if not set(transition["process_refs"]) <= set(evidence["processes"]):
-                raise ValueError(f"Unknown process reference: {mid}/{tid}")
-            for group in ("guards", "effects"):
-                records = transition[group]
-                if len({r["id"] for r in records}) != len(records):
-                    raise ValueError(f"Duplicate {group} IDs: {mid}/{tid}")
-                for record in records:
-                    if not record.get("description"):
-                        raise ValueError(f"Empty {group} description")
-                    if group == "effects":
-                        for symbol in record["fields"]:
-                            table, _, name = symbol.partition(".")
-                            if table not in schema["entities"] or name not in schema["entities"][table]["fields"]:
-                                raise ValueError(f"Unknown workflow effect field {symbol}")
-    dispositions = plan["process_dispositions"]
-    if set(dispositions) != set(evidence["processes"]):
-        raise ValueError("Every source process needs an explicit implementation disposition")
-    for pid, disposition in dispositions.items():
-        require_refs(disposition,nodes)
-        if disposition.get("mode") not in {"state_machine","operation"} or not disposition.get("reason") or not set(disposition.get("machines",[])) <= set(plan["machines"]):
-            raise ValueError(f"Invalid process implementation disposition: {pid}")
-        if disposition["mode"] == "state_machine" and not disposition["machines"]:
-            raise ValueError(f"{pid}: state-machine disposition needs a machine")
-    for decision in plan["decisions"]:
-        require_refs(decision, nodes)
-        if not decision.get("issue") or not decision.get("resolution") or not decision.get("source_refs"):
-            raise ValueError("Source conflicts require traceable explicit resolutions")
+def validate_foundation(value, evidence, schema):
+    """Adapt a small configuration, without compiling a workflow/design contract."""
+    if not isinstance(value, dict):
+        raise ValueError("Foundation configuration must be a JSON object")
+    boundary = value.get("default_boundary", value.get("boundary"))
+    if isinstance(boundary, dict):
+        refs = boundary.get("requirements", [])
+        boundary = boundary.get("mode")
+    else:
+        refs = value.get("boundary_requirements", [])
+    if not isinstance(boundary, str) or boundary not in {"none", "unit", "unit_tree"}:
+        raise ValueError("default_boundary must be none, unit or unit_tree")
+    refs = _references(refs, evidence, "boundary_requirements")
+    if boundary != "none" and not refs:
+        raise ValueError("Tenant boundary needs an owning source requirement ID")
+    plan = {"format_version": 2, "default_boundary": boundary, "boundary_requirements": refs,
+        "additional_permissions": [], "features": [], "machines": {}, "decisions": [],
+        "schema_adjustments": [], "implementation_notes": [],
+        "business_configuration": "backend/src/business/platform.ts"}
+    generated = {item["field"]: item for item in schema.get("er_import", {}).get("generated", []) if item.get("references")}
+    for adjustment in value.get("schema_adjustments", []) or []:
+        field = adjustment.get("field")
+        if field not in generated or adjustment.get("nullable") is not True or not adjustment.get("reason"):
+            raise ValueError(f"schema_adjustments: {field!r} may only optionalize a generated FK with an explicit source reason; allowed fields: {list(generated)}")
+        owners = _references(adjustment.get("requirements", []), evidence, f"schema_adjustments.{field}")
+        if not owners:
+            raise ValueError(f"schema_adjustments.{field}: cite owning requirement IDs")
+        plan["schema_adjustments"].append({"field": field, "nullable": True, "reason": adjustment["reason"],
+            "requirements": owners, "source_refs": [generated[field]["reason"]]})
+    notes = value.get("implementation_notes", []) or []
+    if isinstance(notes, str):
+        notes = [{"instruction": notes}]
+    for note in notes:
+        if isinstance(note, str):
+            note = {"instruction": note}
+        if not isinstance(note, dict):
+            continue
+        instruction = note.get("instruction", note.get("note", ""))
+        if instruction:
+            # Notes remain evidence, not a reason to reject the whole configuration.
+            plan["implementation_notes"].append({**note, "instruction": instruction})
     from infrastructure.stages.backend.registration import registration_config
-    plan['registration'] = registration_config(plan, evidence)
+    registration = value.get("registration") or {"enabled": False, "user_types": []}
+    if not isinstance(registration, dict) or not isinstance(registration.get("enabled", False), bool):
+        raise ValueError("registration.enabled must be a boolean")
+    for row in registration.get("user_types", []) or []:
+        row["requirements"] = _references(row.get("requirements", []), evidence, "registration.user_types")
+    plan["registration"] = registration_config({"registration": registration}, evidence)
+    plan["process_dispositions"] = {pid: {"mode": "deferred", "machines": [],
+        "requirements": [rid for rid, node in evidence["nodes"].items() if pid in node.get("processes", [])],
+        "reason": "Implement source process during its owning backend requirement; reuse shared business configuration."}
+        for pid in evidence["processes"]}
     return plan
 
 
@@ -237,11 +178,19 @@ def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
     save_json(arc_dir / "db_schema.json", schema)
     if schema.get("er_import"):
         save_json(arc_dir / "er_import.json", schema["er_import"])
-    payload = {"evidence": evidence, "schema": schema["entities"], "er_mapping": schema.get("er_import",{}),
-        "account_names": [r.get("properties", {}).get("username") for r in raw.get("data", []) if r.get("entity") == "test account"]}
+    # No full schema, policy matrix, BPMN graph or screenshot text in this call.
+    # Original evidence is published once and supplied per requirement downstream.
+    payload = {
+        "requirement_id_index": {rid: node.get("name", "") for rid, node in evidence["nodes"].items()},
+        "requirements": {rid: {key: node[key] for key in ("name", "text", "scenarios")}
+            for rid, node in evidence["nodes"].items()},
+        "identity_catalog": {key: evidence["authorization"]["catalog"][key] for key in ("roles", "units")},
+        "generated_relationship_fields": [item for item in schema.get("er_import", {}).get("generated", []) if item.get("references")],
+    }
     console = DemoConsole(pause)
     plan, _ = propose_json(TextModel(), INSTRUCTIONS, payload,
-        lambda value: validate_foundation(value, evidence, schema), console, "Backend shared semantics", max_attempts)
+        lambda value: validate_foundation(value, evidence, schema), console,
+        "Backend minimal configuration", min(max_attempts, 3))
     plan.update(enabled=True, source_hashes=evidence["source_hashes"])
     for adjustment in plan["schema_adjustments"]:
         table,key=adjustment["field"].split('.')
@@ -251,15 +200,6 @@ def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
         schema["er_import"]["backend_semantic_adjustments"]=plan["schema_adjustments"]
         schema["er_import"]["schema_sha256"]=fingerprint(schema["entities"])
         save_json(arc_dir / "er_import.json",schema["er_import"])
-    # Shared machine effects must be visible before field-obligation inference.
-    for machine in plan["machines"].values():
-        symbols = {f"{machine['entity']}.{machine['state_field']}"}
-        for transition in machine["transitions"].values():
-            symbols.update(field for effect in transition["effects"] for field in effect["fields"])
-        owners = set(machine["requirements"]) | {rid for t in machine["transitions"].values() for rid in t["requirements"]}
-        for rid in owners:
-            if schema["requirements"].get(rid):
-                schema["requirements"][rid] = sorted(set(schema["requirements"][rid]) | symbols)
     infrastructure_fields = {f"{name}.{key}" for name, entity in schema["entities"].items() if entity.get("origin") in {"backend_platform", "reference_target"} for key in entity["fields"]}
     for rid, fields in schema["requirements"].items():
         if fields:
@@ -270,5 +210,5 @@ def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
     save_json(arc_dir / "data_bindings.json", compile_data(raw, schema))
     from infrastructure.stages.backend.platform_files import publish_platform
     publish_platform(arc_dir.parent, evidence, plan, schema, raw)
-    console.show("Backend shared semantics", json.dumps({"boundary": plan["default_boundary"], "machines": list(plan["machines"]), "decisions": plan["decisions"]}, ensure_ascii=False, indent=2))
+    console.show("Backend infrastructure ready", json.dumps({"boundary": plan["default_boundary"], "business_configuration": plan["business_configuration"], "implementation_notes": plan["implementation_notes"]}, ensure_ascii=False, indent=2))
     return {"status": "GREEN", "enabled": True, "machines": list(plan["machines"])}

@@ -28,12 +28,12 @@ export interface RoutePolicy {
 export interface TransitionSpec {
   roles: string[]; assigned_only: boolean;
   action: string;
-  event: string; from: string[]; to: string; process_refs: string[]; requirements: string[];
-  guards: {id: string; description: string}[];
-  effects: {id: string; description: string; fields: string[]}[];
+  event: string; from: string[]; to: string; process_refs?: string[]; requirements?: string[];
+  guards?: {id: string; description: string}[];
+  effects?: {id: string; description: string; fields: string[]}[];
 }
 export interface MachineSpec {
-  entity: string; state_field: string; initial: string; states: string[]; requirements: string[];
+  entity: string; state_field: string; initial: string; states: string[]; requirements?: string[];
   state_actions: Record<string,string[]>;
   transitions: Record<string,TransitionSpec>;
 }
@@ -44,5 +44,14 @@ export interface PlatformSettings {
   tables: Record<string,{key:string;references:Record<string,string>}>;
   boundary: "none" | "unit" | "unit_tree";
   features: {id:string;allowed_roles:string[];denied_usernames:string[];requirements?:string[];reason?:string}[];
+  machines: Record<string,MachineSpec>;
+}
+
+// Application-owned code, implemented alongside the APIs, not an upstream design IR.
+export interface BusinessConfiguration {
+  additionalPolicies: {role:string;resource:string;action:string;
+    scope:"all"|"own"|"unit"|"unit_tree"|"assigned";effect:"allow"|"deny";
+    requirements:string[];reason:string}[];
+  features: PlatformSettings["features"];
   machines: Record<string,MachineSpec>;
 }

@@ -40,7 +40,10 @@ def implementation_context(tree, schema, design, rid):
         'api_inventory': api_index({aid: item for aid, item in design.get('items', {}).items() if aid not in selected}),
         'backend_foundation': tree.backend_foundation,
         'endpoint_documentation': 'backend/src/api/endpoints.json',
-        'registry': 'backend/src/api/register.ts'}
+        'registry': 'backend/src/api/register.ts',
+        'business_configuration': 'backend/src/business/platform.ts',
+        'workflow_implementation': 'Implement associated source BPMN, guards and effects in real code; '
+            'the foundation intentionally does not predesign business machines. Extend the shared business configuration in this task.'}
 
 
 def acceptance_context(tree, schema, inventory, rid, oracle, accounts, test_path, support):

@@ -83,6 +83,7 @@ class RequirementCheckpoints:
         paths.update(p for p in SHARED if p.startswith(stage_roots))
         paths.update({'backend/src/platform/runtime.ts', 'backend/src/platform/types.ts',
             'backend/src/platform/settings.ts', 'backend/src/platform/bootstrap.ts',
+            'backend/src/business/platform.ts',
             'backend/src/db/client.ts', 'backend/src/db/initialize.ts', 'backend/src/db/seed.ts'})
         if self.stage == 'frontend':
             paths.update({'frontend/src/auth/RegisterPage.tsx', 'frontend/src/design-system.tsx'})

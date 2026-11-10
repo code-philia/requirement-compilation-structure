@@ -62,7 +62,7 @@ connection. The platform owns authentication, CSRF, transactions, scope, ownersh
 idempotency, audit and state transitions. Do not replace or bypass it, open another DB,
 start transactions in handlers, manually mutate workflow state or edit platform files.
 Use supplied platform/types.ts and backend_foundation/source evidence for runtime APIs
-and source resource/action/machine IDs. Read platform/settings.ts only for a specific
+and source resource/action IDs. Read platform/settings.ts only for a specific
 missing configuration detail; do not load the entire runtime or all existing tests by default. RoutePolicy is ordinary code configuration beside registration:
 {security:{mode:'policy',permissions:[{resource:'...',action:'...'}],features:[],
 resource:'...',action:'...',record_id:'params.id' or null,operation:'read|create|update|delete|command|bulk'},
@@ -82,6 +82,32 @@ must not be reimplemented. Registration is available only when foundation.regist
 is enabled; use its server-owned user type mappings. Use session mode only for
 source-required authenticated operations with no business resource. All runtime policy
 configuration can be corrected in code by this same implementation loop.
+The foundation is minimal deployment configuration, NOT a complete business plan.
+Implement source-required permissions/features/workflows directly in
+backend/src/business/platform.ts (application-owned, editable) while implementing APIs.
+The fixed settings.ts imports businessConfiguration automatically. Preserve existing
+entries and reuse a canonical machine per entity across requirements. Never edit fixed
+platform/settings.ts, runtime.ts or bootstrap.ts. Do not interpret empty foundation
+machines/features/additional_permissions as absence of source obligations.
+Use the already supplied per-requirement BPMN, policies, prose and scenarios. Read the
+business configuration once, then add/modify the concrete owner and route together.
+Do not request a separate design proposal. Machine definitions only need entity,
+state_field, initial, states, state_actions and transitions. Each transition needs event,
+action, roles, assigned_only, from and to; guard/effect descriptions and field lists are
+optional. Implement their actual conditions and transactional effects in handler code;
+register the machine before using policy.workflow or access.advance. Document source
+requirements in code. Preserve human actor roles, valid initial states and commands.
+New derived stock/aggregate rows must be initialized on first use when source defines
+missing values as zero/empty; do not reject valid new business keys or depend on fixtures.
+Approval/reversal, stock movements, audit and state changes must commit atomically;
+reverse original movements and avoid double effects on retries. No invented multilevel
+approval or task center. Add additionalPolicies only for explicit source-backed gaps,
+using catalog role/resource/action IDs plus requirements/reason; source CSV is immutable.
+Feature restrictions belong in businessConfiguration.features and the actual route's
+security.features. Never infer a named demo account from a whole role or weaken tenant
+isolation. Default administrator remains unrestricted. Shared configuration is included
+in typecheck, acceptance and incremental recovery; repairs belong to this code loop.
+
 Without the platform, wire handlers through Express and implement required transactions
 and security directly from the source, preserving the existing ApiRequest/ApiResponse ABI.
 
@@ -99,6 +125,8 @@ There is no generated API contract. Supplied endpoint usage and fixed fixture ex
 normally suffice for transport. Inspect a specific route/handler only for missing facts;
 do not read all historical tests or platform runtime by default. Derive expected business
 behavior ONLY from original requirements.
+The minimal foundation does not enumerate business machines/features. Their empty lists
+do not waive original permission, workflow or entitlement scenarios.
 Cover each original scenario, naming its ID in the executed test title. Test successful
 results, source-required rejection, unchanged state on rejection, permission/tenant
 isolation and workflow effects. Include cross-module supporting reads/foreign IDs.
@@ -167,6 +195,8 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
     sources = [REGISTER_PATH, 'backend/src/api/types.ts']
     if foundation.get('enabled'):
         sources += ['backend/src/platform/types.ts']
+        if (output / 'backend/src/business/platform.ts').is_file():
+            sources += ['backend/src/business/platform.ts']
     for rid in tree.leaves:
         reused = resume.reuse(rid)
         if reused:

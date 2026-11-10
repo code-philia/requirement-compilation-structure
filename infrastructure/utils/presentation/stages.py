@@ -25,6 +25,6 @@ def stage_label(script: str) -> str:
     if script in joint:
         return f"Stage {script[:2]} | {joint[script]}"
     if script == "02_design_backend_foundation":
-        return "Stage 02B | Normalize backend permissions and workflows"
+        return "Stage 02B | Import ER and publish fixed infrastructure with minimal configuration"
     number = script[:2]
     return f"Stage {number} | {STAGES[number]}" if number in STAGES else script
