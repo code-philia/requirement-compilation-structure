@@ -46,10 +46,10 @@ def reasoning_arguments(name, mode):
 
 class TextModel:
     """Transport for structured stage proposals and file-edit responses."""
-    def __init__(self, *, json_mode: bool = True) -> None:
+    def __init__(self, *, model_name: str | None = None, json_mode: bool = True) -> None:
         """Read compiler/.env and configure the default text model; require API credentials."""
         load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
-        self.name = os.getenv("MODEL") or DEFAULT_MODEL
+        self.name = model_name or os.getenv("MODEL") or DEFAULT_MODEL
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("Set OPENAI_API_KEY in compiler/.env")
