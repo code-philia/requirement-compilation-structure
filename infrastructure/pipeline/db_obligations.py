@@ -1,122 +1,87 @@
-"""Step 03: infer database read/write obligations for every requirement and step."""
+"""Derive requirement and step read/write obligations against the completed schema."""
 
 import json
 from pathlib import Path
 
-from infrastructure.shared.models.text import TextModel
-from infrastructure.stages.database.obligations.records import normalize_inference, normalize_obligations, check_symbols
-from infrastructure.stages.database.schema import check_related_fields
-from infrastructure.utils.presentation.console import DemoConsole
-from infrastructure.utils.presentation.formatting import format_schema
-from infrastructure.utils.presentation.formatting import format_obligations
+from infrastructure.stages.database.obligation_agent import ObligationAgent
+from infrastructure.shared.rag.schema import SchemaRetriever
+from infrastructure.stages.database.obligation_utils import normalize_obligations
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.utils.files import save_json
-from infrastructure.shared.agent.proposals import propose_json
+from infrastructure.utils.presentation.console import DemoConsole
+from infrastructure.utils.presentation.formatting import format_schema, format_obligations
 from infrastructure.shared.agent.tasks import TaskFailures
-from infrastructure.shared.agent.discovery import ContextIndex
 
 
-# --- Extension point 03A: obligation inference policy --------------------------
-# Rewrite how requirement text maps to reads/writes, especially failure paths,
-# fixture setup, and generated keys. Records are normalized for set operations.
-INSTRUCTIONS = """Infer this requirement's database reads and writes over the supplied related_schema.
-Return:
-{
-  "requirement": {"read": ["Entity.field"], "write": ["Entity.field"]},
-  "steps": {"STEP-ID": {"read": ["Entity.field"], "write": ["Entity.field"]}}
-}
-"read" and "write" are separate fields containing arrays of qualified DB field names.
-Use [] when a set is empty. Include the supplied step IDs; use steps={} when there
-are no steps. Select existing schema symbols; do not create schema definitions.
-
-Infer requirement effects from its description and complete scenarios. Infer each
-step's effects from its own Given/When/Then and requirement context. Keep these
-records specific: do not copy the requirement's writes into every step. The leaf
-requirement must cover the effects of all its own steps; it may also describe behavior
-not exercised by a step. References provide context, not inherited effects.
-
-Given fixtures describe existing state, not writes performed by the behavior under
-test. This includes prerequisite actions described in Given, even when those actions
-create records through the UI. Do not charge their writes to the current When action.
-Rejection and instructions to leave data unchanged do not imply writes.
-Include lookup, filter and join keys in reads, and persisted generated keys in writes.
-A field can occur in both arrays. Read/write sets describe possible behavior across
-branches, not effects required on every invocation. Related fields are candidates;
-there is no need to classify every supplied field. UI-only state has no DB effect.
-For credentials, distinguish submitted passwords from stored hashes.
-Reads describe necessary data capabilities, not an exhaustive SQL access whitelist.
-Include persisted re-reads required by reload, navigation or reopening an editor;
-returning data from a create operation does not replace a later retrieval operation.
-"""
-
-
-def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10) -> dict:
-    for filename, previous in (("requirements.json", "main.py --stage 01"), ("db_schema.json", "main.py --stage 02")):
+def infer_db_obligations(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 5) -> dict:
+    for filename in ("requirements.json", "db_schema.json"):
         if not (arc_dir / filename).is_file():
-            raise ValueError(f"Run {previous} first to create .arc/{filename}")
-    if top_k < 1:
-        raise ValueError("--top-k must be positive")
-    tree = RequirementTree(json.loads((arc_dir / "requirements.json").read_text(encoding="utf-8-sig")))
+            raise ValueError(f"Missing prerequisite artifact: .arc/{filename}")
+    if top_k < 1 or max_attempts < 1:
+        raise ValueError("top_k and max_attempts must be positive")
+    root = json.loads((arc_dir / "requirements.json").read_text(encoding="utf-8-sig"))
+    tree = RequirementTree(root)
     schema = json.loads((arc_dir / "db_schema.json").read_text(encoding="utf-8-sig"))
-    # --- Pass boundary: use the existing database symbol space ----------------
-    # Inference may select existing fields, but cannot create schema symbols.
-    # An unmapped concept should trigger schema review, not a fabricated field.
-    console = DemoConsole(pause)
-    model = TextModel()
-    # Organizational parents keep empty records; only leaves receive model inference.
-    obligations = {"requirements": {rid: {"read": [], "write": []} for rid in tree.requirements if tree.children[rid]},
-        "steps": {sid: {"read": [], "write": []} for rid in tree.requirements if tree.children[rid] for sid in tree.own_steps[rid]}}
+    parents = {}
 
+    def visit(node, parent_name):
+        parents[node["id"]] = parent_name
+        for child in node.get("children", []) or []:
+            visit(child, node.get("name", ""))
+
+    visit(root, None)
+    console = DemoConsole(pause)
+    retriever = SchemaRetriever()
+    obligations = {"requirements": {}, "steps": {}}
+    for rid in tree.requirements:
+        if tree.children[rid]:
+            obligations["requirements"][rid] = {"read": [], "write": []}
+            for sid in tree.own_steps[rid]:
+                obligations["steps"][sid] = {"read": [], "write": []}
     failures = TaskFailures(arc_dir, "03_infer_db_obligations", console)
     save_json(arc_dir / "db_obligations.json", obligations)
-    for index, rid in enumerate(tree.leaves, 1):
-        with failures.task(rid):
-            requirement = tree.requirements[rid]
-            label = f"{index}/{len(tree.leaves)} {rid}"
-            steps_text = tree.concatenated_steps(rid)
-            console.show(f"{label} | 1. Current requirement and steps", (
-                f"{requirement['name']}\n\nDescription:\n{requirement['description']}"
-                f"\n\nConcatenated steps:\n{steps_text or '(No steps on this requirement.)'}"
-            ))
-            related_fields = schema["requirements"].get(rid)
-            try:
-                check_related_fields(schema, related_fields)
-            except ValueError as error:
-                raise ValueError(f"Invalid schema associations for {rid} in .arc/db_schema.json. "
-                    f"Rerun main.py --stage 02 to repair the schema before inference. {error}") from error
-            related_entities = {}
-            for symbol in related_fields:
-                entity, field = symbol.split(".", 1)
-                related_entities.setdefault(entity, {"description": schema["entities"][entity]["description"], "fields": {}})
-                related_entities[entity]["fields"][field] = schema["entities"][entity]["fields"][field]
-            console.show(f"{label} | 2. Related schema fields", format_schema(related_entities))
-            # --- Extension point 03C: inference granularity and feedback -----------
-            # One call currently predicts a requirement and all its own steps.
-            # Try separate calls or richer evidence, while retaining every node ID
-            # and step-specific read/write sets. Report inconsistent inference
-            # for model correction rather than silently expanding its records.
-            request = {
-                "requirement": requirement,
-                "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
-                "related_fields": sorted(related_fields),
-                "related_schema": {"entities": related_entities},
-            }
-            def accept(response):
-                inferred = normalize_inference(response, tree.own_steps[rid])
-                check_symbols([inferred["requirement"], *inferred["steps"].values()], schema)
-                summary = format_obligations({rid: inferred["requirement"], **inferred["steps"]})
-                return inferred, summary
 
-            (inferred, summary), _ = propose_json(model, INSTRUCTIONS, request, accept,
-                console, f"Obligation inference {rid}", max_attempts, context_index=ContextIndex(lambda: {"schema": schema["entities"]}))
-            obligations["requirements"][rid] = inferred["requirement"]
-            obligations["steps"].update(inferred["steps"])
+    # for each requirement, review its description and all its steps, then submit the complete obligation sets
+    for number, rid in enumerate(tree.leaves, 1):
+        with failures.task(rid):
+            # requirement
+            requirement = {**tree.requirements[rid], "parent_module": parents[rid]}
+            steps = [tree.steps[sid] for sid in tree.own_steps[rid]]
+            label = f"Review {number} | {rid}"
+            console.show(label + " | Requirement review", requirement["description"] + "\n" + tree.concatenated_steps(rid))
+
+            # related from last stage, not a complete boundary; may be empty
+            candidates = schema["requirements"].get(rid, [])
+            if not isinstance(candidates, list) or any(not isinstance(field, str) for field in candidates):
+                raise ValueError(f"Malformed related_fields for {rid}")
+
+            # retrieved related entities
+            query = "\n".join((requirement["name"], requirement["description"], tree.concatenated_steps(rid)))
+            retrieved = retriever.retrieve(query, schema, top_k)
+            provided = dict(retrieved["entities"])
+            for field in candidates:
+                name = field.split(".", 1)[0]
+                if name in schema["entities"]:
+                    provided[name] = schema["entities"][name]
+            console.show(label + " | Complete candidate and retrieved entities", format_schema(provided))
+
+            # start the obligation agent
+            agent = ObligationAgent(json_mode=False)
+            try:
+                reviewed = agent.run({"requirement": requirement, "steps": steps, "schema": schema,
+                    "related_fields": candidates, "provided_entities": provided,
+                    "matches": retrieved["matches"]}, max_rounds=min(max_attempts, 5))
+            finally:
+                agent.model.client.close()
+
+            # save the reviewed obligation sets and show them
+            obligations["requirements"][rid] = reviewed["requirement"]
+            obligations["steps"].update(reviewed["steps"])
             save_json(arc_dir / "db_obligations.json", obligations)
-            console.artifact("db_obligations", obligations, f"{label} | Accepted obligations")
-            console.show(f"{label} | 4. Inferred obligations", summary)
+            console.artifact("db_obligations", obligations, label + " | Accepted obligations")
+            console.show(label + " | Reviewed effects", format_obligations({rid: reviewed["requirement"], **reviewed["steps"]}))
 
     failures.finish()
     obligations = normalize_obligations(obligations, tree)
     save_json(arc_dir / "db_obligations.json", obligations)
-    print(f"Obligations saved: {arc_dir / 'db_obligations.json'}", flush=True)
     return obligations
