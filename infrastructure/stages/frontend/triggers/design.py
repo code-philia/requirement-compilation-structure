@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 from infrastructure.stages.frontend.ui.design import page_context, page_elements
-from infrastructure.stages.database.obligations.rules import union
+from infrastructure.stages.database.obligation_utils import union
 
 
 def empty_triggers(tree):
@@ -42,7 +42,7 @@ def validate_coverage(design, backend, obligations, tree, requirement_ids):
     requirement writes retain exact coverage of their possible effects.
     """
     from infrastructure.stages.backend.primitives import ObligationCoverageError, coverage
-    from infrastructure.stages.database.obligations.rules import difference
+    from infrastructure.stages.database.obligation_utils import difference
     for rid in requirement_ids:
         effects = [trigger_obligations(design['triggers'][tid], backend)
             for tid in design['requirements'][rid]]

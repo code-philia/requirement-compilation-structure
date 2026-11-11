@@ -4,10 +4,9 @@ import json
 from pathlib import Path
 
 from infrastructure.stages.backend.context import load_context, requirement_context, api_requirement_uses
-from infrastructure.stages.database.obligations.records import check_symbols
+from infrastructure.stages.database.obligation_utils import check_symbols, union
 from infrastructure.stages.backend.primitives import apply_decomposition, validate_design
 from infrastructure.shared.models.text import TextModel
-from infrastructure.stages.database.obligations.rules import union
 from infrastructure.utils.presentation.formatting import format_apis
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_obligations

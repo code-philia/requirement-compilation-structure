@@ -4,7 +4,7 @@ from pathlib import Path
 
 from infrastructure.utils.files import read_artifact
 
-from infrastructure.stages.database.obligations.records import normalize_obligations, check_symbols
+from infrastructure.stages.database.obligation_utils import normalize_obligations, check_symbols
 from infrastructure.stages.requirements.tree import RequirementTree
 
 

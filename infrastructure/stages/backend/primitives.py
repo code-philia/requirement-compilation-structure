@@ -1,7 +1,7 @@
 """Requirement and scenario coverage over declared API database effects."""
 
 from copy import deepcopy
-from infrastructure.stages.database.obligations.rules import difference, union
+from infrastructure.stages.database.obligation_utils import difference, union
 
 
 class ObligationCoverageError(ValueError):
