@@ -138,9 +138,6 @@ class Compiler:
             incomplete = [name for name, result in self.report["stages"].items()
                 if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
             self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
-            save_json(self.arc_dir / "compilation.json", self.report)
-            checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
-                status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete})
             show_panel("[DONE] Requirement compilation | " + self.report["status"],
                 f"Application: {self.output_dir}\nReport: {self.arc_dir / 'compilation.json'}"
                 + ("\nIncomplete stages: " + ", ".join(incomplete) if incomplete else ""),
@@ -152,3 +149,7 @@ class Compiler:
         finally:
             self.report.update(finish_run(run_token, self.report["status"]))
             save_json(self.arc_dir / "compilation.json", self.report)
+            incomplete = [name for name, result in self.report["stages"].items()
+                if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES", "INTERRUPTED"}]
+            checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
+                status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete})
