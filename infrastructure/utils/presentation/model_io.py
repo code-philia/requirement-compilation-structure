@@ -12,6 +12,7 @@ import httpx
 
 from infrastructure.utils.presentation.console import current_activity, preview, show_panel, WaitingStatus
 from infrastructure.utils.presentation.logging import session_info, full_detail
+from infrastructure.utils.presentation.agent import AgentLogger
 from infrastructure.utils.presentation.events import model_started, model_finished
 from rich.console import Group
 from rich.panel import Panel
@@ -51,13 +52,15 @@ def _record(event: str, **data) -> None:
 
 
 def _message_text(message: dict) -> str:
-    """Return message text verbatim, without the transport JSON envelope."""
-    content = message.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(part["text"] for part in content if part.get("type") == "text")
-    return ""
+    """Render message content together with native tool calls and result identities."""
+    return AgentLogger("Model").format_message(message)
+
+
+def record_tool_execution(tool_call: dict, result: dict, *, logger: AgentLogger | None = None) -> None:
+    """Retain each tool invocation and outcome, including the final successful batch."""
+    record = {"tool_call": tool_call, "result": result}
+    _record("tool_execution", **record)
+    (logger or AgentLogger("Model")).log_tool_execution(tool_call, result)
 
 
 def _http_request(request: httpx.Request) -> None:
@@ -71,8 +74,10 @@ def _http_request(request: httpx.Request) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         prefix = directory / f"{stage.replace(' ', '_')}.{task}.{call['id'][:8]}.{call['attempt']}"
         request.extensions["compiler_model_log_prefix"] = prefix
-        messages = json.loads(request.content).get("messages", [])
-        text = "\n\n".join(_message_text(message) for message in messages)
+        payload = json.loads(request.content)
+        logger = call["logger"]
+        request.extensions["compiler_agent_logger"] = logger
+        text = logger.format_input(payload)
         prefix.with_name(prefix.name + ".model.input").write_text(text, encoding="utf-8", newline="\n")
     _record("http_request", method=request.method, url=str(request.url.copy_with(query=None)),
         body=request.content.decode("utf-8"))
@@ -89,7 +94,8 @@ def _http_response(response: httpx.Response) -> None:
             text = response.text
         else:
             if isinstance(body, dict) and "choices" in body:
-                text = "\n\n".join(_message_text(choice.get("message", {})) for choice in body["choices"])
+                logger = response.request.extensions["compiler_agent_logger"]
+                text = logger.format_output(body)
             elif isinstance(body, dict) and isinstance(body.get("error"), dict):
                 text = str(body["error"].get("message", ""))
             else:
@@ -269,16 +275,17 @@ def show_call_totals():
     show_panel("Stage model usage | reported counts only", view, tone="output")
 
 
-def invoke(client, arguments: dict):
+def invoke(client, arguments: dict, *, logger: AgentLogger | None = None):
     """Audit one SDK call and show a static waiting message until it returns."""
     call_id = uuid4().hex
     activity = current_activity()
     session = session_info()
     label = f"{session['stage']} | {activity}" if session else activity
-    token = _call.set({"id": call_id, "activity": activity})
+    logger = logger or AgentLogger("Model")
+    token = _call.set({"id": call_id, "activity": activity, "logger": logger})
     verbose = session is None or session.get("model_log", True)
     if verbose:
-        full_detail(f"[MODEL INPUT] {label}", "\n\n".join(_message_text(message) for message in arguments.get("messages", [])))
+        logger.log_input(label, arguments)
         show_panel(f"[MODEL INPUT] {label} | call {call_id[:8]}", _input_view(arguments), tone="input")
     else:
         show_panel(f"[MODEL CALL] {label} | call {call_id[:8]}", f"Model: {arguments.get('model')}", tone="input")
@@ -296,12 +303,13 @@ def invoke(client, arguments: dict):
         raw = response.model_dump(mode="json")
         _record("response", elapsed_seconds=elapsed, response=raw)
         waiting.close()
-        content = "\n".join(choice.message.content or "" for choice in response.choices)
+        content = "\n".join(logger.format_message(choice.get("message", {})) for choice in raw.get("choices", []))
         usage = raw.get("usage") or {}
         model_finished(call_id, arguments.get("model"), usage, elapsed)
         usage_recorded = True
         _count_call(usage, elapsed)
-        full_detail(f"[MODEL OUTPUT] {label}", _usage_summary(usage) + f"\nRound-trip latency: {elapsed:.2f} s" + ("\n" + content if verbose else ""))
+        full_detail(f"[MODEL OUTPUT] {label}", _usage_summary(usage) + f"\nRound-trip latency: {elapsed:.2f} s"
+            + ("\n" + logger.format_output(raw) if verbose else ""))
         show_panel(f"[MODEL OUTPUT] {label} | {elapsed:.2f}s",
             _output_view(content, usage, elapsed) if verbose else _usage_view(usage, elapsed), tone="output")
         return response

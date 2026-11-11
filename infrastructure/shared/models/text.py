@@ -80,7 +80,8 @@ class TextModel:
                 options.pop("reasoning_effort", None)
                 options.pop("extra_body", None)
             try:
-                return invoke(self.client, {**options, self._token_parameter: self.max_output_tokens})
+                return invoke(self.client, {**options, self._token_parameter: self.max_output_tokens},
+                    logger=getattr(self, "logger", None))
             except OpenAIError as error:
                 message = str(error).lower()
                 rejected = getattr(error, "status_code", None) in {400, 422} and any(
