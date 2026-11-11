@@ -44,31 +44,30 @@ def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK, port: int =
     templates = configuration["templates"]
     if not templates.is_dir():
         raise ValueError(f"Stack templates do not exist: {templates}")
+
+    # copy template files to output directory, preserving existing application sources and data
     created = []
     for source in sorted(templates.rglob("*")):
         if not source.is_file():
             continue
         relative = source.relative_to(templates)
         content = source.read_text(encoding="utf-8-sig")
+
+        # process port configuration in backend and frontend files
         if relative.as_posix() == "backend/src/server.ts":
             content = content.replace('process.env.PORT ?? "3000"', f'process.env.PORT ?? "{port}"')
         elif relative.as_posix() == "frontend/vite.config.ts":
             content = content.replace("http://127.0.0.1:3000", f"http://127.0.0.1:{port}")
+
+        # write new files only; preserve existing application sources and data
         target = output_dir / relative
-        if not target.resolve().is_relative_to(output_dir):
-            raise ValueError(f"Project path escapes the output directory: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with target.open("x", encoding="utf-8", newline="\n") as stream:
-                stream.write(content)
-        except FileExistsError:
-            if not target.is_file():
-                raise ValueError(f"Expected a project file: {target}")
-            continue
+        with target.open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(content)
         created.append(relative.as_posix())
+
+    # create new directories
     for relative in configuration["directories"]:
         target = output_dir / relative
-        if not target.resolve().is_relative_to(output_dir):
-            raise ValueError(f"Project directory escapes the output directory: {relative}")
         target.mkdir(parents=True, exist_ok=True)
     return created

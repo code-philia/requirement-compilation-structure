@@ -14,7 +14,10 @@ def project_initialization(input_dir: Path, output_dir: Path, pause: bool = Fals
     if input_dir != output_dir:
         if output_dir.is_relative_to(input_dir):
             raise ValueError("Output directory must not be inside the requirements directory")
+        
+        # copy requirements directory to output directory, ignoring tests
         shutil.copytree(input_dir, output_dir, dirs_exist_ok=True, ignore=shutil.ignore_patterns("tests"))
+
     initialize_repository(output_dir)
     created = initialize_project(output_dir, stack, port)
     checkpoint(output_dir, stage="00", task="project", action="Publish application scaffold",

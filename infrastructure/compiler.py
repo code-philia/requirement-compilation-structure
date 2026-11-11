@@ -109,6 +109,9 @@ class Compiler:
         run_token, run_id = begin_run(self.output_dir, self.input_dir, stage)
         self.report.update(run_id=run_id, started_at=timestamp())
         try:
+            # =========================================
+            # main loop over all passes in the pipeline
+            # =========================================
             for name, function, artifact in passes:
                 if function is project_initialization:
                     result = self._run(name, function, self.input_dir, self.output_dir, port=self.port, pause=self.pause)
@@ -118,6 +121,10 @@ class Compiler:
                 else:
                     result = self._run(name, function, self.arc_dir, pause=self.pause)
                 self.artifacts[artifact] = result
+
+            # ========================================
+            #        final report and exit
+            # ========================================
             self.current_stage = None
             incomplete = [name for name, result in self.report["stages"].items()
                 if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES"}]
