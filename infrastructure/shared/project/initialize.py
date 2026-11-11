@@ -15,6 +15,7 @@ STACKS = {
     DEFAULT_STACK: {
         "templates": Path(__file__).with_name("templates"),
         "directories": ("backend/src/db/tables", "backend/src/db/seeds"),
+        "build_directories": ("backend/dist", "frontend/dist"),
     },
 }
 
@@ -62,8 +63,13 @@ def initialize_project(output_dir: Path, stack: str = DEFAULT_STACK, port: int =
         # write new files only; preserve existing application sources and data
         target = output_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("x", encoding="utf-8", newline="\n") as stream:
-            stream.write(content)
+        try:
+            with target.open("x", encoding="utf-8", newline="\n") as stream:
+                stream.write(content)
+        except FileExistsError:
+            if not target.is_file():
+                raise ValueError(f"Expected a project file: {target}")
+            continue
         created.append(relative.as_posix())
 
     # create new directories

@@ -17,7 +17,7 @@ from infrastructure.pipeline.frontend_implementation import implement_frontend_t
 from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
-from infrastructure.shared.project.git import checkpoint
+from infrastructure.shared.project.git import checkpoint, rollback_before_stage
 from infrastructure.utils.presentation.events import begin_run, finish_run, begin_stage, finish_stage, timestamp
 
 
@@ -91,22 +91,31 @@ class Compiler:
             status=status, details=self.report["stages"][stage])
         return result
 
-    def compile(self, stage: str | None = None) -> Path:
-        """Execute every pass, or only the selected pass using existing artifacts."""
+    def compile(self, stage: str | None = None, *, from_stage: str | None = None) -> Path:
+        """Run all passes, or restore the previous checkpoint before selected passes."""
         passes = PIPELINE
-        if stage is not None:
+        if stage is not None and from_stage is not None:
+            raise ValueError("stage and from_stage are mutually exclusive")
+        selected = stage if stage is not None else from_stage
+        if selected is not None:
             passes = ()
-            for entry in PIPELINE:
-                if entry[0] == stage:
-                    passes = (entry,)
+            for index, entry in enumerate(PIPELINE):
+                if entry[0] == selected:
+                    passes = (entry,) if stage is not None else PIPELINE[index:]
                     break
             if not passes:
-                raise ValueError(f"Unknown stage: {stage}. Use a full stage name such as 06_implement_backend_tdd.")
+                raise ValueError(f"Unknown stage: {selected}. Use a full stage name such as 06_implement_backend_tdd.")
+        if selected is not None:
+            names = [name for name, _, _ in PIPELINE]
+            index = names.index(selected)
+            if index > 0:
+                rollback_before_stage(self.output_dir, names[index - 1])
         self.artifacts.clear()
         self.report = {"status": "RUNNING", "stages": {}}
         show_panel("Requirement compiler | Pipeline",
             f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: {len(passes)}\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
-        run_token, run_id = begin_run(self.output_dir, self.input_dir, stage)
+        run_token, run_id = begin_run(self.output_dir, self.input_dir, selected)
+        self.report["selection"] = {"stage": stage, "from_stage": from_stage}
         self.report.update(run_id=run_id, started_at=timestamp())
         try:
             # =========================================
