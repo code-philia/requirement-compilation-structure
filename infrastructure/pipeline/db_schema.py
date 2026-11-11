@@ -80,7 +80,7 @@ def requirement_nodes(root: dict):
         yield {**tree.requirements[rid], "steps": tree.concatenated_steps(rid)}
 
 
-def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 6, max_attempts: int = 10) -> dict:
+def build_db_schema(arc_dir: Path, pause: bool = False, top_k: int = 10, max_attempts: int = 10) -> dict:
     requirements_path = arc_dir / "requirements.json"
     if not requirements_path.is_file():
         raise ValueError("Run main.py --stage 01 first to create .arc/requirements.json")
