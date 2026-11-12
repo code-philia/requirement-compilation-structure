@@ -10,6 +10,7 @@ from contextvars import ContextVar
 
 import httpx
 
+from infrastructure.shared.models.streaming import complete, streaming_enabled
 from infrastructure.utils.presentation.console import current_activity, preview, show_panel, WaitingStatus
 from infrastructure.utils.presentation.logging import session_info, full_detail
 from infrastructure.utils.presentation.events import model_started, model_finished
@@ -79,7 +80,14 @@ def _http_request(request: httpx.Request) -> None:
 
 
 def _http_response(response: httpx.Response) -> None:
-    """Read and retain the complete non-streaming response before SDK parsing."""
+    """Retain ordinary bodies without eagerly consuming an SSE response."""
+    if response.headers.get("content-type", "").split(";", 1)[0].strip().lower() == "text/event-stream":
+        call = _call.get()
+        if call is not None:
+            call["stream_log_prefix"] = response.request.extensions.get("compiler_model_log_prefix")
+        _record("http_response", status_code=response.status_code,
+            request_id=response.headers.get("x-request-id"), streaming=True)
+        return
     response.read()
     prefix = response.request.extensions.get("compiler_model_log_prefix")
     if prefix is not None:
@@ -272,6 +280,9 @@ def show_call_totals():
 
 def invoke(client, arguments: dict):
     """Audit one SDK call and show a static waiting message until it returns."""
+    arguments = dict(arguments)
+    if streaming_enabled():
+        arguments["stream"] = True
     call_id = uuid4().hex
     activity = current_activity()
     session = session_info()
@@ -291,13 +302,16 @@ def invoke(client, arguments: dict):
         model_started(call_id, arguments.get("model"), str(getattr(client, "base_url", "")))
         _record("request", arguments=arguments)
         started = monotonic()
-        response = client.chat.completions.create(**arguments)
+        response = complete(client, **arguments)
         elapsed = monotonic() - started
         # Preserve the SDK envelope and untouched message content before any JSON repair.
         raw = response.model_dump(mode="json")
         _record("response", elapsed_seconds=elapsed, response=raw)
         waiting.close()
         content = "\n".join(choice.message.content or "" for choice in response.choices)
+        prefix = _call.get().get("stream_log_prefix")
+        if prefix is not None:
+            prefix.with_name(prefix.name + ".model.ouput").write_text(content, encoding="utf-8", newline="\n")
         usage = raw.get("usage") or {}
         model_finished(call_id, arguments.get("model"), usage, elapsed)
         usage_recorded = True
