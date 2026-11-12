@@ -391,9 +391,16 @@ class BackendBuildAgent(BaseAgent):
         refresh_graph(self.graph, self.schema)
         if not roots(self.graph, self.rid):
             raise ValueError('Use skip_backend for an evidenced backend-free requirement, or define its internal capabilities')
+        issues = []
         for identity, record in closure(self.graph,roots(self.graph,self.rid)).items():
             if record['description'].strip().lower() in {'placeholder','todo','tbd'} or re.search(r'\s',record['name']):
-                raise ValueError(f'{identity}: provide a real responsibility and callable function name before implementation')
+                issues.append({'id':identity,'name':record['name'],
+                    'instruction':'Use the actual callable name without descriptive spaces; put explanation in description. Replace placeholder purpose.'})
+        if issues:
+            return {'status':'DESIGN_CORRECTION_NEEDED','issues':issues,
+                'example_arguments':{'patches':[{'id':issue['id'],'changes':{
+                    'name':'actualCallableName','description':'Source-backed responsibility'}} for issue in issues]},
+                'next_action':'Use patch_capabilities to correct all listed items in one batch, then begin_tests. Do not redesign or inspect unrelated files.'}
         self.phase = 'tests'
         owners = [record['implementation'] for record in closure(self.graph, roots(self.graph,self.rid)).values()]
         self.files.files.update(owners)
