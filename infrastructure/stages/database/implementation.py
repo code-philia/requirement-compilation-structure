@@ -2,23 +2,20 @@
 
 import json
 import re
-import uuid
 
 from infrastructure.shared.agent.feedback import CheckFailure, compact_feedback
 from infrastructure.shared.agent.tools import FileTools
-from infrastructure.stages.database.file_agent import run_database_agent
+from infrastructure.stages.database.file_agent import DatabaseImplementationAgent
 from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.shared.project.git import checkpoint
 from infrastructure.stages.database.order import table_dependencies, implementation_groups
 from infrastructure.stages.database.testing import DatabaseChecks
 from infrastructure.stages.requirements.tree import RequirementTree
-from infrastructure.stages.backend.context import requirement_context
 from infrastructure.utils.files import read_artifact, save_json, save_text
 from infrastructure.stages.database.runtime import seed_source
-from infrastructure.stages.database.seeds import MANIFEST, SEED_RULES, seed_assertions
+from infrastructure.stages.database.seeds import MANIFEST, SEED_RULES, seed_assertions, source_seed_records
 from infrastructure.stages.requirements.data import load_data, publish_seed_data, DATA_INSTRUCTIONS
-from infrastructure.stages.backend.platform_files import IDENTITY_TABLES
 
 
 SEED_PATH = "backend/src/db/seed.ts"
@@ -41,37 +38,38 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
     save_text(output / SEED_PATH, seed_source(order))
     catalog = load_data(arc_dir)
     publish_seed_data(output, schema, catalog)
-    business = {key: row for key, row in catalog["records"].items()
-        if row["lifecycle"] == "SEED" and row["entity"] != "test account"}
-    if not business:
+    seeds = source_seed_records(catalog)
+    if not seeds:
         return
-    tree = RequirementTree(read_artifact(arc_dir, "requirements.json"))
-    tree.validation_data = catalog
-    from infrastructure.stages.backend.evidence import load_evidence
-    tree.backend_evidence = load_evidence(arc_dir)
-    foundation_path = arc_dir / "backend_foundation.json"
-    tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled": False}
-    protected = {insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths} if tree.backend_foundation.get("enabled") else set()
+    raw = read_artifact(arc_dir, "requirements.json")
+    tree = RequirementTree(raw)
+    selected = [rid for rid, ids in catalog.get("requirements", {}).items() if set(ids) & set(seeds)]
+    if not selected:
+        selected = list(tree.leaves)
     readable = set(insert_paths.values()) | {f"backend/src/db/tables/{name}.sql" for name in order} | {MANIFEST}
-    files = FileTools(output, ["backend/src/db"], requirements=list(tree.leaves), stage="database",
-        files=[], writable=(set(insert_paths.values()) - protected) | {MANIFEST}, readable=readable)
-    task = {"catalog": business, "entities": schema["entities"],
+    files = FileTools(output, ["backend/src/db"], requirements=selected, stage="database",
+        files=sorted(readable), writable=set(insert_paths.values()) | {MANIFEST}, readable=readable)
+    evidence_path = arc_dir / "backend_evidence.json"
+    evidence = read_artifact(arc_dir, evidence_path.name) if evidence_path.is_file() else {}
+    task = {"catalog": seeds, "schema_semantics": {name: {
+        "description": entity.get("description", ""), "source_refs": entity.get("source_refs", []),
+        "fields": {key: {k: field[k] for k in ('description', 'source_type', 'constraints') if k in field}
+            for key, field in entity['fields'].items()}} for name, entity in schema['entities'].items()},
         "source_sha256": catalog["source_sha256"], "schema_sha256": catalog["schema_sha256"],
         "manifest_path": MANIFEST, "insert_files": insert_paths,
-        "requirements": [requirement_context(tree, rid) for rid in tree.leaves],
+        "requirements": [{key: value for key, value in tree.raw[rid].items()
+            if key in {"id", "name", "description", "scenarios", "data"}} for rid in selected],
+        "source_identity_evidence": evidence.get("authorization", {}).get("catalog", {}),
         "reserved_future_data": {key: row for key, row in catalog["records"].items()
-            if row["lifecycle"] != "SEED"},
-        "identity_references": {key: {"username": row["properties"].get("username"),
-            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, "arc-backend:user:" + row["properties"]["username"]))}
-            for key, row in catalog["records"].items() if row["entity"] == "test account"}}
+            if row["lifecycle"] != "SEED"}}
 
     def generated():
         assertions = seed_assertions(output, schema, catalog)
-        return {"status": "GENERATED", "source_records": len(business), "observed_rows": len(assertions)}
+        return {"status": "GENERATED", "source_records": len(seeds), "observed_rows": len(assertions)}
 
     with failures.task("startup data / semantic SQL implementation"):
-        run_database_agent(model, DATA_INSTRUCTIONS + SEED_RULES, task, files, generated,
-            max_turns, console, "Implement explicit startup data")
+        DatabaseImplementationAgent('seeds', DATA_INSTRUCTIONS + SEED_RULES, files, generated,
+            model=model).run(task, max_turns=max_turns, console=console, label="Implement explicit startup data")
 
 
 REPAIR_INSTRUCTIONS = '''Repair the actual database implementation and its startup wiring.
@@ -83,7 +81,7 @@ foreign-key tables, initializer, client, setup/server entry point or SQL build-c
 Repair the responsible db/seeds/ENTITY.sql insertion files when prerequisite data fails.
 seed.ts is only the shared SQL loader; do not move business row definitions into it.
 Preserve the existing seed identities, credentials, values and relationships; correct
-execution errors without redefining their business meaning. Semantic queries are disabled. The
+execution errors without redefining their business meaning. The
 loader runs after table creation in the initialization transaction, on every startup.
 Keep it idempotent and preserve existing user data; do not remove it to make checks pass.
 Keep CREATE TABLE IF NOT EXISTS and all canonical tables/fields. Opening the database
@@ -98,7 +96,7 @@ Do not replace the canonical schema with a test-only database, omit a failing ta
 catch an error and pretend startup succeeded, disable constraints to hide a failure,
 change the schema artifact, weaken checks, or add mocks. Do not drop existing user data.
 Repair SQL to implement the supplied schema, including sqlite_type, composite primary
-keys and entity.unique_constraints. An ER-imported schema is the same design contract:
+keys and entity.unique_constraints. The completed agent-designed schema is the implementation authority:
 its SQL implementation is repairable, but its fields, relationships and constraints
 must not be redesigned to bypass an initialization failure.
 This task owns database SQL and the supplied startup wiring; later API/UI tasks do not.
@@ -147,8 +145,6 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
     allowed = {*WIRING, *sql_paths.values(), *insert_paths.values()}
     protected = {"backend/src/app.ts", "backend/src/api/register.ts", "backend/src/db/initialize.ts", "backend/src/db/seed.ts",
         "backend/tsconfig.json", "backend/package.json", "package.json"} if (output / "backend/src/platform/settings.ts").is_file() else set()
-    if protected:
-        protected.update(insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths)
     workspace = FileTools(output, ["backend", "package.json"], requirements=list(schema.get("requirements", {})),
         stage="database", files=WIRING, writable=allowed-protected, readable=allowed | {MANIFEST})
     task = {"table_order": [name for group in implementation_groups(schema) for name in group],
@@ -156,13 +152,15 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
         "insertion_directory": "backend/src/db/seeds",
         "database_path": "backend/data/app.db", "entities": {}}
     dependencies = table_dependencies(schema)
+    catalog = load_data(arc_dir)
 
     def repair_feedback(value):
         value = compact_feedback(value)
         text = json.dumps(value, ensure_ascii=False)
         selected = {name for name in sql_paths if f"{name}.sql" in text
-            or re.search(r"Missing (?:table|column): " + re.escape(name) + r"(?!\w)", text)}
-        if "SEED" in text or "seed" in text:
+            or re.search(r"(?:Missing (?:table|column): |no such (?:table|column): |Storage affinity mismatch: |Required field allows null: |Missing (?:primary key|unique constraint|foreign key): )" + re.escape(name) + r"(?!\w)", text)}
+        data_failure = any(word in text.lower() for word in ('seed', 'credential'))
+        if data_failure:
             selected.update(sql_paths)
         pending = list(selected)
         while pending:
@@ -173,14 +171,18 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
                     pending.append(target)
         # Retain wiring and replace the previous failing table context instead of accumulating it.
         workspace.files = set(WIRING) | {MANIFEST} | {sql_paths[name] for name in selected} | {insert_paths[name] for name in selected}
-        workspace.writable = (set(workspace.files) | set(insert_paths.values())) - protected - {MANIFEST}
+        workspace.writable = (set(workspace.files) | set(insert_paths.values()) | {MANIFEST}) - protected
         task["entities"] = {name: schema["entities"][name] for name in sorted(selected)}
+        if data_failure:
+            task.update({"catalog": source_seed_records(catalog),
+                "source_sha256": catalog["source_sha256"], "schema_sha256": catalog["schema_sha256"],
+                "manifest_path": MANIFEST, "insert_files": insert_paths})
         return value
 
     try:
-        agent = run_database_agent(model or TextModel(), REPAIR_INSTRUCTIONS, task, workspace, gate,
-            max_turns, console, "Database runtime repair", feedback=feedback,
-            feedback_filter=repair_feedback)
+        agent = DatabaseImplementationAgent('runtime', REPAIR_INSTRUCTIONS + SEED_RULES,
+            workspace, gate, model=model or TextModel(json_mode=False), feedback_filter=repair_feedback).run(
+                task, max_turns=max_turns, console=console, label="Database runtime repair", feedback=feedback)
         report.update(status="GREEN", repair_turns=agent["turns"])
         save_json(path, report)
         return report

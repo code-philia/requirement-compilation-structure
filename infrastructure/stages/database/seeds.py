@@ -1,7 +1,6 @@
 """Agent-produced seed SQL with source coverage and executable row evidence."""
 
 import json
-import uuid
 
 MANIFEST = "backend/src/db/seed-evidence.json"
 
@@ -24,9 +23,13 @@ never silently drop a source record or meaningful business property.
 Only lifecycle=SEED records belong in startup SQL. CREATED/DERIVED records and scenario
 When/Then outcomes must not be inserted. Given clauses help interpret explicit data,
 not a license to materialize every hypothetical scenario prerequisite at application start.
-Source test accounts are bootstrapped by the identity platform, not by this task.
-Keep platform identity, policy, sessions and audit tables unchanged. Ownership may be
-established only from explicit source unit/owner evidence; never grant extra memberships.
+Explicit source account records are part of this task too: resolve their tables,
+credential columns and memberships from the ACTUAL schema. There is no preset users,
+roles, organizations table, account UUID formula, administrator or default password.
+Only create source-required rows/memberships, never fabricate sessions or extra grants.
+If a credential is stored as a password hash, use seed_password_hash('source password');
+it produces scrypt$saltHex$digestHex. Record a property binding with transform=password_hash
+instead of putting plaintext or a random generated hash in expected row fields.
 
 Edit per-table backend/src/db/seeds/TABLE.sql files. Each inserts only into its own table.
 Use idempotent INSERT ... SELECT ... WHERE NOT EXISTS or targeted ON CONFLICT;
@@ -51,17 +54,37 @@ Also write task.manifest_path as JSON:
    }
  }
 }
-Include exactly all supplied business SEED IDs and all their original property names.
+Include exactly all supplied SEED IDs and all their original property names.
 Rows are observable expectations for the SQL you implement, not an alternative to INSERTs.
 Each locator must contain a primary/unique key (including all columns of a composite key).
 Include related rows needed to preserve foreign-key display names. Property mappings refer
 to a rows index and a field whose value equals the source value (numeric text is allowed). For a source {$ref: DATA-ID},
-map to the actual FK field and resolved target key; account IDs are in identity_references.
+map to the actual FK field and resolved target key in that source record's manifest rows.
+For a nested property mapped to several relational rows, use
+{"bindings":[{"row":0,"field":"role_code","source_path":[0,"role"]}, ...]}.
+Paths are relative to the property value and must cover every leaf value exactly or as
+an entire JSON subtree; map unit/role labels to actual related-row code/name fields.
+For hashed credentials use {"row":0,"field":"credential_column","transform":"password_hash"};
+the field must exist in the schema but should be omitted from row.fields because its
+salted value is generated at startup. Runtime checks verify it against the source password.
 Canonical bound fields supplied in task.catalog remain requirements; reuse their technical
 IDs. Every rows entry is checked after real initialization and repeated startup.
 If evidence is truly contradictory, report the conflict explicitly; do not invent a
 success, silently skip data or weaken a source value to pass a check.
 '''
+
+
+def source_seed_records(catalog):
+    """All explicit source seeds, including accounts with noncanonical table labels."""
+    return {rid: row for rid, row in catalog.get('records', {}).items() if row['lifecycle'] == 'SEED'}
+
+
+def leaf_paths(value):
+    if isinstance(value, dict) and '$ref' not in value and value:
+        return {(key,) + suffix for key, child in value.items() for suffix in leaf_paths(child)}
+    if isinstance(value, list) and value:
+        return {(index,) + suffix for index, child in enumerate(value) for suffix in leaf_paths(child)}
+    return {()}
 
 
 def sql_value(value):
@@ -70,8 +93,7 @@ def sql_value(value):
 
 def seed_assertions(output, schema, catalog):
     """Validate full source coverage; return row checks for the real DB startup gate."""
-    seeds = {rid: row for rid, row in catalog['records'].items()
-        if row['lifecycle'] == 'SEED' and row['entity'] != 'test account'}
+    seeds = source_seed_records(catalog)
     if not seeds:
         return []
     path = output / MANIFEST
@@ -82,7 +104,7 @@ def seed_assertions(output, schema, catalog):
         if evidence.get(key) != catalog[key]:
             raise ValueError('Seed evidence is stale: ' + key)
     if set(evidence.get('records', {})) != set(seeds):
-        raise ValueError('Seed evidence must cover exactly every explicit business SEED record')
+        raise ValueError('Seed evidence must cover exactly every explicit SEED record')
     result = []
     for rid, source in seeds.items():
         resolution = evidence['records'][rid]
@@ -111,37 +133,59 @@ def seed_assertions(output, schema, catalog):
         if set(properties) != set(source.get('properties', {})):
             raise ValueError(rid + ': explain every original source property')
         persisted = 0
+        checks = result[-len(rows):]
         for name, value in source.get('properties', {}).items():
             mapping = properties[name]
             if mapping.get('display_only') is True:
                 if not mapping.get('reason'):
                     raise ValueError(rid + ': display-only properties need evidence')
+                if source.get('entity') == 'test account':
+                    raise ValueError(rid + ': account credentials/memberships are not display decoration')
                 continue
-            index, field = mapping.get('row'), mapping.get('field')
-            if type(index) is not int or not 0 <= index < len(rows) or field not in rows[index]['fields']:
-                raise ValueError(rid + ': invalid source property mapping: ' + name)
-            stored = rows[index]['fields'][field]
-            if isinstance(value, dict) and "$ref" in value:
-                target = catalog['records'].get(value['$ref'])
-                reference = schema['entities'][rows[index]['entity']]['fields'][field].get('references')
-                if not target or target['lifecycle'] != 'SEED' or not reference:
-                    raise ValueError(rid + ': seed reference needs a published SEED target and schema FK')
-                target_entity, target_field = reference.split('.')
-                if target['entity'] == 'test account':
-                    expected = str(uuid.uuid5(uuid.NAMESPACE_URL, 'arc-backend:user:' + target['properties']['username']))
-                    matches = target_entity == 'users' and target_field == 'id' and stored == expected
+            bindings = mapping.get('bindings')
+            if bindings is None:
+                bindings = [mapping]
+            if not isinstance(bindings, list) or not bindings:
+                raise ValueError(rid + ': supply property bindings for ' + name)
+            covered = set()
+            for binding in bindings:
+                path = binding.get('source_path', [])
+                if not isinstance(path, list):
+                    raise ValueError(rid + ': source_path must be an array')
+                selected = value
+                for key in path:
+                    selected = selected[key]
+                index, field = binding.get('row'), binding.get('field')
+                if (type(index) is not int or not 0 <= index < len(rows)
+                        or field not in schema['entities'][rows[index]['entity']]['fields']):
+                    raise ValueError(rid + ': invalid source property mapping: ' + name)
+                if binding.get('transform') == 'password_hash':
+                    if not isinstance(selected, str) or field in rows[index]['fields']:
+                        raise ValueError(rid + ': omit generated hash from fields; source password must be text')
+                    checks[index].setdefault('password_hashes', {})[field] = selected
                 else:
-                    target_rows = evidence['records'][value['$ref']]['rows']
-                    matches = any(r['entity'] == target_entity and
-                        {**r['locator'], **r['fields']}.get(target_field) == stored for r in target_rows)
-                if not matches:
-                    raise ValueError(rid + ': reference does not resolve to the source target row')
-                persisted += 1
-                continue
-            # FK labels map to related-row fields, never to invented opaque IDs.
-            if stored != value and not (isinstance(stored, (str, int, float)) and isinstance(value, (str, int, float)) and str(stored) == str(value)):
-                raise ValueError(rid + ': preserve the source value for ' + name)
+                    if binding.get('transform'):
+                        raise ValueError(rid + ': unsupported property transform')
+                    if field not in rows[index]['fields']:
+                        raise ValueError(rid + ': mapped field must have an expected source value')
+                    stored = rows[index]['fields'][field]
+                    if isinstance(selected, dict) and '$ref' in selected:
+                        target = catalog['records'].get(selected['$ref'])
+                        reference = schema['entities'][rows[index]['entity']]['fields'][field].get('references')
+                        if not target or target['lifecycle'] != 'SEED' or not reference:
+                            raise ValueError(rid + ': seed reference needs a SEED target and schema FK')
+                        target_entity, target_field = reference.split('.')
+                        target_rows = evidence['records'][selected['$ref']]['rows']
+                        if not any(r['entity'] == target_entity and
+                                {**r['locator'], **r['fields']}.get(target_field) == stored for r in target_rows):
+                            raise ValueError(rid + ': reference does not resolve to source target row')
+                    elif stored != selected and not (isinstance(stored, (str, int, float))
+                            and isinstance(selected, (str, int, float)) and str(stored) == str(selected)):
+                        raise ValueError(rid + ': preserve the source value for ' + name)
+                covered.update(tuple(path) + leaf for leaf in leaf_paths(selected))
+            if covered != leaf_paths(value):
+                raise ValueError(rid + ': bindings must preserve every nested source value in ' + name)
             persisted += 1
         if source.get('properties') and not persisted:
-            raise ValueError(rid + ': cannot classify an entire business record as decoration')
+            raise ValueError(rid + ': cannot classify an entire source record as decoration')
     return result

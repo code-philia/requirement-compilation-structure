@@ -29,7 +29,9 @@ RECORD = {"type": "object", "properties": {
     "required": ["read", "write"], "additionalProperties": False}
 
 SCHEMA_RULES = """Maintain one logical database schema, NOT SQL or application code.
-ER Mermaid is evidence, not an executable contract: inspect its source with read_er.
+The COMPLETE original ER Mermaid source is supplied directly in each er_sources entry's content.
+Use it as evidence, not an executable contract. No file lookup, path arguments or
+paginated reads are needed. Source paths are citation labels only.
 Resolve contradictory relationships, duplicate concepts, missing keys, FK collisions,
 cardinality and optionality using the evidence; record each nontrivial decision and its
 source references. Do not run a deterministic Mermaid-to-schema conversion. Preserve
@@ -123,8 +125,6 @@ class DatabaseDesignAgent(BaseAgent):
         self.persist = persist or (lambda: None)
         self.completed = None
         self.input = {}
-        self.read_sources = set()
-        self.read_ranges = {}
 
     def build_system_prompt(self):
         if self.mode == "er":
@@ -132,7 +132,7 @@ class DatabaseDesignAgent(BaseAgent):
         return SCHEMA_RULES + "\n" + OBLIGATION_RULES
 
     def build_user_prompt(self, input):
-        return {**input, "er_sources": {path: {"total_lines": len(text.splitlines())}
+        return {**input, "er_sources": {path: {"content": text}
                 for path, text in self.sources.items()},
             "entity_inventory": {name: {"description": entity["description"],
                 "fields": list(entity["fields"]), "origin": entity.get("origin", "agent"),
@@ -140,11 +140,7 @@ class DatabaseDesignAgent(BaseAgent):
                 for name, entity in self.schema["entities"].items()}}
 
     def build_tools(self):
-        tools = [AgentTool("read_er", "Read original ER evidence, up to 2000 lines per call; batch independent reads.",
-            {"type": "object", "properties": {"path": {"type": "string"},
-                "start_line": {"type": "integer", "minimum": 1},
-                "end_line": {"type": "integer", "minimum": 1}}, "required": ["path"], "additionalProperties": False}, self.read_er),
-            AgentTool("retrieve_entity", "Read complete canonical definitions for several named entities together.",
+        tools = [AgentTool("retrieve_entity", "Read complete canonical definitions for several named entities together.",
                 {"type": "object", "properties": {"names": {"type": "array", "items": {"type": "string"}}},
                  "required": ["names"], "additionalProperties": False}, self.retrieve_entity),
             AgentTool("upsert_entity", "Create one logical table or merge an evidence-backed repair; never generate code here.",
@@ -160,17 +156,6 @@ class DatabaseDesignAgent(BaseAgent):
                     "steps": {"type": "object", "additionalProperties": RECORD}},
                  "required": ["requirement", "steps"], "additionalProperties": False}, self.submit_obligations))
         return tools
-
-    def read_er(self, path, start_line=1, end_line=None):
-        lines = self.sources[path].splitlines()
-        if start_line < 1 or (end_line is not None and end_line < start_line):
-            raise ValueError("Use positive inclusive line ranges")
-        end = min(end_line if end_line is not None else start_line + 399, start_line + 1999, len(lines))
-        self.read_sources.add(path)
-        self.read_ranges.setdefault(path, []).append((start_line, end))
-        return {"path": path, "start_line": start_line, "end_line": end,
-            "total_lines": len(lines), "next_start_line": end + 1 if end < len(lines) else None,
-            "content": "\n".join(lines[start_line-1:end])}
 
     def retrieve_entity(self, names):
         return {"entities": {name: self.schema["entities"][name] for name in names if name in self.schema["entities"]},
@@ -217,16 +202,6 @@ class DatabaseDesignAgent(BaseAgent):
             raise ValueError("Repair schema before completing: " + "; ".join(issues or ["no entities"]))
 
     def finish_schema(self, summary):
-        if set(self.sources) - self.read_sources:
-            raise ValueError("Read every declared ER source before completing")
-        for path, text in self.sources.items():
-            cursor = 1
-            for start, end in sorted(self.read_ranges.get(path, [])):
-                if start > cursor:
-                    break
-                cursor = max(cursor, end + 1)
-            if cursor <= len(text.splitlines()):
-                raise ValueError(f"ER evidence incomplete: read {path} starting at line {cursor} before finishing")
         self.ensure_complete()
         self.completed = {"summary": summary}
         return {"status": "COMPLETE", "entities": len(self.schema["entities"])}
@@ -249,7 +224,7 @@ class DatabaseDesignAgent(BaseAgent):
         return {"status": "COMPLETE"}
 
     def run(self, input, max_turns=20):
-        self.input, self.completed, self.read_sources, self.read_ranges = input, None, set(), {}
+        self.input, self.completed = input, None
         self.start(input)
         for _ in range(max_turns):
             try:

@@ -9,7 +9,6 @@ from tempfile import TemporaryDirectory
 from infrastructure.utils.processes import capture_process, npm_command
 from infrastructure.stages.requirements.data import load_data, startup_assertions
 from infrastructure.stages.database.seeds import seed_assertions
-from infrastructure.stages.backend.platform_files import identity_startup_assertions
 
 
 PROBE_SOURCE = r'''
@@ -18,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { scryptSync, timingSafeEqual } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 const plan = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const Database = createRequire(join(process.cwd(), "package.json"))("better-sqlite3");
@@ -25,6 +25,12 @@ const quote = name => '"' + name.replaceAll('"', '""') + '"';
 const affinity = value => {const type=value.toUpperCase();return type.includes('INT')?'INTEGER':/CHAR|CLOB|TEXT/.test(type)?'TEXT':!type||type.includes('BLOB')?'BLOB':/REAL|FLOA|DOUB/.test(type)?'REAL':'NUMERIC';};
 let phase = "setup", server;
 const completed = [];
+const canonicalJson = value => JSON.stringify(normalizeJson(value));
+function normalizeJson(value) {
+  if(Array.isArray(value)) return value.map(normalizeJson);
+  if(value && typeof value==='object') return Object.fromEntries(Object.keys(value).sort().map(key=>[key,normalizeJson(value[key])]));
+  return value;
+}
 function inspect(filename, marker = false) {
   if (!existsSync(filename)) throw new Error("Initialization did not create DATABASE_URL: " + filename);
   const db = new Database(filename);
@@ -60,13 +66,6 @@ function inspect(filename, marker = false) {
       for(const group of design.unique_constraints??[])if(!unique.includes([...group].sort().join('|')))throw new Error(`Missing composite unique: ${table}.${group.join(',')}`);
     }
     if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Foreign-key validation failed");
-    for (const account of plan.identity_accounts ?? []) {
-      const user=db.prepare('SELECT id FROM users WHERE username=?').get(account.username);
-      if(!user)throw new Error('Missing source identity: '+account.username);
-      const actual=db.prepare('SELECT r.role_id AS role,u.code AS unit FROM user_ou_roles r JOIN org_units u ON u.id=r.unit_id WHERE r.user_id=?').all(user.id);
-      const canonical=roles=>roles.map(r=>r.role+'@'+r.unit).sort().join('|');
-      if(canonical(actual)!==canonical(account.roles))throw new Error('Source identity memberships changed by startup seeds: '+account.username);
-    }
     for (const record of plan.validation_data ?? []) {
       const entries=Object.entries(record.locator);
       const row=db.prepare(`SELECT * FROM ${quote(record.entity)} WHERE ${entries.map(([key])=>quote(key)+'=?').join(' AND ')}`).get(...entries.map(([,value])=>value));
@@ -74,7 +73,20 @@ function inspect(filename, marker = false) {
         if(row)throw new Error("Non-SEED validation record was preloaded: "+record.id);
       } else {
         if(!row)throw new Error("Missing source SEED record: "+record.id);
-        for(const [key,value] of Object.entries(record.fields))if(row[key]!==value)throw new Error("Source SEED value mismatch: "+record.id+"."+key);
+        for(const [key,value] of Object.entries(record.fields)) {
+          const json=plan.schema[record.entity].fields[key]?.type==='json';
+          const matches=json&&row[key]!=null&&value!=null
+            ? canonicalJson(JSON.parse(row[key]))===canonicalJson(JSON.parse(value)) : row[key]===value;
+          if(!matches)throw new Error("Source SEED value mismatch: "+record.id+"."+key);
+        }
+        for(const [key,password] of Object.entries(record.password_hashes??{})) {
+          const [algorithm,salt,digest,...extra]=String(row[key]??'').split('$');
+          if(algorithm!=='scrypt'||!/^[0-9a-f]{32}$/i.test(salt??'')||!/^[0-9a-f]{128}$/i.test(digest??'')||extra.length)
+            throw new Error('Invalid source credential hash: '+record.id+'.'+key);
+          const expected=Buffer.from(digest,'hex');
+          if(!timingSafeEqual(scryptSync(password,Buffer.from(salt,'hex'),64),expected))
+            throw new Error('Source credential mismatch: '+record.id+'.'+key);
+        }
       }
     }
     if (marker && db.prepare('SELECT value FROM "__arc_startup_probe"').get()?.value !== "preserve")
@@ -189,14 +201,11 @@ class DatabaseChecks:
                 return {**build, "phase": "backend build"}
             with TemporaryDirectory(prefix="arc-db-check-") as temporary:
                 arc=self.output/".arc"
-                foundation=json.loads((arc/"backend_foundation.json").read_text()) if (arc/"backend_foundation.json").is_file() else {}
-                identity=identity_startup_assertions(json.loads((arc/"requirements.json").read_text()),
-                    json.loads((arc/"backend_evidence.json").read_text())) if foundation.get("enabled") else []
+                catalog = load_data(arc)
                 plan = {"directory": temporary, "database": str(self.output / "backend/data/app.db"),
                     "tables": {name: list(entity["fields"]) for name, entity in self.schema["entities"].items()},
                     "schema":self.schema["entities"],
-                    "identity_accounts":identity,
-                    "validation_data":startup_assertions(load_data(arc)) + seed_assertions(self.output, self.schema, load_data(arc)),
+                    "validation_data":startup_assertions(catalog) + seed_assertions(self.output, self.schema, catalog),
                     "setup": [*npm_command(), "run", "db:init", "--workspace", "@arc/backend"]}
                 runner = Path(temporary) / "check-database.mjs"
                 arguments = Path(temporary) / "plan.json"
