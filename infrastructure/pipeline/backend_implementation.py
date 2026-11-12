@@ -232,8 +232,6 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
     registry_wired = publish_registries(output, groups)
     install_dependencies(output)
     model, console, checks = TextModel(), DemoConsole(pause), BackendChecks(output)
-    # Bounded edit batches; never send hundreds of thousands of output tokens for one edit.
-    model.max_output_tokens = min(model.max_output_tokens, 24576)
     cached = BackendCheckCache(output, checks)
     raw = read_artifact(arc_dir, 'requirements.json')
     previous = read_artifact(arc_dir, 'backend_tdd.json') if (arc_dir / 'backend_tdd.json').is_file() else {}

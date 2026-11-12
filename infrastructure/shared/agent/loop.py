@@ -46,8 +46,6 @@ def run_file_agent(model, instructions: str, task: dict, files: FileTools, gate,
         raise ValueError("--max-turns must be positive")
     if feedback_filter is None:
         feedback_filter = compact_feedback
-    if files.stage in {'backend', 'frontend', 'ui'} and hasattr(model, 'max_output_tokens'):
-        model.max_output_tokens = min(model.max_output_tokens, 24576)
     context_result = None
     test_reference = testing_reference(task)
     read_observations = {}
