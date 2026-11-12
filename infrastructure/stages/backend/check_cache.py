@@ -17,6 +17,9 @@ class BackendCheckCache:
     def fingerprint(self):
         digest = hashlib.sha256()
         paths = set(source_paths(self.output, 'backend'))
+        # Compiler-owned frontend handoff, never executable backend input. Publishing
+        # accepted documentation must not invalidate identical cumulative checks.
+        paths.discard('backend/src/api/endpoints.json')
         paths.update({'package.json', 'package-lock.json', 'npm-shrinkwrap.json'})
         for relative in sorted(paths):
             path = self.output / relative

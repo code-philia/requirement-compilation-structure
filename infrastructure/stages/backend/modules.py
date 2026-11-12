@@ -56,7 +56,7 @@ def publish_registries(output, groups):
             save_text(path, 'import type { Express } from "express";\nimport type Database from "better-sqlite3";\n'
                 'export function registerModuleApis(app: Express, connection: Database.Database): void {}\n')
     imports, calls = [], []
-    for index, (mid, group) in enumerate(sorted(unique.items())):
+    for index, (mid, group) in enumerate(unique.items()):
         imports.append(f'import {{ registerModuleApis as m{index} }} from "./modules/{mid}/register.js";')
         calls.append(f'  m{index}(app, connection);')
     save_text(output / AGGREGATOR, 'import type { Express } from "express";\nimport type Database from "better-sqlite3";\n'

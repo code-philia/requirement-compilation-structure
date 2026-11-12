@@ -1,212 +1,25 @@
-"""Import source evidence and publish fixed infrastructure with minimal configuration."""
+"""Publish source evidence for backend design without imposing a platform schema."""
 
-import json
-import re
-
-from infrastructure.shared.models.text import TextModel
-from infrastructure.shared.agent.proposals import propose_json
-from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.files import read_artifact, save_json
 from infrastructure.stages.backend.evidence import compile_evidence
 
-INSTRUCTIONS = """Select only the small deployment configuration needed before database creation.
-Return one JSON object:
-{
- "default_boundary":"none|unit|unit_tree",
- "boundary_requirements":["owning requirement node ID"],
- "registration":{"enabled":false,"user_types":[]},
- "global_design":{"modules":[{"name":"business module","requirements":["REQ-ID"],
-   "responsibility":"brief responsibility","implementation_locations":["backend/src/...","frontend/src/..."]}],
-   "shared_concerns":["short cross-module integration guidance"]},
- "implementation_notes":[{"requirements":["owning requirement node ID"],
-   "instruction":"short shared integration guidance"}]
-}
-Keep global_design lightweight: module boundaries, reusable owners and shared concerns.
-Include source-required shared services, persistence, validation/calculation or integration
-responsibilities where useful; the backend design stage plans their concrete modules
-alongside APIs. Do not impose a fixed architecture or prebuild an unused utility library.
-Do NOT enumerate API signatures, permission matrices, machines, guards, effects or process dispositions.
-These are implemented incrementally in backend/src/business/platform.ts beside actual APIs.
-Source authorization and BPMN are already imported unchanged; never transcribe them here.
-Keep notes short; no note is needed just to repeat source behavior.
-
-Use requirement_id_index keys as requirement citations. Embedded clause labels such as
-SYS-001, scenario IDs and BPMN IDs are not requirement node IDs; use their owning node.
-'all' policies do not cancel explicit tenant/team isolation. Use unit for own-team data,
-unit_tree ONLY for source-required descendant-unit visibility, none ONLY if isolation
-is not required. Administrator always has all permissions through fixed infrastructure.
-
-Schema repairs belong to the following joint schema/obligation agent. Put any noticed
-schema conflict in implementation_notes; do not emit schema_adjustments here.
-
-Authentication/session/CSRF/identity bootstrap are fixed account/password infrastructure.
-Enable registration ONLY if prose/scenarios explicitly require it. In that case use
-user_types:[{id,label,role,unit,requirements,source_refs}]. Derive selectable source user
-types and their exact existing role/unit bindings; never issue admin via public signup,
-infer every role is selectable or invent a mapping. If required registration is ambiguous,
-report the concrete gap in implementation_notes and leave it disabled. No SMS/email flows.
-"""
-
-
-def _references(refs, evidence, location):
-    """Resolve exact node IDs or unambiguous source clause/scenario aliases."""
-    if isinstance(refs, str):
-        refs = [refs]
-    if not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs):
-        raise ValueError(f"{location}: expected requirement IDs as a list")
-    nodes, resolved = evidence["nodes"], []
-    for ref in refs:
-        if ref in nodes:
-            owners = [ref]
-        else:
-            owners = [rid for rid, node in nodes.items() if
-                re.search(r"(?<![\w.-])" + re.escape(ref) + r"(?![\w.-])", node.get("text", ""))
-                or any(scenario.get("id") == ref for scenario in node.get("scenarios", []) if isinstance(scenario, dict))]
-        if len(owners) != 1:
-            error = ValueError(f"{location}: citation {ref!r} has no unambiguous owner; use requirement_id_index keys")
-            error.feedback = {"requirement_id_index": {rid: node.get("name", "") for rid, node in nodes.items()},
-                "candidates": owners}
-            raise error
-        if owners[0] not in resolved:
-            resolved.append(owners[0])
-    return resolved
-
-
-def validate_foundation(value, evidence, schema):
-    """Adapt a small configuration, without compiling a workflow/design contract."""
-    if not isinstance(value, dict):
-        raise ValueError("Foundation configuration must be a JSON object")
-    boundary = value.get("default_boundary", value.get("boundary"))
-    if isinstance(boundary, dict):
-        refs = boundary.get("requirements", [])
-        boundary = boundary.get("mode")
-    else:
-        refs = value.get("boundary_requirements", [])
-    if not isinstance(boundary, str) or boundary not in {"none", "unit", "unit_tree"}:
-        raise ValueError("default_boundary must be none, unit or unit_tree")
-    refs = _references(refs, evidence, "boundary_requirements")
-    if boundary != "none" and not refs:
-        raise ValueError("Tenant boundary needs an owning source requirement ID")
-    plan = {"format_version": 2, "default_boundary": boundary, "boundary_requirements": refs,
-        "additional_permissions": [], "features": [], "machines": {}, "decisions": [],
-        "schema_adjustments": [], "implementation_notes": [],
-        "global_design": value.get("global_design", {}),
-        "business_configuration": "backend/src/business/platform.ts"}
-    generated = {item["field"]: item for item in schema.get("er_import", {}).get("generated", []) if item.get("references")}
-    for adjustment in value.get("schema_adjustments", []) or []:
-        field = adjustment.get("field")
-        if field not in generated or adjustment.get("nullable") is not True or not adjustment.get("reason"):
-            raise ValueError(f"schema_adjustments: {field!r} may only optionalize a generated FK with an explicit source reason; allowed fields: {list(generated)}")
-        owners = _references(adjustment.get("requirements", []), evidence, f"schema_adjustments.{field}")
-        if not owners:
-            raise ValueError(f"schema_adjustments.{field}: cite owning requirement IDs")
-        plan["schema_adjustments"].append({"field": field, "nullable": True, "reason": adjustment["reason"],
-            "requirements": owners, "source_refs": [generated[field]["reason"]]})
-    notes = value.get("implementation_notes", []) or []
-    if isinstance(notes, str):
-        notes = [{"instruction": notes}]
-    for note in notes:
-        if isinstance(note, str):
-            note = {"instruction": note}
-        if not isinstance(note, dict):
-            continue
-        instruction = note.get("instruction", note.get("note", ""))
-        if instruction:
-            # Notes remain evidence, not a reason to reject the whole configuration.
-            plan["implementation_notes"].append({**note, "instruction": instruction})
-    from infrastructure.stages.backend.registration import registration_config
-    registration = value.get("registration") or {"enabled": False, "user_types": []}
-    if not isinstance(registration, dict) or not isinstance(registration.get("enabled", False), bool):
-        raise ValueError("registration.enabled must be a boolean")
-    for row in registration.get("user_types", []) or []:
-        row["requirements"] = _references(row.get("requirements", []), evidence, "registration.user_types")
-    plan["registration"] = registration_config({"registration": registration}, evidence)
-    plan["process_dispositions"] = {pid: {"mode": "deferred", "machines": [],
-        "requirements": [rid for rid, node in evidence["nodes"].items() if pid in node.get("processes", [])],
-        "reason": "Implement source process during its owning backend requirement; reuse shared business configuration."}
-        for pid in evidence["processes"]}
-    return plan
-
-
-def add_platform_schema(schema):
-    from infrastructure.stages.database.er import field, fingerprint
-    def f(kind, description, **options):
-        return field(kind, description, nullable=False, **options)
-    definitions = {
-        "users": {"id": f("uuid", "Identity", primary_key=True), "username": f("string", "Account name", unique=True), "password_hash": f("string", "scrypt credential")},
-        "org_units": {"id": f("uuid", "Unit identity", primary_key=True), "code": f("string", "Catalog unit code", unique=True), "name": f("string", "Unit name"), "parent_id": field("uuid", "Parent unit", references="org_units.id")},
-        "roles": {"id": f("string", "Catalog role code", primary_key=True), "name": f("string", "Role name")},
-        "user_ou_roles": {"id": f("uuid", "Role assignment", primary_key=True), "user_id": f("uuid", "Subject", references="users.id"), "unit_id": f("uuid", "Domain", references="org_units.id"), "role_id": f("string", "Role", references="roles.id")},
-        "auth_sessions": {"id": f("string", "SHA256 opaque token", primary_key=True), "user_id": f("uuid", "Subject", references="users.id"), "unit_id": f("uuid", "Active domain", references="org_units.id"), "csrf_token": f("string", "CSRF secret"), "expires_at": f("datetime", "Expiry")},
-        "record_access": {"id": f("uuid", "Ownership identity", primary_key=True), "resource": f("string", "Resource code"), "record_id": f("string", "Business record key"), "unit_id": f("uuid", "Record domain", references="org_units.id"), "owner_id": field("uuid", "Owner", references="users.id"), "assignee_id": field("uuid", "Assignee", references="users.id")},
-        "command_receipts": {"id": f("string", "Scoped idempotency key", primary_key=True), "request_hash": f("string", "Canonical request hash"), "response": f("json", "Committed response")},
-        "workflow_audit": {"id": f("uuid", "Audit identity", primary_key=True), "machine": f("string", "Machine ID"), "record_id": f("string", "Business key"), "event": f("string", "Event"), "from_state": f("string", "Previous state"), "to_state": f("string", "Committed state"), "actor_id": f("uuid", "Trusted subject", references="users.id"), "unit_id": f("uuid", "Trusted domain", references="org_units.id"), "occurred_at": f("datetime", "Timestamp")},
-        "platform_meta": {"id": f("string", "Bootstrap marker", primary_key=True), "value": f("string", "Marker value")},
-    }
-    for name, fields in definitions.items():
-        entity = schema["entities"].setdefault(name, {"description": "Compiler-owned backend infrastructure", "origin": "backend_platform", "fields": {}})
-        if entity.get("origin") not in {"backend_platform", "reference_target"}:
-            raise ValueError(f"Business ER entity {name} collides with reserved backend infrastructure")
-        for key, definition in fields.items():
-            if key in entity["fields"] and any(entity["fields"][key].get(k) != definition[k] for k in ("type", "primary_key")):
-                raise ValueError(f"Incompatible infrastructure field {name}.{key}")
-            entity["fields"].setdefault(key, definition)
-    schema["entities"]["user_ou_roles"]["unique_constraints"] = [["user_id", "unit_id", "role_id"]]
-    schema["entities"]["record_access"]["unique_constraints"] = [["resource", "record_id"]]
-    if schema.get("er_import"):
-        schema["er_import"]["schema_sha256"] = fingerprint(schema["entities"])
-        schema["er_import"]["backend_platform_tables"] = list(definitions)
-    return schema
-
 
 def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
+    """Retain the stage interface; identity capabilities are designed from requirements.
+
+    enabled=False means the former fixed platform is absent, not that source-required
+    authentication/authorization is disabled. Backend agents must implement those
+    capabilities using the already designed schema and the original evidence.
+    """
     raw = read_artifact(arc_dir, "requirements.json")
-    # Stage 02 owns model-designed ER schema; never overwrite it with a static import.
     if not (arc_dir / "db_schema.json").is_file():
-        raise ValueError("Run 02_build_db_schema before configuring backend infrastructure")
+        raise ValueError("Run 02_build_db_schema before backend design")
     evidence = compile_evidence(raw, input_dir)
     save_json(arc_dir / "backend_evidence.json", evidence)
-    if not evidence["enabled"]:
-        from infrastructure.stages.requirements.data import compile_data
-        save_json(arc_dir / "data_bindings.json", compile_data(raw, read_artifact(arc_dir, "db_schema.json")))
-        save_json(arc_dir / "backend_foundation.json", {"enabled": False})
-        return {"status": "GREEN", "enabled": False}
-    if not evidence["authorization"]:
-        raise ValueError("Process-enabled backend generation requires an explicit authorization catalog/model/policy")
-    schema = add_platform_schema(read_artifact(arc_dir, "db_schema.json"))
-    save_json(arc_dir / "db_schema.json", schema)
-    if schema.get("er_import"):
-        save_json(arc_dir / "er_import.json", schema["er_import"])
-    # No full schema, policy matrix, BPMN graph or screenshot text in this call.
-    # Original evidence is published once and supplied per requirement downstream.
-    payload = {
-        "requirement_id_index": {rid: node.get("name", "") for rid, node in evidence["nodes"].items()},
-        "requirements": {rid: {key: node[key] for key in ("name", "text", "scenarios")}
-            for rid, node in evidence["nodes"].items()},
-        "identity_catalog": {key: evidence["authorization"]["catalog"][key] for key in ("roles", "units")},
-        "entity_index": list(schema["entities"]),
-        "process_index": {pid: process.get("name", pid) for pid, process in evidence["processes"].items()},
-        "generated_relationship_fields": [item for item in schema.get("er_import", {}).get("generated", []) if item.get("references")],
-    }
-    console = DemoConsole(pause)
-    plan, _ = propose_json(TextModel(), INSTRUCTIONS, payload,
-        lambda value: validate_foundation(value, evidence, schema), console,
-        "Backend minimal configuration", min(max_attempts, 3))
-    plan.update(enabled=True, source_hashes=evidence["source_hashes"])
-    for adjustment in plan["schema_adjustments"]:
-        table,key=adjustment["field"].split('.')
-        schema["entities"][table]["fields"][key]["nullable"]=True
-    if schema.get("er_import"):
-        from infrastructure.stages.database.er import fingerprint
-        schema["er_import"]["backend_semantic_adjustments"]=plan["schema_adjustments"]
-        schema["er_import"]["schema_sha256"]=fingerprint(schema["entities"])
-        save_json(arc_dir / "er_import.json",schema["er_import"])
-    save_json(arc_dir / "db_schema.json", schema)
+    plan = {"enabled": False, "identity_model": "source_driven",
+        "implementation_notes": [{"instruction":
+            "Derive identity, user types, authentication, authorization and workflows from source evidence. "
+            "Implement required shared modules and real endpoints against the existing designed schema. "
+            "No fixed platform tables, default accounts or identity endpoints are provided."}]}
     save_json(arc_dir / "backend_foundation.json", plan)
-    from infrastructure.stages.requirements.data import compile_data
-    save_json(arc_dir / "data_bindings.json", compile_data(raw, schema))
-    # Called by backend design after logical schema and database initialization.
-    from infrastructure.stages.backend.platform_files import publish_platform
-    publish_platform(arc_dir.parent, evidence, plan, schema, raw)
-    console.show("Backend infrastructure configured", json.dumps({"boundary": plan["default_boundary"], "business_configuration": plan["business_configuration"], "implementation_notes": plan["implementation_notes"]}, ensure_ascii=False, indent=2))
-    return {"status": "GREEN", "enabled": True, "machines": list(plan["machines"])}
+    return {"status": "GREEN", **plan}

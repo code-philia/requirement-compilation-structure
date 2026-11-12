@@ -7,8 +7,7 @@ from infrastructure.pipeline.project_initialization import project_initializatio
 from infrastructure.pipeline.requirements import explore_requirement
 from infrastructure.pipeline.database_design import build_er_schema, refine_database
 from infrastructure.pipeline.database import implement_db
-from infrastructure.pipeline.backend_apis import design_backend_joint
-from infrastructure.pipeline.backend_implementation import implement_backend_tdd
+from infrastructure.pipeline.backend_joint import build_backend
 from infrastructure.pipeline.frontend_joint import design_frontend_joint, implement_frontend_joint
 from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
@@ -23,8 +22,7 @@ PIPELINE = (
     ("02_build_db_schema", build_er_schema, "db_schema"),
     ("03_infer_db_obligations", refine_database, "db_obligations"),
     ("04_implement_db", implement_db, "db_implementations"),
-    ("05_design_backend_joint", design_backend_joint, "backend_plan"),
-    ("06_implement_backend_tdd", implement_backend_tdd, "backend_checks"),
+    ("05_build_backend", build_backend, "backend_checks"),
     ("07_design_frontend_joint", design_frontend_joint, "frontend_plan"),
     ("10_implement_frontend_joint", implement_frontend_joint, "frontend_e2e"),
 )
@@ -95,8 +93,7 @@ class Compiler:
             "02_build_db_schema": [".arc/requirements.json"],
             "03_infer_db_obligations": [".arc/db_schema.json"],
             "04_implement_db": [".arc/db_schema.json", ".arc/db_obligations.json", "backend/package.json"],
-            "05_design_backend_joint": [".arc/requirements.json", ".arc/db_schema.json", ".arc/db_obligations.json"],
-            "06_implement_backend_tdd": [".arc/backend_plan.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
+            "05_build_backend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/db_obligations.json"],
             "07_design_frontend_joint": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
             "10_implement_frontend_joint": [".arc/frontend_plan.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
         }
@@ -106,10 +103,9 @@ class Compiler:
             "01_explore_requirement": ["00_project_initialization"],
             "03_infer_db_obligations": ["02_build_db_schema"],
             "04_implement_db": ["03_infer_db_obligations"],
-            "05_design_backend_joint": ["03_infer_db_obligations", "04_implement_db"],
-            "06_implement_backend_tdd": ["05_design_backend_joint", "03_infer_db_obligations", "04_implement_db"],
-            "07_design_frontend_joint": ["05_design_backend_joint", "03_infer_db_obligations"],
-            "10_implement_frontend_joint": ["05_design_backend_joint", "03_infer_db_obligations", "04_implement_db"],
+            "05_build_backend": ["03_infer_db_obligations", "04_implement_db"],
+            "07_design_frontend_joint": ["05_build_backend", "03_infer_db_obligations"],
+            "10_implement_frontend_joint": ["05_build_backend", "03_infer_db_obligations", "04_implement_db"],
         }
         input_pass = self.report['stages'].get('01_explore_requirement', {})
         if stage not in {'00_project_initialization', '01_explore_requirement'} and input_pass.get('status') in {'FAILED', 'BLOCKED'}:
@@ -117,6 +113,11 @@ class Compiler:
                 missing.append('current requirement import did not complete')
         for owner in gates.get(stage, []):
             result = self.report['stages'].get(owner, {})
+            if (owner == '05_build_backend' and result.get('status') == 'COMPLETED_WITH_FAILURES'
+                    and result.get('usable_artifacts', {}).get('backend_endpoints')):
+                # Preserve independent frontend progress after merging old 05/06.
+                # Backend failures remain in the final report and repair queue.
+                continue
             if result.get('status') in {'FAILED', 'COMPLETED_WITH_FAILURES', 'BLOCKED'}:
                 missing.append('prerequisite stage ' + owner + ' needs repair')
         return missing
@@ -172,7 +173,7 @@ class Compiler:
                 # the existing content/dependency checkpoints, not regenerated.
                 # Design requirements map to API/page ID lists, not status records.
                 # Inspect requirement outcomes only for implementation reports.
-                if function not in (implement_backend_tdd, implement_frontend_joint):
+                if function is not implement_frontend_joint:
                     continue
                 entries = result.get('requirements', {}) if isinstance(result, dict) else {}
                 outcomes = [entry for entry in entries.values() if isinstance(entry, dict)] if isinstance(entries, dict) else []
@@ -182,10 +183,7 @@ class Compiler:
                     previous = dict(self.report['stages'][name])
                     show_panel('Incremental recovery | ' + name,
                         'Retry unresolved requirements once using new shared implementations and saved failure feedback. Accepted checkpoints are reused.')
-                    if function is implement_backend_tdd:
-                        result = self._run(name, function, self.arc_dir, pause=self.pause)
-                    else:
-                        result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
+                    result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
                     self.artifacts[artifact] = result
                     self.report['stages'][name]['recovery_attempts'] = [previous]
                     save_json(self.arc_dir / 'compilation.json', self.report)

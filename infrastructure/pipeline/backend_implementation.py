@@ -94,6 +94,12 @@ is enabled; use its server-owned user type mappings. Use session mode only for
 source-required authenticated operations with no business resource. All runtime policy
 configuration can be corrected in code by this same implementation loop.
 The foundation is minimal deployment configuration, NOT a complete business plan.
+When backend_foundation.identity_model=source_driven, the former fixed platform is NOT
+provided: ignore the fixed-platform wiring instructions in this section. Implement the
+source-required identity, user types, permissions and workflows as normal shared modules
+against the actual schema. enabled=false does NOT waive any source-required security.
+Do not assume users/auth_sessions/record_access tables, preset roles, default administrator
+accounts or preimplemented /api/auth endpoints. Reuse actual implemented owners instead.
 Implement source-required permissions/features/workflows directly in
 backend/src/business/platform.ts (application-owned, editable) while implementing APIs.
 The fixed settings.ts imports businessConfiguration automatically. Preserve existing
@@ -250,7 +256,7 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
         references['references/source'] = output / 'reference'
     resume = RequirementCheckpoints(arc_dir, 'backend', raw, lambda rid: {
         'schema': schema_context(schema, rid),
-        'foundation': {key: tree.backend_foundation.get(key) for key in ('enabled', 'default_boundary', 'registration')},
+        'foundation': {key: tree.backend_foundation.get(key) for key in ('enabled', 'identity_model', 'default_boundary', 'registration')},
         'capabilities': backend_items(design, rid),
         'notes': design.get('notes', {}).get(rid), 'recipe': Path(__file__).read_text()})
     accepted = []
@@ -293,7 +299,7 @@ def implement_backend_tdd(arc_dir: Path, pause=False, max_turns=10, max_tests=No
                 'supporting_capability_index': supporting_apis,
                 'registry': group['registry'], 'registry_wired': registry_wired,
                 'global_design': foundation.get('global_design', {}),
-                'backend_foundation': {key: foundation.get(key) for key in ('enabled', 'default_boundary', 'registration', 'business_configuration')},
+                'backend_foundation': {key: foundation.get(key) for key in ('enabled', 'identity_model', 'implementation_notes', 'default_boundary', 'registration', 'business_configuration')},
                 'test_paths': paths, 'test_path': next(iter(paths.values())),
                 'support_module': TEST_SUPPORT_PATH, 'test_accounts': test_accounts(raw),
                 'endpoint_documentation': INVENTORY,

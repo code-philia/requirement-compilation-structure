@@ -31,7 +31,7 @@ def source_context(tree, rid):
     authorization = evidence.get('authorization', {})
     if authorization:
         authorization.pop('model', None)
-        authorization['model_reference'] = 'reference/authorization/model.conf (already installed in fixed platform)'
+        authorization['model_reference'] = 'reference/authorization/model.conf (source policy evidence; implement or reuse its enforcement as required)'
     context['full_evidence_reference'] = 'references/context/' + evidence_filename(rid)
     context['backend_evidence'] = evidence
     return context
@@ -65,12 +65,12 @@ def implementation_context(tree, schema, design, rid):
         'api_inventory': api_index({aid: item for aid, item in design.get('items', {}).items() if aid not in selected
             and (aid.startswith('platform-') or any(aid in design.get('requirements', {}).get(dep, [])
                 for dep in tree.raw[rid].get('dependencies', [])))}),
-        'backend_foundation': {key: tree.backend_foundation[key] for key in ('enabled', 'default_boundary', 'registration', 'business_configuration', 'global_design') if key in tree.backend_foundation},
+        'backend_foundation': {key: tree.backend_foundation[key] for key in ('enabled', 'identity_model', 'implementation_notes', 'default_boundary', 'registration', 'business_configuration', 'global_design') if key in tree.backend_foundation},
         'endpoint_documentation': 'backend/src/api/endpoints.json',
         'registry': 'backend/src/api/register.ts',
-        'business_configuration': 'backend/src/business/platform.ts',
+        'business_configuration': tree.backend_foundation.get('business_configuration'),
         'workflow_implementation': 'Implement associated source BPMN, guards and effects in real code; '
-            'the foundation intentionally does not predesign business machines. Extend the shared business configuration in this task.'}
+            'derive shared workflow owners from the source and actual existing implementation locations.'}
 
 
 def acceptance_context(tree, schema, inventory, rid, oracle, accounts, test_path, support):
