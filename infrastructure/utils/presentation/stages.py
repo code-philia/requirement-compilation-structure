@@ -18,13 +18,13 @@ STAGES = {
 def stage_label(script: str) -> str:
     """Show the pipeline stage number and its purpose."""
     joint = {
+        "02_build_db_schema": "Build logical schema from ER with native tools",
+        "03_infer_db_obligations": "Refine schema and derive requirement read/write obligations",
         "05_design_backend_joint": "Outline backend APIs, shared modules and implementation locations",
         "07_design_frontend_joint": "Outline pages and implementation locations",
         "10_implement_frontend_joint": "Implement pages and interactions directly from source evidence",
     }
     if script in joint:
         return f"Stage {script[:2]} | {joint[script]}"
-    if script == "02_design_backend_foundation":
-        return "Stage 02B | Import ER and publish fixed infrastructure with minimal configuration"
     number = script[:2]
     return f"Stage {number} | {STAGES[number]}" if number in STAGES else script

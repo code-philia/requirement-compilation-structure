@@ -10,7 +10,7 @@ from infrastructure.stages.backend.platform_files import wire_initializer
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
 from infrastructure.utils.presentation.formatting import format_schema
-from infrastructure.shared.agent.loop import run_file_agent
+from infrastructure.stages.database.file_agent import run_database_agent
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.utils.files import save_text
@@ -63,7 +63,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
         raise ValueError("--max-turns must be positive")
     source = arc_dir / "db_schema.json"
     if not source.is_file():
-        raise ValueError("Run --stage 02_design_backend_foundation first to collect ER metadata in .arc/db_schema.json")
+        raise ValueError("Run 02_build_db_schema and 03_infer_db_obligations before SQL implementation")
     output_dir = arc_dir.parent.resolve()
     for required in ("backend/package.json", "backend/src/db/client.ts", "backend/src/db/initialize.ts"):
         if not (output_dir / required).is_file():
@@ -126,7 +126,7 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
                         raise ValueError("Create the current SQL output_path with edit_file")
                     return {"path": expected_path, "status": "GENERATED"}
 
-                run_file_agent(model, INSTRUCTIONS, request, tools, generated_table,
+                run_database_agent(model, INSTRUCTIONS, request, tools, generated_table,
                     max_attempts, console, f"SQL implementation {name}")
                 content = read_source(output_dir / expected_path)
                 proposal = {"path": expected_path, "content": content}
@@ -141,7 +141,9 @@ def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max
     initializer = output_dir / "backend/src/db/initialize.ts"
     if not initializer.resolve().is_relative_to(output_dir):
         raise ValueError("DB initializer path escapes the output directory")
-    save_text(initializer, initializer_source(implementations))
+    # Runtime repair must see every expected table, including failed first attempts.
+    expected_tables = {name: {"path": f"backend/src/db/tables/{name}.sql"} for name in order}
+    save_text(initializer, initializer_source(expected_tables))
     if (output_dir / "backend/src/platform/bootstrap.ts").is_file():
         wire_initializer(initializer)
     checkpoint(output_dir, stage="04", task="database initializer", action="Publish ordered SQL initialization",

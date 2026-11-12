@@ -8,6 +8,9 @@ from infrastructure.stages.backend.context import load_context, requirement_cont
 
 def design_backend_joint(arc_dir: Path, pause: bool = False) -> dict:
     """Describe APIs, shared module responsibilities/dependencies and suggested files."""
+    from infrastructure.stages.backend.foundation import design_backend_foundation
+    # Identity/authorization configuration belongs to backend design, not database analysis.
+    design_backend_foundation(arc_dir.parent, arc_dir, pause=pause)
     tree, _ = load_context(arc_dir, validate_seeds=False)
     inventory = {}
     if tree.backend_foundation.get('enabled'):

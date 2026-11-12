@@ -5,7 +5,7 @@ import traceback
 
 from infrastructure.pipeline.project_initialization import project_initialization
 from infrastructure.pipeline.requirements import explore_requirement
-from infrastructure.stages.backend.foundation import design_backend_foundation
+from infrastructure.pipeline.database_design import build_er_schema, refine_database
 from infrastructure.pipeline.database import implement_db
 from infrastructure.pipeline.backend_apis import design_backend_joint
 from infrastructure.pipeline.backend_implementation import implement_backend_tdd
@@ -20,7 +20,8 @@ from infrastructure.utils.presentation.events import begin_run, finish_run, begi
 PIPELINE = (
     ("00_project_initialization", project_initialization, "project_files"),
     ("01_explore_requirement", explore_requirement, "requirements"),
-    ("02_design_backend_foundation", design_backend_foundation, "backend_foundation"),
+    ("02_build_db_schema", build_er_schema, "db_schema"),
+    ("03_infer_db_obligations", refine_database, "db_obligations"),
     ("04_implement_db", implement_db, "db_implementations"),
     ("05_design_backend_joint", design_backend_joint, "backend_plan"),
     ("06_implement_backend_tdd", implement_backend_tdd, "backend_checks"),
@@ -91,9 +92,10 @@ class Compiler:
     def _missing_prerequisites(self, stage):
         required = {
             "01_explore_requirement": ["backend/package.json", "frontend/package.json"],
-            "02_design_backend_foundation": [".arc/requirements.json"],
-            "04_implement_db": [".arc/db_schema.json", ".arc/backend_foundation.json", "backend/package.json"],
-            "05_design_backend_joint": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
+            "02_build_db_schema": [".arc/requirements.json"],
+            "03_infer_db_obligations": [".arc/db_schema.json"],
+            "04_implement_db": [".arc/db_schema.json", ".arc/db_obligations.json", "backend/package.json"],
+            "05_design_backend_joint": [".arc/requirements.json", ".arc/db_schema.json", ".arc/db_obligations.json"],
             "06_implement_backend_tdd": [".arc/backend_plan.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
             "07_design_frontend_joint": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
             "10_implement_frontend_joint": [".arc/frontend_plan.json", ".arc/db_schema.json", ".arc/backend_foundation.json"],
@@ -102,11 +104,12 @@ class Compiler:
         # Do not use stale deployment/DDL artifacts after a failed current import.
         gates = {
             "01_explore_requirement": ["00_project_initialization"],
-            "04_implement_db": ["02_design_backend_foundation"],
-            "05_design_backend_joint": ["02_design_backend_foundation"],
-            "06_implement_backend_tdd": ["02_design_backend_foundation", "04_implement_db"],
-            "07_design_frontend_joint": ["02_design_backend_foundation"],
-            "10_implement_frontend_joint": ["02_design_backend_foundation", "04_implement_db"],
+            "03_infer_db_obligations": ["02_build_db_schema"],
+            "04_implement_db": ["03_infer_db_obligations"],
+            "05_design_backend_joint": ["03_infer_db_obligations", "04_implement_db"],
+            "06_implement_backend_tdd": ["05_design_backend_joint", "03_infer_db_obligations", "04_implement_db"],
+            "07_design_frontend_joint": ["05_design_backend_joint", "03_infer_db_obligations"],
+            "10_implement_frontend_joint": ["05_design_backend_joint", "03_infer_db_obligations", "04_implement_db"],
         }
         input_pass = self.report['stages'].get('01_explore_requirement', {})
         if stage not in {'00_project_initialization', '01_explore_requirement'} and input_pass.get('status') in {'FAILED', 'BLOCKED'}:
@@ -148,7 +151,7 @@ class Compiler:
                     continue
                 if function is project_initialization:
                     result = self._run(name, function, self.input_dir, self.output_dir, port=self.port, pause=self.pause)
-                elif function is design_backend_foundation:
+                elif function in (build_er_schema, refine_database):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
                 elif function in (explore_requirement, design_frontend_joint, implement_frontend_joint):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)

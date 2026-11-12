@@ -27,6 +27,8 @@ def load_context(arc_dir: Path, *, validate_seeds=True):
     foundation_path = arc_dir / "backend_foundation.json"
     tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled":False}
     schema = read_artifact(arc_dir, "db_schema.json")
+    obligation_path = arc_dir / "db_obligations.json"
+    tree.db_obligations = read_artifact(arc_dir, obligation_path.name) if obligation_path.is_file() else {}
     from infrastructure.stages.database.seeds import MANIFEST, seed_assertions
     seed_path = arc_dir.parent / MANIFEST
     if seed_path.is_file() and validate_seeds:
@@ -42,6 +44,9 @@ def load_context(arc_dir: Path, *, validate_seeds=True):
 def requirement_context(tree, rid: str) -> dict:
     """Return one requirement with its own structured steps and their concatenated teaching/model context."""
     return {**tree.requirements[rid], "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
+        "db_obligation": getattr(tree, "db_obligations", {}).get("requirements", {}).get(rid, {}),
+        "step_db_obligations": {sid: getattr(tree, "db_obligations", {}).get("steps", {}).get(sid, {})
+            for sid in tree.own_steps[rid]},
         "validation_data": data_context(getattr(tree,"validation_data",{}),rid),
         "independent_acceptance_findings": [item for item in getattr(tree,"acceptance_findings",[]) if rid in item["requirements"]],
         "backend_evidence": scoped_evidence(getattr(tree,"backend_evidence",{}),rid),

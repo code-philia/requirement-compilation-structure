@@ -6,7 +6,7 @@ import uuid
 
 from infrastructure.shared.agent.feedback import CheckFailure, compact_feedback
 from infrastructure.shared.agent.tools import FileTools
-from infrastructure.shared.agent.loop import run_file_agent
+from infrastructure.stages.database.file_agent import run_database_agent
 from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.project.dependencies import install_dependencies
 from infrastructure.shared.project.git import checkpoint
@@ -49,7 +49,8 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
     tree.validation_data = catalog
     from infrastructure.stages.backend.evidence import load_evidence
     tree.backend_evidence = load_evidence(arc_dir)
-    tree.backend_foundation = read_artifact(arc_dir, "backend_foundation.json")
+    foundation_path = arc_dir / "backend_foundation.json"
+    tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled": False}
     protected = {insert_paths[name] for name in IDENTITY_TABLES if name in insert_paths} if tree.backend_foundation.get("enabled") else set()
     readable = set(insert_paths.values()) | {f"backend/src/db/tables/{name}.sql" for name in order} | {MANIFEST}
     files = FileTools(output, ["backend/src/db"], requirements=list(tree.leaves), stage="database",
@@ -69,7 +70,7 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
         return {"status": "GENERATED", "source_records": len(business), "observed_rows": len(assertions)}
 
     with failures.task("startup data / semantic SQL implementation"):
-        run_file_agent(model, DATA_INSTRUCTIONS + SEED_RULES, task, files, generated,
+        run_database_agent(model, DATA_INSTRUCTIONS + SEED_RULES, task, files, generated,
             max_turns, console, "Implement explicit startup data")
 
 
@@ -177,7 +178,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
         return value
 
     try:
-        agent = run_file_agent(model or TextModel(), REPAIR_INSTRUCTIONS, task, workspace, gate,
+        agent = run_database_agent(model or TextModel(), REPAIR_INSTRUCTIONS, task, workspace, gate,
             max_turns, console, "Database runtime repair", feedback=feedback,
             feedback_filter=repair_feedback)
         report.update(status="GREEN", repair_turns=agent["turns"])
