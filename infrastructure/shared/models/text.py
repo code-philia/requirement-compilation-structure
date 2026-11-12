@@ -25,6 +25,16 @@ class ModelProtocolError(ValueError):
     """Provider returned no usable JSON content, independently of application behavior."""
 
 
+class ModelRequestError(RuntimeError):
+    """Transport failure with explicit retryability; never an application/test failure."""
+    def __init__(self, error):
+        super().__init__(f'Text model request failed: {error}')
+        self.status_code = getattr(error,'status_code',None)
+        self.retryable = (self.status_code in {408,409,429} or
+            isinstance(self.status_code,int) and self.status_code>=500 or
+            type(error).__name__ in {'APIConnectionError','APITimeoutError'})
+
+
 def reasoning_rejected(error):
     """Only retry controls when the endpoint explicitly rejects those fields."""
     message = str(error).lower()
@@ -112,7 +122,7 @@ class TextModel:
         try:
             response = self._request(**options)
         except OpenAIError as error:
-            raise RuntimeError(f"Text model request failed: {error}") from error
+            raise ModelRequestError(error) from error
         if not response.choices:
             raise ModelProtocolError("Text model returned no choices")
         choice = response.choices[0]

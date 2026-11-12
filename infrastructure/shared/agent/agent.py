@@ -5,7 +5,7 @@ import inspect
 import json
 from typing import Any, Callable
 
-from infrastructure.shared.models.text import TextModel
+from infrastructure.shared.models.text import TextModel, ModelRequestError
 from infrastructure.utils.presentation.agent import AgentLogger
 from infrastructure.utils.presentation.model_io import record_tool_execution
 
@@ -78,7 +78,17 @@ class BaseAgent:
         if not self.messages:
             raise RuntimeError("Call start(input) before step()")
         definitions = [tool.definition() for tool in self.tools.values()]
-        message = self.model.chat(self.messages, tools=definitions, tool_choice=tool_choice)
+        for attempt in range(3):
+            try:
+                message = self.model.chat(self.messages, tools=definitions, tool_choice=tool_choice)
+                break
+            except ModelRequestError as error:
+                if not error.retryable or attempt==2:
+                    raise
+                from infrastructure.utils.presentation.console import show_panel
+                show_panel('Model transport recovery | '+self.logger.name,
+                    f'Transient request failure (HTTP {error.status_code or "connection"}); '
+                    f'retry {attempt+1}/2 in the same conversation. No tools executed; no test/fix iteration consumed.',tone='waiting')
         record = message.model_dump(mode="json", exclude_none=True)
         self.messages.append(record)
         return message
@@ -119,6 +129,11 @@ class BaseAgent:
     def tool_error_feedback(self, call, error):
         """Return local argument diagnostics without echoing a large failed proposal."""
         result = {"type": type(error).__name__, "message": str(error)}
+        if isinstance(error,TypeError) and call.function.name in self.tools:
+            schema = self.tools[call.function.name].parameters
+            result.update(required_arguments=schema.get('required',[]),
+                allowed_arguments=list(schema.get('properties',{})),
+                instruction='Correct only this call using the listed native argument names; earlier successful calls remain saved.')
         if isinstance(error, json.JSONDecodeError):
             result.update(tool=call.function.name, line=error.lineno, column=error.colno,
                 near=error.doc[max(0, error.pos-80):error.pos+80],
