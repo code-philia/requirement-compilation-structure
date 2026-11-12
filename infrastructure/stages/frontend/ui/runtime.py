@@ -100,6 +100,8 @@ def prepare_frontend(output: Path) -> None:
             raise ValueError(f"Missing {relative}; run main.py --stage 00 first")
     template = Path(__file__).resolve().parents[3] / 'shared/project/templates/frontend/src/auth/RegisterPage.tsx'
     save_text(output / 'frontend/src/auth/RegisterPage.tsx', template.read_text())
+    accessibility = template.parents[1] / 'components/accessibility.tsx'
+    save_text(output / 'frontend/src/components/accessibility.tsx', accessibility.read_text())
     configure_arco(output)
     configure_tailwind(output)
     enable_import_case_checks(output, "frontend")

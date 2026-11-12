@@ -145,6 +145,7 @@ def parse_playwright_result(result: dict, include_files: bool = False, output: P
     cases = []
     expected_failures = []
     contexts = []
+    navigation = []
 
     def visit(suite, parents=()):
         """Accumulate nested Playwright suite/spec results into the normalized browser-check report."""
@@ -154,6 +155,16 @@ def parse_playwright_result(result: dict, include_files: bool = False, output: P
             files[filename] = files.get(filename, 0) + len(spec.get("tests", []))
             for test in spec.get("tests", []):
                 cases.append({"title":" ".join((*titles,spec.get("title",""))),"file":filename,"status":test.get("status")})
+                if test.get('status')=='expected' and test.get('expectedStatus','passed')=='passed':
+                    for annotation in test.get('annotations',[]):
+                        if annotation.get('type')=='arc-navigation':
+                            try:
+                                evidence = json.loads(annotation.get('description',''))
+                                if isinstance(evidence,dict) and isinstance(evidence.get('to'),str):
+                                    navigation.append({'file':filename,'title':spec.get('title',''),
+                                        **{key:evidence[key] for key in ('from','to','reload','history') if key in evidence}})
+                            except (ValueError,TypeError):
+                                pass  # Optional evidence is advisory; it never changes test verdicts.
                 if test.get("expectedStatus","passed") != "passed":
                     expected_failures.append(spec.get("title",""))
                 for run in test.get("results", []):
@@ -187,6 +198,8 @@ def parse_playwright_result(result: dict, include_files: bool = False, output: P
         result["cases"] = cases
     if contexts:
         result["failure_contexts"] = contexts
+    if navigation:
+        result['navigation'] = navigation
     result["output"] = json.dumps({key: value for key, value in result.items() if key != "output"}, ensure_ascii=False, indent=2)[-24000:]
     return result
 

@@ -1,4 +1,4 @@
-"""Step 10 test infrastructure: real application servers and isolated SQLite data.
+"""Frontend acceptance infrastructure: real application servers and isolated SQLite data.
 
 Compiler-owned Playwright, Vite, Node-runner, and fixture source strings are written
 by prepare_e2e(). Each browser run owns temporary database files; test cases reset
@@ -17,7 +17,7 @@ CONFIG_SOURCE = '''import { defineConfig } from "@playwright/test";
 const frontendPort = process.env.ARC_E2E_FRONTEND_PORT;
 const backendPort = process.env.ARC_E2E_BACKEND_PORT;
 const database = process.env.ARC_E2E_DB_FILE;
-if (!frontendPort || !backendPort || !database) throw new Error("Use npm run test:e2e or the step 10 runner");
+if (!frontendPort || !backendPort || !database) throw new Error("Use npm run test:e2e or the frontend acceptance runner");
 export default defineConfig({
   testDir: "./tests/e2e", outputDir: "./test-results/e2e", workers: 1,
   fullyParallel: false, retries: 0, forbidOnly: true,
@@ -83,6 +83,9 @@ import { initializeDatabase } from "../../../../backend/src/db/initialize.js";
 export { fixturePasswordHash } from "../../../../backend/tests/support/context.js";
 export { prepareGiven, insertGiven, ownGiven, findGiven, ensureGiven } from "../../../../backend/tests/support/helpers.js";
 export { loginGiven, browserRequest, browserIdentity } from "./helpers.js";
+export { navigateAndAssert, chooseNamedOption } from "./navigation.js";
+export type { NavigationCheck } from "./navigation.js";
+export type { BrowserSession } from "./helpers.js";
 export const test = base.extend<{ database: Database.Database; applicationErrors: void }>({
   database: [async ({}, use) => {
     const path = process.env.ARC_E2E_DB_FILE;
@@ -124,7 +127,7 @@ def prepare_e2e(output, backend):
         FIXTURE: FIXTURE_SOURCE}
     from pathlib import Path
     templates = Path(__file__).resolve().parents[3] / 'shared/project/templates'
-    for name in ('backend/tests/support/helpers.ts', 'frontend/tests/e2e/support/helpers.ts'):
+    for name in ('backend/tests/support/helpers.ts', 'frontend/tests/e2e/support/helpers.ts', 'frontend/tests/e2e/support/navigation.ts'):
         sources[name] = (templates / name).read_text()
     for relative, source in sources.items():
         save_text(output / relative, source)

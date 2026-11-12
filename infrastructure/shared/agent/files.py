@@ -34,7 +34,7 @@ def editable_application_path(output, relative):
             "backend/src/db/initialize.ts", "backend/src/db/seed.ts"}):
         return False
     if relative.startswith("frontend/src/"):
-        return relative not in {"frontend/src/ui-runtime.ts", "frontend/src/design-system.tsx", "frontend/src/auth/RegisterPage.tsx"}
+        return relative not in {"frontend/src/ui-runtime.ts", "frontend/src/design-system.tsx", "frontend/src/auth/RegisterPage.tsx", "frontend/src/components/accessibility.tsx"}
     if relative.startswith("backend/src/"):
         return (relative in SHARED_SOURCES or (not (templates / relative).is_file()
             and not relative.startswith("backend/src/db/")))

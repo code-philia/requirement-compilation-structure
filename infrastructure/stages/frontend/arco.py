@@ -83,8 +83,11 @@ IMPLEMENT_INSTRUCTIONS = '''
 COMMON ARCO PITFALLS — use these facts before searching references:
 - Layout grid: import { Grid } from '@arco-design/web-react'; use Grid.Row/Grid.Col.
   Row and Col are not top-level exports. Update imports AND every JSX usage together.
-- Select is a composite control. Supply aria-label with the original field label on
-  Select itself (e.g. aria-label="所属商品"); Form.Item text alone may not label its trigger.
+- Select is a composite control. Reuse selectAriaLabel(sourceLabel) from the supplied
+  frontend/src/components/accessibility.tsx on Select itself. Do not label both outer
+  combobox and internal input via another label/htmlFor association. Reuse requiredLabel
+  for visible required marks without changing accessible names. Test by the unique
+  getByRole('combobox', {name: sourceLabel, exact:true}); Form.Item text alone may not name it.
 - Drawer uses visible/onCancel/footer; check its exact API before borrowing Modal-only props.
 - Make coherent, focused edit batches. When changing imports, update all matching uses.
 
