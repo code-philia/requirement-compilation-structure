@@ -13,6 +13,7 @@ DEFAULT_STACK = "react-express-sqlite"
 # database/backend stacks also need matching lowering adapters in steps 05/08.
 STACKS = {
     DEFAULT_STACK: {
+        "build_directories": ("backend/dist", "frontend/dist"),
         "templates": Path(__file__).with_name("templates"),
         "directories": ("backend/src/db/tables", "backend/src/db/seeds"),
     },

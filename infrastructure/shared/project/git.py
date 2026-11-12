@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
+from uuid import uuid4
 
 
 IGNORE_RULES = (
@@ -128,6 +130,56 @@ def initialize_repository(output):
 
 
 _checkpoint_lock = RLock()
+
+
+def rollback_before_stage(output: Path, previous_stage: str):
+    """Restore an output-local successful pass, backing up the current committed head.
+
+    Called only for an explicitly selected debug stage, before opening logs or
+    writing run metadata. Dirty worktrees are never discarded automatically.
+    Ignored runtime data, logs, credentials and dependencies are not rolled back.
+    """
+    from infrastructure.shared.project.initialize import DEFAULT_STACK, STACKS
+
+    repository = GitRepository(output)
+    repository.require_root()
+    if repository.run("symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.strip() != "main":
+        raise GitError("Stage rollback requires the output repository's main branch")
+    if repository.status().strip():
+        raise GitError("Output has uncommitted or untracked files; commit or move them before stage rollback")
+    prefix = f"[{previous_stage}] stage report: Publish pass result ("
+    revision = None
+    for record in repository.run("log", "--format=%H%x09%s").stdout.splitlines():
+        commit, title = record.split("\t", 1)
+        if title.startswith(prefix):
+            status = title[len(prefix):].removesuffix(")")
+            if status != "GREEN":
+                raise GitError(f"Latest checkpoint of {previous_stage} is {status}; repair that stage first")
+            revision = commit
+            break
+    if revision is None:
+        raise GitError(f"No completed checkpoint for {previous_stage}; run the preceding stages first")
+    build_directories = STACKS[DEFAULT_STACK]["build_directories"]
+    for relative in build_directories:
+        target = repository.directory / relative
+        if not target.resolve().is_relative_to(repository.directory):
+            raise GitError(f"Build output escapes output directory: {relative}")
+        if repository.run("ls-tree", "-r", "--name-only", revision, "--", relative).stdout.strip():
+            raise GitError(f"Build output contains tracked files at checkpoint: {relative}")
+    backup = "before-rollback-" + uuid4().hex[:12]
+    repository.run("branch", backup, "HEAD")
+    repository.run("reset", "--hard", revision)
+    for relative in build_directories:
+        target = repository.directory / relative
+        if target.is_symlink():
+            target.unlink()
+        elif target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+    print(f"[GIT] Restored {previous_stage} at {revision[:8]}; previous HEAD saved as {backup}", flush=True)
+    print("[BUILD] Cleared backend/frontend build outputs; dependencies, runtime data and logs retained", flush=True)
+    return {"revision": revision, "backup_branch": backup, "previous_stage": previous_stage}
 
 
 def _serialized_checkpoint(function):

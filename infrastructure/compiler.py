@@ -13,7 +13,7 @@ from infrastructure.pipeline.frontend_joint import design_frontend_joint, implem
 from infrastructure.utils.presentation.console import show_panel
 from infrastructure.utils.presentation.logging import console_log
 from infrastructure.utils.files import save_json
-from infrastructure.shared.project.git import checkpoint
+from infrastructure.shared.project.git import checkpoint, rollback_before_stage
 from infrastructure.utils.presentation.events import begin_run, finish_run, begin_stage, finish_stage, timestamp
 
 
@@ -130,18 +130,27 @@ class Compiler:
         show_panel('[BLOCKED] ' + stage, '\n'.join(missing) + '\nContinuing independent planning/tasks.', tone='waiting')
         return result
 
-    def compile(self, stage: str | None = None) -> Path:
-        """Execute every pass, or only the selected pass using existing artifacts."""
+    def compile(self, stage: str | None = None, *, from_stage: str | None = None) -> Path:
+        """Run selected passes after restoring their previous successful checkpoint."""
         passes = PIPELINE
-        if stage is not None:
-            if stage not in STAGE_MAP:
-                raise ValueError(f"Unknown stage: {stage}")
-            passes = (STAGE_MAP[stage],)
+        if stage is not None and from_stage is not None:
+            raise ValueError("stage and from_stage are mutually exclusive")
+        selected = stage if stage is not None else from_stage
+        restored = None
+        if selected is not None:
+            if selected not in STAGE_MAP:
+                raise ValueError(f"Unknown stage: {selected}")
+            names = [name for name, _, _ in PIPELINE]
+            index = names.index(selected)
+            if index > 0:
+                restored = rollback_before_stage(self.output_dir, names[index - 1])
+            passes = (STAGE_MAP[selected],) if stage is not None else PIPELINE[index:]
         self.artifacts.clear()
         self.report = {"status": "RUNNING", "stages": {}}
         show_panel("Requirement compiler | Pipeline",
             f"Input: {self.input_dir}\nOutput: {self.output_dir}\nPasses: {len(passes)}\nDetailed model logs: {'enabled' if self.model_log else 'disabled'}")
-        run_token, run_id = begin_run(self.output_dir, self.input_dir, stage)
+        run_token, run_id = begin_run(self.output_dir, self.input_dir, selected)
+        self.report["selection"] = {"stage": stage, "from_stage": from_stage, "restored": restored}
         self.report.update(run_id=run_id, started_at=timestamp())
         try:
             for name, function, artifact in passes:
@@ -195,8 +204,6 @@ class Compiler:
             self.report['repair_queue'] = '.arc/repair_queue.json'
             self.report["status"] = "COMPLETED_WITH_FAILURES" if incomplete else "GREEN"
             save_json(self.arc_dir / "compilation.json", self.report)
-            checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
-                status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete})
             show_panel("[DONE] Requirement compilation | " + self.report["status"],
                 f"Application: {self.output_dir}\nReport: {self.arc_dir / 'compilation.json'}"
                 + ("\nIncomplete stages: " + ", ".join(incomplete) if incomplete else ""),
@@ -208,3 +215,11 @@ class Compiler:
         finally:
             self.report.update(finish_run(run_token, self.report["status"]))
             save_json(self.arc_dir / "compilation.json", self.report)
+            # Commit only after all final metadata is written, on every exit path.
+            # Otherwise finished_at/duration leave a dirty report that blocks the
+            # next stage's checkpoint restore.
+            incomplete = [name for name, result in self.report["stages"].items()
+                if result["status"] in {"FAILED", "COMPLETED_WITH_FAILURES", "BLOCKED", "INTERRUPTED"}]
+            checkpoint(self.output_dir, stage="compiler", task="pipeline", action="Publish final compilation report",
+                status=self.report["status"], details={"stages": self.report["stages"], "incomplete_stages": incomplete,
+                    "finished_at": self.report.get("finished_at")})
