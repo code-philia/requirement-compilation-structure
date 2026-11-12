@@ -47,11 +47,16 @@ for required values/PKs. Exact decimals can use type=string, sqlite_type=TEXT wi
 explicit exact-arithmetic constraint; do not invent precision or silently use floats.
 Use actual SQLite storage types where helpful. JSON/list checks must be SQLite scalar
 checks; cross-row rules belong to application code. Do not store UI-only state.
-Compiler-owned platform entities are supplied when needed. Reuse their identity,
-session, organization, role and ownership symbols, never create duplicate infrastructure
-or change protected platform fields. Business schema may reference these tables.
-When authorization_resources is supplied, keep those source resource IDs as canonical
-table names with a single technical primary key so the current runtime can bind them.
+There are NO preset user, role, organization, session, ownership, audit or platform tables.
+Infer whether each responsibility needs persisted data from the ER and current requirement
+evidence. user_ref/unit_ref imply a relationship to identify and model, not permission to
+inject a fixed platform schema. Create the smallest coherent source-required definitions.
+Use the source authorization catalog as evidence for user types, roles and relationships,
+not a mandatory table layout. A role is not automatically a separate user table or a public
+registration choice. Do not invent administrators, user types, default accounts, sessions,
+audit tables or credentials unless required. No fixed table names, account columns, UUID
+strategy or tenancy architecture are imposed. Preserve source terminology and record any
+necessary canonical-name bindings in source_refs. Write a specific description per entity.
 Gather enough evidence then publish definitions promptly. Batch independent reads and
 updates; do not repeatedly retrieve already supplied definitions. Native tools only.
 """
@@ -74,8 +79,9 @@ Requirement sets cover all its own step sets and additional behavior in its desc
 For a materialized aggregate initially absent, creation keys/required fields are possible
 writes; do not assume scenario fixtures or future data are system startup seeds.
 Acceptance-only DB inspections can go into observation_read, not business read.
-Infrastructure-managed audit/idempotency/ownership writes need not be charged as extra
-business effects; source-required assignee/state/ledger changes are genuine effects.
+Do not assume an external platform supplies identity, audit, idempotency or ownership.
+Include their persistent reads/writes when the current source behavior requires them;
+source-required assignee/state/ledger changes are genuine effects.
 Use exact canonical Entity.field symbols. Candidate retrieval is a hint, not a whitelist.
 If the schema cannot express the behavior, REPAIR it with upsert_entity before submission.
 Preserve earlier obligations and unrelated definitions. Do not fake empty obligations
@@ -194,13 +200,9 @@ class DatabaseDesignAgent(BaseAgent):
                 raise ValueError(f"{name}.{key}.references must be Entity.field or null")
             if field["primary_key"]:
                 field["nullable"] = False
-            if current.get("origin") == "backend_platform" and key in current["fields"] and current["fields"][key] != field:
-                raise ValueError(f"{name}.{key} is compiler-owned; use its supplied definition")
             updated["fields"][key] = field
         if "unique_constraints" in entity:
             groups = entity["unique_constraints"]
-            if current.get("origin") == "backend_platform":
-                groups = [*current.get("unique_constraints", []), *groups]
             updated["unique_constraints"] = list({tuple(group): group for group in groups}.values())
         updated["source_refs"] = sorted(set(updated.get("source_refs", [])) | set(source_refs))
         self.schema["entities"][name] = updated
@@ -251,9 +253,17 @@ class DatabaseDesignAgent(BaseAgent):
         self.start(input)
         for _ in range(max_turns):
             try:
-                message = self.step(tool_choice="required")
+                # Thinking mode supports native tools with auto selection, but
+                # rejects forced tool_choice=required. Completion remains explicit.
+                message = self.step(tool_choice="auto")
             except (ValueError, IncompleteModelStreamError) as error:
                 self.messages.append({"role": "user", "content": str(error) + " Return a smaller complete native tool batch."})
+                continue
+            if not message.tool_calls:
+                completion_tool = "finish_schema" if self.mode == "er" else "submit_obligations"
+                self.messages.append({"role": "user", "content":
+                    f"The task is not complete. Use the native tools to perform the work, "
+                    f"then call {completion_tool}. A text-only answer does not submit a result."})
                 continue
             results = self.execute_tools(message)
             if self.completed is not None and all(json.loads(item["content"])["ok"] for item in results):

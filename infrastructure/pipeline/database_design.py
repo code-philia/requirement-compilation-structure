@@ -37,18 +37,16 @@ def build_er_schema(input_dir, arc_dir, pause=False, max_turns=40):
     sources = er_sources(input_dir)
     previous_path = arc_dir / "db_schema.json"
     previous = read_artifact(arc_dir, previous_path.name) if previous_path.is_file() else {}
-    reusable = previous.get("er_design", {}).get("source_sha256") == source_fingerprint(sources)
+    reusable = (previous.get("er_design", {}).get("source_sha256") == source_fingerprint(sources)
+        and previous.get("er_design", {}).get("identity_model") == "source_driven")
     schema = {"entities": {}, "requirements": {}, "decisions": [],
-        "er_design": {"mode": "agent", "source_sha256": source_fingerprint(sources),
+        "er_design": {"mode": "agent", "identity_model": "source_driven", "source_sha256": source_fingerprint(sources),
             "sources": list(sources), "status": "BUILDING"}}
     if reusable:
         schema = previous
     from infrastructure.stages.backend.evidence import compile_evidence
     evidence = compile_evidence(read_artifact(arc_dir, "requirements.json"), input_dir)
     save_json(arc_dir / "backend_evidence.json", evidence)
-    if evidence["enabled"]:
-        from infrastructure.stages.backend.foundation import add_platform_schema
-        schema = add_platform_schema(schema)
     save_json(arc_dir / "db_schema.json", schema)
     console = DemoConsole(pause)
     if reusable and schema["er_design"].get("status") == "GREEN" and not schema_issues(schema):
@@ -56,10 +54,8 @@ def build_er_schema(input_dir, arc_dir, pause=False, max_turns=40):
         return schema
     console.show("ER schema | Logical design", "Read ER evidence; create definitions with native tools, without SQL or per-requirement calls.")
     agent = DatabaseDesignAgent(schema, sources, persist=lambda: save_json(arc_dir / "db_schema.json", schema))
-    result = agent.run({"task": "Read the complete ER source, resolve conflicts and construct the initial canonical schema.",
-        "authorization_resources": evidence.get("authorization", {}).get("catalog", {}).get("resources", []) if evidence.get("authorization") else [],
-        "platform_entities": {name: entity for name, entity in schema["entities"].items()
-            if entity.get("origin") == "backend_platform"}}, max_turns=max_turns)
+    result = agent.run({"task": "Read the complete ER source, resolve conflicts and construct the initial canonical schema. No identity tables or user types are preset.",
+        "source_authorization_catalog": evidence.get("authorization", {}).get("catalog", {}) if evidence.get("authorization") else {}}, max_turns=max_turns)
     schema["er_design"].update(status="GREEN", summary=result["summary"])
     save_json(arc_dir / "db_schema.json", schema)
     checkpoint(arc_dir.parent, task="ER schema", action="Publish agent-designed logical schema", status="GREEN",
@@ -71,11 +67,13 @@ def refine_database(input_dir, arc_dir, pause=False, max_turns=16):
     """Every node gets own effects; schema repairs and obligations are published together."""
     sources = er_sources(input_dir)
     schema = read_artifact(arc_dir, "db_schema.json")
+    if schema.get("er_design", {}).get("identity_model") != "source_driven":
+        raise ValueError("Rerun 02_build_db_schema to replace the legacy preset identity schema with source-driven design")
     if schema.get("er_design", {}).get("source_sha256") != source_fingerprint(sources):
         raise ValueError("ER source changed; rerun 02_build_db_schema before requirement analysis")
     raw = read_artifact(arc_dir, "requirements.json")
     tree = RequirementTree(raw)
-    signature = source_fingerprint({"requirements": raw, "er": sources})
+    signature = source_fingerprint({"requirements": raw, "er": sources, "identity_model": "source_driven"})
     progress_path, obligations_path = arc_dir / "db_analysis.json", arc_dir / "db_obligations.json"
     previous = read_artifact(arc_dir, progress_path.name) if progress_path.is_file() else {}
     reusable = previous.get("source_sha256") == signature and previous.get("schema_sha256") == source_fingerprint(schema["entities"])
