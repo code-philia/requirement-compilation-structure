@@ -2,11 +2,9 @@
 
 import json
 import os
-from pathlib import Path
-
-from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 from infrastructure.utils.presentation.model_io import http_client, invoke
+from infrastructure.shared.models.environment import load_model_environment, endpoint_model_name
 
 
 DEFAULT_MODEL = "deepseek-flash"
@@ -52,11 +50,11 @@ class TextModel:
     """Transport for structured stage proposals and file-edit responses."""
     def __init__(self, *, model_name: str | None = None, json_mode: bool = True) -> None:
         """Read compiler/.env and configure the default text model; require API credentials."""
-        load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
-        self.name = model_name or os.getenv("MODEL") or DEFAULT_MODEL
-        api_key = os.getenv("OPENAI_API_KEY")
+        load_model_environment()
+        self.name = endpoint_model_name(model_name or os.getenv("MODEL") or os.getenv("LLM_MODEL") or DEFAULT_MODEL)
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
         if not api_key:
-            raise ValueError("Set OPENAI_API_KEY in compiler/.env")
+            raise ValueError("Set OPENAI_API_KEY or LLM_API_KEY in the environment, compiler/.env or workspace .env")
         try:
             self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "320000"))
         except ValueError as error:
@@ -71,7 +69,7 @@ class TextModel:
         self._token_parameter = "max_completion_tokens"
         self.client = OpenAI(
             api_key=api_key,
-            base_url=os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+            base_url=os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL") or "https://api.openai.com/v1",
             timeout=600, max_retries=2,
             http_client=http_client(),
         )
