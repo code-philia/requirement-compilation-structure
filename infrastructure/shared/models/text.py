@@ -50,10 +50,10 @@ def reasoning_arguments(name, mode):
 
 class TextModel:
     """Transport for structured stage proposals and file-edit responses."""
-    def __init__(self, *, json_mode: bool = True) -> None:
+    def __init__(self, *, model_name: str | None = None, json_mode: bool = True) -> None:
         """Read compiler/.env and configure the default text model; require API credentials."""
         load_dotenv(Path(__file__).resolve().parents[3] / ".env", encoding="utf-8-sig")
-        self.name = os.getenv("MODEL") or DEFAULT_MODEL
+        self.name = model_name or os.getenv("MODEL") or DEFAULT_MODEL
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("Set OPENAI_API_KEY in compiler/.env")
@@ -84,7 +84,8 @@ class TextModel:
                 options.pop("reasoning_effort", None)
                 options.pop("extra_body", None)
             try:
-                return invoke(self.client, {**options, self._token_parameter: self.max_output_tokens})
+                return invoke(self.client, {**options, self._token_parameter: self.max_output_tokens},
+                    logger=getattr(self, "logger", None))
             except OpenAIError as error:
                 message = str(error).lower()
                 rejected = getattr(error, "status_code", None) in {400, 422} and any(
@@ -97,6 +98,39 @@ class TextModel:
                     print("Provider rejected reasoning controls; using provider defaults.", flush=True)
                     continue
                 raise
+
+    def chat(self, messages: list[dict], *, tools: list[dict] | None = None,
+            tool_choice: str | dict = "auto"):
+        """Return a complete native assistant message, without the legacy JSON protocol.
+
+        Callers own message history and execution. Never execute partial tool arguments
+        after truncation. Configuration, transport auditing and provider compatibility
+        remain shared with existing stages.
+        """
+        options = {"model": self.name, "messages": messages,
+            **reasoning_arguments(self.name, self.reasoning)}
+        if tools:
+            options.update(tools=tools, tool_choice=tool_choice)
+        try:
+            response = self._request(**options)
+        except OpenAIError as error:
+            raise RuntimeError(f"Text model request failed: {error}") from error
+        if not response.choices:
+            raise ModelProtocolError("Text model returned no choices")
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            raise ModelProtocolError(
+                f"Model output was truncated (finish_reason=length); configured output budget "
+                f"is {self.max_output_tokens} tokens including reasoning. No tool calls executed. "
+                "Request a smaller complete edit batch or adjust MAX_OUTPUT_TOKENS.")
+        message = choice.message
+        if getattr(message, "refusal", None):
+            raise ModelProtocolError(f"Text model refused the request: {message.refusal}")
+        if choice.finish_reason not in {"stop", "tool_calls"}:
+            raise ModelProtocolError(f"Unexpected model finish_reason: {choice.finish_reason}")
+        if not message.tool_calls and not (message.content or "").strip():
+            raise ModelProtocolError("Text model returned neither content nor native tool calls")
+        return message
 
     def generate_json(self, instructions: str, payload: dict) -> dict:
         """Recover once from endpoints incompatible with JSON response mode."""
