@@ -1,167 +1,178 @@
-"""Step 04: implement tables, per-table prerequisite inserts and real initialization."""
+"""Stage 04: lower the completed schema to SQL, seed explicit data and initialize."""
 
+import hashlib
 import json
 from pathlib import Path
 
 from infrastructure.stages.database.order import implementation_groups, table_dependencies
 from infrastructure.stages.database.runtime import initializer_source
-from infrastructure.stages.database.er import validate_imported_schema
+from infrastructure.stages.database.file_agent import DatabaseImplementationAgent
 from infrastructure.stages.backend.platform_files import wire_initializer
 from infrastructure.shared.models.text import TextModel
 from infrastructure.utils.presentation.console import DemoConsole
-from infrastructure.utils.presentation.formatting import format_schema
-from infrastructure.stages.database.file_agent import run_database_agent
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.agent.tasks import TaskFailures
-from infrastructure.utils.files import save_text
+from infrastructure.utils.files import read_source, save_json, save_text
 from infrastructure.shared.project.git import checkpoint
 from infrastructure.stages.database.implementation import implement_startup_data, verify_database_runtime
-from infrastructure.utils.files import read_source
 
 
-# --- Extension point 04A: SQL lowering policy ---------------------------------
-# The model writes DDL through the shared edit_file tool at the supplied table path.
-# The real initializer and compiled startup are checked and repaired in this pass.
-INSTRUCTIONS = """Implement entity as SQLite DDL for the compiler-selected output_path.
-Use edit_file to create output_path under backend/src/db/tables, or replace exact
-existing SQL when rerunning. This task owns this one fixed SQL path. Read the supplied
-related SQL first; use read_file only for missing relevant evidence. The compiler adapts
-an unambiguous misplaced creation to output_path and reports the actual path.
+INSTRUCTIONS = """Implement the supplied COMPLETE canonical db schema as SQLite DDL.
+This is implementation, not another design pass. The task supplies a dependency-ordered
+batch of tables and external FK target definitions. Implement ALL tables in this batch,
+using each exact output_paths entry. Several native edit_file calls can be returned in
+ONE response, followed by finish_implementation in that same response.
 
-Honor entity.unique_constraints as table-level composite UNIQUE constraints.
-Create the current entity with CREATE TABLE IF NOT EXISTS, preserving its entity and
-field names and quoting identifiers with double quotes. Implement the supplied keys,
-nullability, uniqueness, references and SQLite-enforceable value constraints.
-Map string/uuid/date/datetime/json to TEXT, integer/boolean to INTEGER, number to REAL.
-When a field supplies sqlite_type, preserve that storage type. In particular,
-source_type=decimal with sqlite_type=TEXT is exact decimal text, not REAL.
-The supplied schema is the design contract, including imported ER designs: implement
-it without renaming, adding, dropping or redesigning tables/fields. Preserve every
-entity.unique_constraints column group as a table-level UNIQUE constraint. Multiple
-primary_key fields form one composite PRIMARY KEY, not several column primary keys.
-Use explicit NOT NULL when nullable=false. SQLite INTEGER PRIMARY KEY can generate
-its value; application code supplies other generated values unless schema evidence
-specifies otherwise. Do not invent defaults, normalization, cascades or uniqueness.
+Create each table with CREATE TABLE IF NOT EXISTS; quote table and field identifiers.
+Preserve exact names, types, keys, nullability, uniqueness, references and supported
+constraints. Honor sqlite_type when present; otherwise string/uuid/date/datetime/json
+map to TEXT, integer/boolean to INTEGER, number to REAL. Exact decimal text stays TEXT.
+Multiple primary_key fields form ONE composite PRIMARY KEY. Use explicit NOT NULL for
+nullable=false, including non-integer primary keys. Preserve entity.unique_constraints.
+Do not invent defaults, normalization, cascades, business columns or preset identity
+infrastructure. Any account/role/session table is just its actual supplied definition.
 
-Use CHECK for enforceable constraints such as boolean 0/1 or enumerations. Describe
-application-only rules such as password hashing in comments instead of inventing SQL
-checks. SQLite CHECK expressions must not contain subqueries, SELECT, EXISTS,
-aggregates or window functions. For JSON arrays, use scalar checks such as
-json_valid(field) and json_type(field) = 'array'; validate array element types in
-application code, not with json_each subqueries inside CHECK. Keep constraints
-requiring multi-row or cross-table inspection in application code.
-This task creates one table, without extra tables, data mutations or application startup code.
-referenced_tables provides target definitions and available SQL. A null implementation
-means the target has not been generated yet; SQLite forward references can express
-self-references and cycles. The initializer enables foreign keys and runs the ordered
-SQL files in a transaction. Preserve existing data through IF NOT EXISTS.
+Implement enforceable scalar rules as CHECKs. SQLite CHECK cannot contain subqueries,
+SELECT/EXISTS, aggregates or window functions. JSON validation uses scalar json_valid
+and json_type; array-element, cross-row and application-only rules stay in application
+code, with a short SQL comment explaining them. Forward FKs and cyclic groups are valid.
+Never put INSERTs, application code, PRAGMA settings or transaction control in table SQL.
+The host owns ordered loaders, transactions and foreign-key activation.
+
+All relevant current SQL is supplied. Batch only missing reads. Use local replacements
+when rerunning and preserve existing data. Do not touch schema artifacts or unrelated
+application code. A local SQL execution failure is repair feedback, not a reason to
+abandon the batch. finish_implementation checks the actual DDL in a disposable SQLite
+connection; full application initialization follows after all batches and seed SQL.
 """
 
 
-def implement_db(arc_dir: Path, pause: bool = False, max_attempts: int = 10, max_turns: int = 10) -> dict:
-    if max_turns < 1:
-        raise ValueError("--max-turns must be positive")
-    source = arc_dir / "db_schema.json"
-    if not source.is_file():
-        raise ValueError("Run 02_build_db_schema and 03_infer_db_obligations before SQL implementation")
-    output_dir = arc_dir.parent.resolve()
-    for required in ("backend/package.json", "backend/src/db/client.ts", "backend/src/db/initialize.ts"):
-        if not (output_dir / required).is_file():
-            raise ValueError("Run main.py --stage 00 first to initialize the project structure")
-    schema = json.loads(source.read_text(encoding="utf-8-sig"))
-    if schema.get("er_import"):
-        validate_imported_schema(arc_dir, schema)
+def signature(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def table_batches(schema, max_tables=6, max_fields=100):
+    """Pack dependency components without splitting a cycle or assuming domain names."""
+    result, batch, fields = [], [], 0
+    for group in implementation_groups(schema):
+        count = sum(len(schema['entities'][name]['fields']) for name in group)
+        if batch and (len(batch) + len(group) > max_tables or fields + count > max_fields):
+            result.append(batch)
+            batch, fields = [], 0
+        batch.extend(group)
+        fields += count
+    if batch:
+        result.append(batch)
+    return result
+
+
+def inspect_ddl(output, schema, names):
+    """Execute only DDL in memory to give the agent immediate, table-specific feedback."""
+    import sqlite3
+    connection = sqlite3.connect(':memory:')
+    try:
+        for name in names:
+            relative = f'backend/src/db/tables/{name}.sql'
+            path = output / relative
+            if not path.is_file() or not read_source(path).strip():
+                raise ValueError(f'Missing nonempty SQL file: {relative}')
+            try:
+                connection.executescript(read_source(path))
+                quoted = '"' + name.replace('"', '""') + '"'
+                columns = {row[1]: row for row in connection.execute(f'PRAGMA table_info({quoted})')}
+                expected = schema['entities'][name]['fields']
+                missing = sorted(set(expected) - set(columns))
+                extra = sorted(set(columns) - set(expected))
+                if missing or extra or not columns:
+                    raise ValueError(f'{name}: columns differ from schema; missing={missing}, extra={extra}')
+                for field, definition in expected.items():
+                    row = columns[field]
+                    if bool(row[5]) != bool(definition['primary_key']):
+                        raise ValueError(f'{name}.{field}: primary key differs from schema')
+            except (sqlite3.Error, ValueError) as error:
+                raise ValueError(f'{relative}: {error}') from error
+    finally:
+        connection.close()
+    return {'status': 'GENERATED', 'tables': names, 'check': 'DDL executed in memory'}
+
+
+def implement_db(arc_dir: Path, pause=False, max_attempts=10, max_turns=10):
+    schema_path = arc_dir / 'db_schema.json'
+    if not schema_path.is_file():
+        raise ValueError('Run 02_build_db_schema and 03_infer_db_obligations before SQL implementation')
+    output = arc_dir.parent.resolve()
+    schema = json.loads(read_source(schema_path))
     console = DemoConsole(pause)
-    # --- Extension point 04B: dependency-aware table implementation -----------
-    # Referenced tables precede dependents. Cyclic groups use forward references;
-    # available implementations and unresolved target definitions remain explicit.
-    groups = implementation_groups(schema)
-    order = [name for group in groups for name in group]
     dependencies = table_dependencies(schema)
-    print("Table implementation order: " + (" -> ".join(order) or "(No tables.)"), flush=True)
-    model = TextModel() if order else None
-    implementations = {}
-    failures = TaskFailures(arc_dir, "04_implement_db", console)
-    for group in groups:
-        for name in group:
-            with failures.task(name):
-                entity = schema["entities"][name]
-                label = f"{len(implementations) + 1}/{len(order)} {name}"
-                cycle = len(group) > 1 or name in dependencies[name]
-                console.show(f"{label} | 1. Table and dependency plan", (
-                    "Order: " + " -> ".join(order)
-                    + "\nReferences: " + (", ".join(dependencies[name]) or "(none)")
-                    + ("\nCyclic group (SQLite forward references): " + ", ".join(group) if cycle else "")
-                    + "\n\n" + format_schema({name: entity})
-                ))
-                referenced = {
-                    target: {"schema": schema["entities"][target], "implementation": implementations.get(target)}
-                    for target in dependencies[name]
-                }
-                console.show(f"{label} | 2. Referenced table implementations", (
-                    "\n\n".join(
-                        f"{target}:\n" + (item["implementation"]["path"] + "\n" + item["implementation"]["content"]
-                        if item["implementation"] else "Not implemented yet; target schema is supplied for the forward reference.\n" + format_schema({target: item["schema"]}))
-                        for target, item in referenced.items()
-                    ) or "(No referenced tables.)"
-                ))
-                # --- Extension point 04C: generation context and correction -------
-                expected_path = f"backend/src/db/tables/{name}.sql"
-                request = {
-                    "entity_name": name, "entity": entity, "output_path": expected_path,
-                    "referenced_tables": {target: {**record, "implementation":
-                        {"path": record["implementation"]["path"]} if record["implementation"] else None}
-                        for target, record in referenced.items()},
-                }
-                related_files = [f"backend/src/db/tables/{target}.sql" for target in dependencies[name]
-                    if (output_dir / f"backend/src/db/tables/{target}.sql").is_file()]
-                requirement_ids = [rid for rid, fields in schema["requirements"].items()
-                    if any(field.split(".", 1)[0] == name for field in fields)]
-                tools = FileTools(output_dir, ["backend/src/db/tables"], requirements=requirement_ids,
-                    stage="database", files=[expected_path, *related_files], writable=[expected_path],
-                    readable=[f"backend/src/db/tables/{entity}.sql" for entity in order])
+    batches = table_batches(schema)
+    order = [name for batch in batches for name in batch]
+    paths = {name: f'backend/src/db/tables/{name}.sql' for name in order}
+    report_path = arc_dir / 'db_implementations.json'
+    previous = json.loads(read_source(report_path)) if report_path.is_file() else {}
+    report = {'status': 'IMPLEMENTING', 'schema_sha256': signature(schema['entities']),
+        'order': order, 'tables': {}, 'batches': []}
+    failures = TaskFailures(arc_dir, '04_implement_db', console)
+    model = TextModel(json_mode=False)
+    for index, names in enumerate(batches, 1):
+        label = f'batch {index}/{len(batches)}: ' + ', '.join(names)
+        entry = {'tables': names, 'status': 'RUNNING'}
+        report['batches'].append(entry)
+        with failures.task(label):
+            referenced = set().union(*(set(dependencies[name]) for name in names)) - set(names)
+            definitions = {name: schema['entities'][name] for name in names}
+            inputs = signature({'tables': definitions,
+                'references': {name: schema['entities'][name] for name in referenced}})
+            reused = all(previous.get('tables', {}).get(name, {}).get('input_sha256') == inputs
+                and (output / paths[name]).is_file()
+                and previous['tables'][name].get('sql_sha256') == signature(read_source(output / paths[name]))
+                for name in names)
+            if reused:
+                console.show('Database SQL | Reuse', label)
+            else:
+                requirements = [rid for rid, fields in schema.get('requirements', {}).items()
+                    if any(symbol.split('.', 1)[0] in names for symbol in fields)]
+                files = FileTools(output, ['backend/src/db/tables'], requirements=requirements,
+                    stage='database', files=[paths[name] for name in [*names, *sorted(referenced)]],
+                    writable=[paths[name] for name in names], readable=list(paths.values()))
+                task = {'tables': definitions, 'output_paths': {name: paths[name] for name in names},
+                    'referenced_tables': {name: schema['entities'][name] for name in referenced},
+                    'dependency_order': names,
+                    'schema_decisions': [decision for decision in schema.get('decisions', []) if decision.get('entity') in names]}
+                DatabaseImplementationAgent('tables', INSTRUCTIONS, files,
+                    lambda: inspect_ddl(output, schema, names), model=model).run(
+                        task, max_turns=max_attempts, console=console, label=label)
+            entry['status'] = 'GREEN'
+            for name in names:
+                report['tables'][name] = {'path': paths[name], 'status': 'GREEN',
+                    'input_sha256': inputs, 'sql_sha256': signature(read_source(output / paths[name]))}
+            checkpoint(output, stage='04', task=label, action='Publish schema SQL batch', status='GREEN')
+        if failures.report['tasks'][label]['status'] == 'FAILED':
+            entry.update(failures.report['tasks'][label])
+        save_json(report_path, report)
 
-                def generated_table():
-                    if not (output_dir / expected_path).is_file():
-                        raise ValueError("Create the current SQL output_path with edit_file")
-                    return {"path": expected_path, "status": "GENERATED"}
-
-                run_database_agent(model, INSTRUCTIONS, request, tools, generated_table,
-                    max_attempts, console, f"SQL implementation {name}")
-                content = read_source(output_dir / expected_path)
-                proposal = {"path": expected_path, "content": content}
-                target = output_dir / expected_path
-                implementations[name] = proposal
-                console.show(f"{label} | 4. Table implementation saved", (
-                    f"{target}\n\nSQL proposal saved. This pass checks real initialization and startup next."
-                    + "\nValue CHECK constraints and application-only rules remain available for semantic review."
-                ))
-    # --- Pass boundary: wire candidates, then execute and repair them ----------
-    # The executable loader is the order registry; no extra manifest is retained.
-    initializer = output_dir / "backend/src/db/initialize.ts"
-    if not initializer.resolve().is_relative_to(output_dir):
-        raise ValueError("DB initializer path escapes the output directory")
-    # Runtime repair must see every expected table, including failed first attempts.
-    expected_tables = {name: {"path": f"backend/src/db/tables/{name}.sql"} for name in order}
-    save_text(initializer, initializer_source(expected_tables))
-    if (output_dir / "backend/src/platform/bootstrap.ts").is_file():
+    # Every expected table stays in the loader even after a failed first generation,
+    # so final repair can create it instead of accidentally declaring partial success.
+    initializer = output / 'backend/src/db/initialize.ts'
+    save_text(initializer, initializer_source({name: {'path': paths[name]} for name in order}))
+    if (output / 'backend/src/platform/bootstrap.ts').is_file():
         wire_initializer(initializer)
-    checkpoint(output_dir, stage="04", task="database initializer", action="Publish ordered SQL initialization",
-        details={"table_order": order, "published_tables": list(implementations)})
-    print(f"Database initialization wired: {initializer}", flush=True)
-    if order:
-        # Resolve explicit source data after DDL; never infer startup rows from hypothetical scenarios.
-        implement_startup_data(arc_dir, schema, model, console, failures, max_attempts)
-    with failures.task("database runtime"):
-        verified = verify_database_runtime(arc_dir, schema, model, console, max_turns)
-        # The runtime owner can repair tables whose initial generation failed.
+    checkpoint(output, stage='04', task='database initializer', action='Publish complete SQL loading order')
+    implement_startup_data(arc_dir, schema, model, console, failures, max_attempts)
+    with failures.task('database runtime'):
+        report['verification'] = verify_database_runtime(arc_dir, schema, model, console, max_turns)
+        # The integration agent may repair earlier SQL or seed publication failures.
+        for label, outcome in list(failures.report['tasks'].items()):
+            if outcome['status'] == 'FAILED':
+                failures.report['tasks'][label] = {'status': 'GREEN', 'recovered_by': 'database runtime repair', 'initial_failure': outcome}
+        for entry in report['batches']:
+            if entry['status'] == 'FAILED':
+                entry.update(status='GREEN', recovered_by='database runtime repair')
         for name in order:
-            relative = f"backend/src/db/tables/{name}.sql"
-            implementations[name] = {"path": relative, "content": read_source(output_dir / relative)}
-            entry = failures.report["tasks"].get(name)
-            if entry and entry["status"] == "FAILED":
-                failures.report["tasks"][name] = {"status": "GREEN", "initial_failure": entry,
-                    "recovered_by": "database runtime repair"}
-        console.show("Database runtime | GREEN", json.dumps(verified, ensure_ascii=False, indent=2))
+            report['tables'].setdefault(name, {'path': paths[name]})
+            report['tables'][name].update(status='GREEN', sql_sha256=signature(read_source(output / paths[name])))
+    report['status'] = 'COMPLETED_WITH_FAILURES' if any(item['status'] == 'FAILED'
+        for item in failures.report['tasks'].values()) else 'GREEN'
+    report['tasks'] = failures.report['tasks']
+    save_json(report_path, report)
     failures.finish()
-    return implementations
+    return report
