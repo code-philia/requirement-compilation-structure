@@ -10,30 +10,32 @@ from infrastructure.shared.project.git import checkpoint
 from infrastructure.utils.presentation.events import task_scope
 
 
-def _snapshot(output):
+def _snapshot(output, extra_paths=()):
     paths = {path.relative_to(output).as_posix()
         for root in ("backend/src", "backend/tests", "frontend/src", "frontend/tests")
         for path in (output / root).rglob("*") if path.is_file() and not path.is_symlink()
         and not any(part in EXCLUDED or part.startswith(".") for part in path.relative_to(output).parts)}
     index = ".arc/requirement_files.json"
+    paths.update(relative for relative in extra_paths if (output/relative).is_file()
+        and not (output/relative).is_symlink() and (output/relative).resolve().is_relative_to(output.resolve()))
     if (output / index).is_file():
         paths.add(index)
     return {path: (output / path).read_bytes() for path in paths}
 
 
 @contextmanager
-def implementation_task(output, entry, console, label):
+def implementation_task(output, entry, console, label, *, extra_paths=()):
     """Archive rejected files, restore the task baseline, and continue on acceptance failure.
 
     Missing prerequisites are checked before this boundary. Disk errors, interrupts,
     and unexpected compiler exceptions propagate; they are not business failures.
     """
     with task_scope(label, entry.get("requirements"), result=entry):
-        before = _snapshot(output)
+        before = _snapshot(output, extra_paths)
         try:
             yield
         except (ValueError, RuntimeError, TypeError, KeyError, AttributeError, IndexError) as error:
-            after = _snapshot(output)
+            after = _snapshot(output, extra_paths)
             changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
             name = re.sub(r"[^\w.-]+", "_", label).strip("._")[:100] or "task"
             directory = output / ".arc/failures" / f"{name}.{uuid4().hex[:8]}"

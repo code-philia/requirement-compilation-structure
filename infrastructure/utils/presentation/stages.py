@@ -18,6 +18,7 @@ STAGES = {
 def stage_label(script: str) -> str:
     """Show the pipeline stage number and its purpose."""
     joint = {
+        "05_build_backend": "Design and implement APIs/modules per requirement with hybrid retrieval",
         "02_build_db_schema": "Build logical schema from ER with native tools",
         "03_infer_db_obligations": "Refine schema and derive requirement read/write obligations",
         "05_design_backend_joint": "Outline backend APIs, shared modules and implementation locations",

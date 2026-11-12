@@ -60,7 +60,7 @@ def read_file(files, path, start_line=1, end_line=None):
     last = min(end_line if end_line is not None else len(lines), len(lines))
     reference = None
     if files.supplied_contents.get(path) == content:
-        reference = f"files[{path}]"
+        reference = getattr(files, 'supplied_content_references', {}).get(path, f"files[{path}]")
     else:
         for excerpt in files.read_files.get(path, []):
             if (excerpt["total_lines"] == len(lines) and excerpt["start_line"] <= start_line

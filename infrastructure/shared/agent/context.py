@@ -51,6 +51,17 @@ def related_files(output, requirements):
                 continue
             for stage in stages:
                 result.update(links.get(rid, {}).get(stage, []))
+    backend_graph = output / '.arc/backend_graph.json'
+    if backend_graph.is_file():
+        from infrastructure.stages.backend.graph import closure, roots
+        graph = read_artifact(output / '.arc', backend_graph.name)
+        for rid in requirements:
+            for record in closure(graph, roots(graph, rid)).values():
+                location = record.get('implementation')
+                if isinstance(location, str):
+                    target = output / location
+                    if target.resolve().is_relative_to(output.resolve()) and target.is_file() and not target.is_symlink():
+                        result.add(location)
     backend_plan = output / '.arc/backend_plan.json'
     module_map = output / '.arc/backend_module_implementation_files.json'
     if backend_plan.is_file() and module_map.is_file():

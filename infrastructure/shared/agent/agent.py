@@ -107,8 +107,7 @@ class BaseAgent:
                 value = handler(**arguments)
                 result = {"ok": True, "result": value}
             except Exception as error:
-                result = {"ok": False, "error": {
-                    "type": type(error).__name__, "message": str(error)}}
+                result = {"ok": False, "error": self.tool_error_feedback(call, error)}
             record = {"role": "tool", "tool_call_id": call.id,
                 "content": json.dumps(result, ensure_ascii=False, default=str)}
             self.messages.append(record)
@@ -116,6 +115,16 @@ class BaseAgent:
             record_tool_execution(call.model_dump(mode="json"),
                 json.loads(record["content"]), logger=self.logger)
         return results
+
+    def tool_error_feedback(self, call, error):
+        """Return local argument diagnostics without echoing a large failed proposal."""
+        result = {"type": type(error).__name__, "message": str(error)}
+        if isinstance(error, json.JSONDecodeError):
+            result.update(tool=call.function.name, line=error.lineno, column=error.colno,
+                near=error.doc[max(0, error.pos-80):error.pos+80],
+                instruction='Retry only this failed call with a smaller valid JSON object. Escape strings correctly. '
+                    'Other successful calls in this batch remain saved; do not resend them.')
+        return result
 
     def run_loop(self, input: dict, *, max_turns: int = 20,
             tool_choice: str | dict = "auto"):
