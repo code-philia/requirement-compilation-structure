@@ -6,10 +6,10 @@ from uuid import uuid4
 from infrastructure.utils.files import save_json
 
 TARGETS = {
-    "schema": "02_design_backend_foundation", "backend_foundation": "02_design_backend_foundation",
-    "obligations": "06_implement_backend_tdd", "backend_api": "05_design_backend_joint",
-    "ui_design": "07_design_frontend_joint", "triggers": "10_implement_frontend_joint",
-    "acceptance": "10_implement_frontend_joint", "validation_data": "04_implement_db",
+    "schema": "02_build_db_schema", "backend_foundation": "05_build_backend",
+    "obligations": "03_infer_db_obligations", "backend_api": "05_build_backend",
+    "ui_design": "06_build_frontend", "triggers": "06_build_frontend",
+    "acceptance": "06_build_frontend", "validation_data": "04_implement_db",
     "input_evidence": "01_explore_requirement", "compiler_runtime": "compiler_maintenance",
 }
 

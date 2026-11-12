@@ -140,6 +140,7 @@ def rollback_before_stage(output: Path, previous_stage: str):
     Ignored runtime data, logs, credentials and dependencies are not rolled back.
     """
     from infrastructure.shared.project.initialize import DEFAULT_STACK, STACKS
+    from infrastructure.pipeline.stages import canonical_stage, CHECKPOINT_NAMES
 
     repository = GitRepository(output)
     repository.require_root()
@@ -147,15 +148,21 @@ def rollback_before_stage(output: Path, previous_stage: str):
         raise GitError("Stage rollback requires the output repository's main branch")
     if repository.status().strip():
         raise GitError("Output has uncommitted or untracked files; commit or move them before stage rollback")
-    prefix = f"[{previous_stage}] stage report: Publish pass result ("
+    previous_stage = canonical_stage(previous_stage)
+    prefixes = {name:f"[{name}] stage report: Publish pass result ("
+        for name in CHECKPOINT_NAMES.get(previous_stage,(previous_stage,))}
     revision = None
+    checkpoint_stage = None
     for record in repository.run("log", "--format=%H%x09%s").stdout.splitlines():
         commit, title = record.split("\t", 1)
-        if title.startswith(prefix):
+        matched = next((name for name,prefix in prefixes.items() if title.startswith(prefix)),None)
+        if matched is not None:
+            prefix = prefixes[matched]
             status = title[len(prefix):].removesuffix(")")
             if status != "GREEN":
                 raise GitError(f"Latest checkpoint of {previous_stage} is {status}; repair that stage first")
             revision = commit
+            checkpoint_stage = matched
             break
     if revision is None:
         raise GitError(f"No completed checkpoint for {previous_stage}; run the preceding stages first")
@@ -179,7 +186,8 @@ def rollback_before_stage(output: Path, previous_stage: str):
             target.unlink()
     print(f"[GIT] Restored {previous_stage} at {revision[:8]}; previous HEAD saved as {backup}", flush=True)
     print("[BUILD] Cleared backend/frontend build outputs; dependencies, runtime data and logs retained", flush=True)
-    return {"revision": revision, "backup_branch": backup, "previous_stage": previous_stage}
+    return {"revision": revision, "backup_branch": backup, "previous_stage": previous_stage,
+        "checkpoint_stage": checkpoint_stage}
 
 
 def _serialized_checkpoint(function):

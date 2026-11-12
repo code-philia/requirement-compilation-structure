@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 from infrastructure.compiler import Compiler, PIPELINE, STAGE_MAP
+from infrastructure.pipeline.stages import canonical_stage
 from infrastructure.utils.cli import resolve_directories
 from infrastructure.utils.presentation.logging import configure_console
 from infrastructure.utils.presentation.stages import stage_label
@@ -25,9 +26,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=3000,
         help="Default generated backend port and frontend API proxy target (default: 3000)")
     stages = parser.add_mutually_exclusive_group()
-    stages.add_argument("--stage", choices=list(STAGE_MAP), metavar="STAGE",
-        help="Restore the previous completed stage checkpoint, clear build outputs, and run only this stage")
-    stages.add_argument("--from-stage", choices=list(STAGE_MAP), metavar="STAGE",
+    stages.add_argument("--stage", type=canonical_stage, choices=list(STAGE_MAP), metavar="STAGE",
+        help="Restore the previous completed stage checkpoint and run this stage; old substage names alias their merged stage")
+    stages.add_argument("--from-stage", type=canonical_stage, choices=list(STAGE_MAP), metavar="STAGE",
         help="Restore the previous completed stage checkpoint, clear build outputs, and run from this stage to the end")
     parser.add_argument("--pause", action="store_true", help="Wait for Enter after each display stage")
     args = parser.parse_args(argv)
