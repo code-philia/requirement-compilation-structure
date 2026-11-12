@@ -104,7 +104,8 @@ def edit_file(files, path, operation, new_content, old_content=""):
         if operation == "replace":
             if not old_content:
                 raise FileToolError("INVALID_ARGUMENTS", "replace requires nonempty exact old_content", path)
-            if current.strip() and old_content.strip() == current.strip():
+            if (current.strip() and old_content.strip() == current.strip()
+                    and path not in getattr(files, 'replaceable_files', set())):
                 old_lines, new_lines = current.splitlines(keepends=True), new_content.splitlines(keepends=True)
                 spans = SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes()
                 retained = sum(i2-i1 for tag,i1,i2,j1,j2 in spans if tag == 'equal')

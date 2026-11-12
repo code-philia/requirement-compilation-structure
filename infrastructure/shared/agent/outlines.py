@@ -119,11 +119,13 @@ callers, NOT an invented HTTP endpoint. Export names and detailed interfaces are
 while implementing. Reuse shared capabilities across requirements via IDs/dependencies;
 only propose useful source-backed modules, no mandatory layered architecture or utility
 catalog. Shared code may own calculations, validation, persistence, business operations,
-policy adapters or workflow orchestration. Do not duplicate fixed authentication,
-transactions, auditing or other platform infrastructure. For integrations/background
+policy adapters or workflow orchestration. Reuse actual existing implementations of
+authentication, transactions and auditing when present; otherwise design source-required
+shared modules. Do not assume a fixed platform exists. For integrations/background
 work, describe real callers/lifecycle only when the source requires them.
 No security/workflow DSL or detailed contracts here. Source evidence is supplied again
-at implementation. Reuse fixed platform identity endpoints.'''
+at implementation. Derive user types and identity endpoints from requirements; do not
+invent preset roles, accounts or registration choices.'''
     else:
         shape = '''ITEM = {"purpose":"page/section and its main actions", "route":"/page/:id",
 "implementation_hint":"frontend/src/...", "api_ids":["existing backend API IDs"]}.
@@ -131,9 +133,9 @@ Describe layout/navigation/forms/important visible states briefly in purpose or 
 Reuse shared shell/pages and source routes when specified. API IDs refer to the actual
 backend inventory. Do not design component trees, props or individual trigger records.
 Use Arco; choose components and callback wiring during implementation.
-When registration is enabled by source/foundation, plan a registration page using the
-fixed frontend/src/auth/RegisterPage.tsx and shared /api/auth/registration-options/register
-endpoints. User type labels/options come from the server; never duplicate role selection.'''
+When source requires registration, plan its page against actual designed backend APIs.
+Derive selectable user types and role bindings from source evidence, not preset roles.
+Reuse existing authentication components/endpoints only when actually supplied.'''
     backend_path = arc_dir / 'backend_endpoints.json'
     backend = read_artifact(arc_dir, backend_path.name) if kind == 'frontend' and backend_path.is_file() else None
     foundation = read_artifact(arc_dir, 'backend_foundation.json')

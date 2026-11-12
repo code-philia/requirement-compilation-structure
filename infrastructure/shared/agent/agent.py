@@ -62,6 +62,7 @@ class BaseAgent:
     def start(self, input: dict) -> list[dict]:
         """Begin a fresh task; a custom run can then call step/execute_tools itself."""
         tools = self.build_tools()
+        tools = [tool for tool in tools if tool.name != "bash"]
         self.tools = {tool.name: tool for tool in tools}
         if len(self.tools) != len(tools):
             raise ValueError("Agent tool names must be unique")

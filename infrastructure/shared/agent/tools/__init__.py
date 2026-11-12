@@ -41,7 +41,7 @@ class FileTools:
             self.reference_roots[prefix] = root
         self.discovery = discovery
         self.tool_registry = {name:entry for name,entry in TOOL_REGISTRY.items()
-            if discovery or name not in {"list_files","search_files"}}
+            if name != "bash" and (discovery or name not in {"list_files","search_files"})}
         if sys.platform != "linux" or not shutil.which("bwrap"):
             self.tool_registry.pop("bash", None)
         self.related_files = set(files) | related_files(self.output, self.requirements)
