@@ -286,7 +286,7 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
     # the response validator and downstream consumers together.
     arc_dir.mkdir(parents=True, exist_ok=True)
     save_text(arc_dir / "requirements.json", text + "\n")
-    checkpoint(arc_dir.parent, stage="01", task="requirements", action="Publish input requirement snapshot",
+    checkpoint(arc_dir.parent, stage="read_requirements", task="requirements", action="Publish input requirement snapshot",
         details={"source": str(source), "image_references": references})
     save_json(arc_dir / "image_references.json", catalog)
     analysis = {}
@@ -347,7 +347,7 @@ def explore_requirement(input_dir: Path, arc_dir: Path, pause: bool = False) -> 
                     analysis_sources = {ref: hashes[ref] for ref in analysis}
                     save_json(arc_dir / "visual_analysis.json", analysis)
                     save_json(arc_dir / "visual_analysis_sources.json", analysis_sources)
-                    checkpoint(arc_dir.parent, stage="01", task=grouped[digest][0],
+                    checkpoint(arc_dir.parent, stage="read_requirements", task=grouped[digest][0],
                         action="Publish visual reference analysis",
                         details={"references": grouped[digest], "analysis": result})
                     console.show(f"3. Visual analysis | {grouped[digest][0]}",

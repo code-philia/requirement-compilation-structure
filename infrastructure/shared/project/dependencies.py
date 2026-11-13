@@ -10,7 +10,7 @@ from infrastructure.utils.processes import npm_command, start_process, stop_proc
 def install_dependencies(output_dir: Path) -> None:
     """Run npm install in the generated workspace, stream its output, and fail on timeout or nonzero exit."""
     if not (output_dir / "package.json").is_file():
-        raise ValueError("Run main.py --stage 00 before installing project dependencies")
+        raise ValueError("Run main.py --stage project_initialization before installing project dependencies")
     command = npm_command()
     print(f"Installing dependencies in {output_dir}: npm install --include=dev --no-audit --no-fund", flush=True)
     with start_process(

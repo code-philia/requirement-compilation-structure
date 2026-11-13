@@ -97,7 +97,7 @@ def prepare_frontend(output: Path) -> None:
     """Prepare build and test infrastructure without generating application behavior."""
     for relative in ("package.json", "frontend/package.json", "frontend/src/main.tsx", "frontend/tsconfig.json", "frontend/vite.config.ts"):
         if not (output / relative).is_file():
-            raise ValueError(f"Missing {relative}; run main.py --stage 00 first")
+            raise ValueError(f"Missing {relative}; run main.py --stage project_initialization first")
     template = Path(__file__).resolve().parents[3] / 'shared/project/templates/frontend/src/auth/RegisterPage.tsx'
     save_text(output / 'frontend/src/auth/RegisterPage.tsx', template.read_text())
     accessibility = template.parents[1] / 'components/accessibility.tsx'

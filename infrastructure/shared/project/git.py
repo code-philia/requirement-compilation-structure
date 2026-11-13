@@ -121,7 +121,7 @@ def initialize_repository(output):
     try:
         repository = GitRepository(output).initialize()
         if repository.run("rev-parse", "--verify", "HEAD", check=False).returncode:
-            checkpoint(output, stage="00", task="repository", action="Initialize output repository",
+            checkpoint(output, stage="project_initialization", task="repository", action="Initialize output repository",
                 status="READY", details={"branch": "main", "scope": "Application sources, designs, tests and reports"})
         return repository
     except (GitError, OSError) as error:

@@ -13,7 +13,7 @@ def design_backend_foundation(input_dir, arc_dir, pause=False, max_attempts=10):
     """
     raw = read_artifact(arc_dir, "requirements.json")
     if not (arc_dir / "db_schema.json").is_file():
-        raise ValueError("Run 02_build_db_schema before backend design")
+        raise ValueError("Run build_db_schema before backend design")
     evidence = compile_evidence(raw, input_dir)
     save_json(arc_dir / "backend_evidence.json", evidence)
     plan = {"enabled": False, "identity_model": "source_driven",

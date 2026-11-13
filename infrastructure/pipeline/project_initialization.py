@@ -17,7 +17,7 @@ def project_initialization(input_dir: Path, output_dir: Path, pause: bool = Fals
         shutil.copytree(input_dir, output_dir, dirs_exist_ok=True, ignore=shutil.ignore_patterns("tests"))
     initialize_repository(output_dir)
     created = initialize_project(output_dir, stack, port)
-    checkpoint(output_dir, stage="00", task="project", action="Publish application scaffold",
+    checkpoint(output_dir, stage="project_initialization", task="project", action="Publish application scaffold",
         details={"stack": stack, "port": port, "created_files": created})
     DemoConsole(pause).show(
         f"Project initialization | {stack}",

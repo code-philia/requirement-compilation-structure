@@ -74,9 +74,9 @@ def refine_database(input_dir, arc_dir, pause=False, max_turns=16):
     sources = er_sources(input_dir)
     schema = read_artifact(arc_dir, "db_schema.json")
     if schema.get("er_design", {}).get("identity_model") != "source_driven":
-        raise ValueError("Rerun 02_build_db_schema to replace the legacy preset identity schema with source-driven design")
+        raise ValueError("Rerun build_db_schema to replace the legacy preset identity schema with source-driven design")
     if schema.get("er_design", {}).get("source_sha256") != source_fingerprint(sources):
-        raise ValueError("ER source changed; rerun 02_build_db_schema before requirement analysis")
+        raise ValueError("ER source changed; rerun build_db_schema before requirement analysis")
     raw = read_artifact(arc_dir, "requirements.json")
     tree = RequirementTree(raw)
     signature = source_fingerprint({"requirements": raw, "er": sources, "identity_model": "source_driven",'startup_version':STARTUP_VERSION})
@@ -87,7 +87,7 @@ def refine_database(input_dir, arc_dir, pause=False, max_turns=16):
     progress = previous if reusable else {"requirements": {}}
     progress.update(status="RUNNING", source_sha256=signature)
     console = DemoConsole(pause)
-    failures = TaskFailures(arc_dir, "03_infer_db_obligations", console)
+    failures = TaskFailures(arc_dir, "analyze_db_requirements", console)
     model, retriever = TextModel(json_mode=False), SchemaRetriever()
     evidence = read_artifact(arc_dir,'backend_evidence.json') if (arc_dir/'backend_evidence.json').is_file() else {}
     catalog = evidence.get('authorization',{}).get('catalog',{})

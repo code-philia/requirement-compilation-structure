@@ -184,14 +184,15 @@ class DemoConsole:
 def show_dashboard(stage: str, artifacts: dict) -> None:
     """Show the current pass and saved/in-memory artifact inventory, without inferring success."""
     from infrastructure.utils.presentation.artifacts import ARTIFACTS, inventory, table, text
-    number = stage.removeprefix("Stage ").split(" | ", 1)[0]
+    from infrastructure.pipeline.stages import canonical_stage
+    current = canonical_stage(stage.split(" | ", 1)[0])
     passes = Text()
     from infrastructure.pipeline.stages import STAGE_SHORT_NAMES
     names = STAGE_SHORT_NAMES
     for index, (key, name) in enumerate(names.items()):
         if index:
             passes.append(" → ", style="dim")
-        passes.append(key + " " + name, style="bold cyan" if key == number else "dim")
+        passes.append(name, style="bold cyan" if key == current else "dim")
     counts = table("Intermediate artifact", "Records", "Availability")
     for kind, label in ARTIFACTS.items():
         value = artifacts.get(kind)

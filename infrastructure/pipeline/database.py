@@ -1,4 +1,4 @@
-"""Stage 04: lower the completed schema to SQL, seed explicit data and initialize."""
+"""Lower the completed schema to SQL, seed explicit data and initialize."""
 
 import hashlib
 import json
@@ -99,7 +99,7 @@ def inspect_ddl(output, schema, names):
 def _implement_db_attempt(arc_dir: Path, pause=False, max_attempts=10, max_turns=10, model=None):
     schema_path = arc_dir / 'db_schema.json'
     if not schema_path.is_file():
-        raise ValueError('Run 02_build_db_schema and 03_infer_db_obligations before SQL implementation')
+        raise ValueError('Run build_db_schema and analyze_db_requirements before SQL implementation')
     output = arc_dir.parent.resolve()
     schema = json.loads(read_source(schema_path))
     console = DemoConsole(pause)
@@ -111,7 +111,7 @@ def _implement_db_attempt(arc_dir: Path, pause=False, max_attempts=10, max_turns
     previous = json.loads(read_source(report_path)) if report_path.is_file() else {}
     report = {'status': 'IMPLEMENTING', 'schema_sha256': signature(schema['entities']),
         'order': order, 'tables': {}, 'batches': []}
-    failures = TaskFailures(arc_dir, '04_implement_db', console)
+    failures = TaskFailures(arc_dir, 'implement_db', console)
     model = model or TextModel(json_mode=False)
     for index, names in enumerate(batches, 1):
         label = f'batch {index}/{len(batches)}: ' + ', '.join(names)
@@ -153,7 +153,7 @@ def _implement_db_attempt(arc_dir: Path, pause=False, max_attempts=10, max_turns
             for name in names:
                 report['tables'][name] = {'path': paths[name], 'status': 'GREEN',
                     'input_sha256': inputs, 'sql_sha256': signature(read_source(output / paths[name]))}
-            checkpoint(output, stage='04', task=label, action='Publish schema SQL batch', status='GREEN')
+            checkpoint(output, stage='implement_db', task=label, action='Publish schema SQL batch', status='GREEN')
         if failures.report['tasks'][label]['status'] == 'FAILED':
             entry.update(failures.report['tasks'][label])
         save_json(report_path, report)
@@ -164,7 +164,7 @@ def _implement_db_attempt(arc_dir: Path, pause=False, max_attempts=10, max_turns
     save_text(initializer, initializer_source({name: {'path': paths[name]} for name in order}))
     if (output / 'backend/src/platform/bootstrap.ts').is_file():
         wire_initializer(initializer)
-    checkpoint(output, stage='04', task='database initializer', action='Publish complete SQL loading order')
+    checkpoint(output, stage='implement_db', task='database initializer', action='Publish complete SQL loading order')
     implement_startup_data(arc_dir, schema, model, console, failures, max_attempts)
     with failures.task('database runtime'):
         report['verification'] = verify_database_runtime(arc_dir, schema, model, console, max_turns)

@@ -18,13 +18,13 @@ from infrastructure.utils.presentation.events import begin_run, finish_run, begi
 
 
 PIPELINE = (
-    ("00_project_initialization", project_initialization, "project_files"),
-    ("01_explore_requirement", explore_requirement, "requirements"),
-    ("02_build_db_schema", build_er_schema, "db_schema"),
-    ("03_infer_db_obligations", refine_database, "db_obligations"),
-    ("04_implement_db", implement_db, "db_implementations"),
-    ("05_build_backend", build_backend, "backend_checks"),
-    ("06_build_frontend", build_frontend, "frontend_e2e"),
+    ("project_initialization", project_initialization, "project_files"),
+    ("read_requirements", explore_requirement, "requirements"),
+    ("build_db_schema", build_er_schema, "db_schema"),
+    ("analyze_db_requirements", refine_database, "db_obligations"),
+    ("implement_db", implement_db, "db_implementations"),
+    ("build_backend", build_backend, "backend_checks"),
+    ("build_frontend", build_frontend, "frontend_e2e"),
 )
 STAGE_MAP = {name: (name, function, artifact) for name, function, artifact in PIPELINE}
 
@@ -89,29 +89,29 @@ class Compiler:
 
     def _missing_prerequisites(self, stage):
         required = {
-            "01_explore_requirement": ["backend/package.json", "frontend/package.json"],
-            "02_build_db_schema": [".arc/requirements.json"],
-            "03_infer_db_obligations": [".arc/db_schema.json"],
-            "04_implement_db": [".arc/db_schema.json", ".arc/db_obligations.json", "backend/package.json"],
-            "05_build_backend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/db_obligations.json"],
-            "06_build_frontend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_endpoints.json"],
+            "read_requirements": ["backend/package.json", "frontend/package.json"],
+            "build_db_schema": [".arc/requirements.json"],
+            "analyze_db_requirements": [".arc/db_schema.json"],
+            "implement_db": [".arc/db_schema.json", ".arc/db_obligations.json", "backend/package.json"],
+            "build_backend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/db_obligations.json"],
+            "build_frontend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_endpoints.json"],
         }
         missing = [path for path in required.get(stage, []) if not (self.output_dir / path).is_file()]
         # Do not use stale deployment/DDL artifacts after a failed current import.
         gates = {
-            "01_explore_requirement": ["00_project_initialization"],
-            "03_infer_db_obligations": ["02_build_db_schema"],
-            "04_implement_db": ["03_infer_db_obligations"],
-            "05_build_backend": ["03_infer_db_obligations", "04_implement_db"],
-            "06_build_frontend": ["05_build_backend", "03_infer_db_obligations", "04_implement_db"],
+            "read_requirements": ["project_initialization"],
+            "analyze_db_requirements": ["build_db_schema"],
+            "implement_db": ["analyze_db_requirements"],
+            "build_backend": ["analyze_db_requirements", "implement_db"],
+            "build_frontend": ["build_backend", "analyze_db_requirements", "implement_db"],
         }
-        input_pass = self.report['stages'].get('01_explore_requirement', {})
-        if stage not in {'00_project_initialization', '01_explore_requirement'} and input_pass.get('status') in {'FAILED', 'BLOCKED'}:
+        input_pass = self.report['stages'].get('read_requirements', {})
+        if stage not in {'project_initialization', 'read_requirements'} and input_pass.get('status') in {'FAILED', 'BLOCKED'}:
             if not input_pass.get('usable_artifacts', {}).get('requirements'):
                 missing.append('current requirement import did not complete')
         for owner in gates.get(stage, []):
             result = self.report['stages'].get(owner, {})
-            if (owner == '05_build_backend' and result.get('status') == 'COMPLETED_WITH_FAILURES'
+            if (owner == 'build_backend' and result.get('status') == 'COMPLETED_WITH_FAILURES'
                     and result.get('usable_artifacts', {}).get('backend_endpoints')):
                 # Preserve independent frontend progress after merging old 05/06.
                 # Backend failures remain in the final report and repair queue.

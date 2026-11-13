@@ -48,49 +48,44 @@ uv run main.py input --output-dir outputs/demo
 
 Add `--model-log` to display and save detailed model input/output, or `--port 33000` to change the backend port (default: 3000). Token usage and model latency are always shown.
 
-### Step by step
+### Stages and debugging
 
-Run these commands in order to execute the same 12 passes as the full pipeline. Each command runs only the selected stage and reads existing artifacts from `outputs/demo/.arc/`.
+The same seven named stages run in this order; stage numbers are no longer used:
+
+| Stage | Responsibility |
+| --- | --- |
+| `project_initialization` | Create the application scaffold. |
+| `read_requirements` | Import requirements and analyze referenced images. |
+| `build_db_schema` | Build an initial logical schema from ER and explicit data. |
+| `analyze_db_requirements` | Visit dependency-ordered leaf requirements in batches of at most five; repair schema, identify required startup records and derive read/write obligations together. |
+| `implement_db` | Implement DDL, seed INSERTs and initialization, with repair feedback. |
+| `build_backend` | Design APIs and reusable modules, generate tests and implement each requirement in one agent context. |
+| `build_frontend` | Design pages/components/interactions, implement and accept using the supplied requirement tests. |
+
+Startup-data classification and obligation inference share one requirement pass.
+Backend design/implementation share a stage, as do frontend UI/trigger design and implementation.
+Database design and SQL implementation remain separate so implementation uses the converged schema.
 
 ```bash
-# 00: Initialize project
-uv run main.py input --output-dir outputs/demo --stage 00_project_initialization
+# Initialize, then run a single stage (repeat with the names above in order).
+uv run main.py input --output-dir outputs/demo --stage project_initialization
+uv run main.py input --output-dir outputs/demo --stage read_requirements
+uv run main.py input --output-dir outputs/demo --stage build_db_schema
+uv run main.py input --output-dir outputs/demo --stage analyze_db_requirements
+uv run main.py input --output-dir outputs/demo --stage implement_db
+uv run main.py input --output-dir outputs/demo --stage build_backend
+uv run main.py input --output-dir outputs/demo --stage build_frontend
 
-# 01: Read requirements and analyze reference images
-uv run main.py input --output-dir outputs/demo --stage 01_explore_requirement
-
-# 02: Design database schema
-uv run main.py input --output-dir outputs/demo --stage 02_build_db_schema
-
-# 02B: Normalize authorization/process evidence and publish shared backend infrastructure
-uv run main.py input --output-dir outputs/demo --stage 02_design_backend_foundation
-
-# 03: Infer database read/write obligations
-uv run main.py input --output-dir outputs/demo --stage 03_infer_db_obligations
-
-# 04: Implement database
-uv run main.py input --output-dir outputs/demo --stage 04_implement_db
-
-# 05: Design backend APIs including P/Q
-uv run main.py input --output-dir outputs/demo --stage 05_design_backend_apis
-
-# 06: Implement backend with test-first acceptance
-uv run main.py input --output-dir outputs/demo --stage 06_implement_backend_tdd
-
-# 07: Design UI and frontend data
-uv run main.py input --output-dir outputs/demo --stage 07_design_ui
-
-# 08: Implement UI and run existence tests
-uv run main.py input --output-dir outputs/demo --stage 08_implement_ui
-
-# 09: Design frontend triggers
-uv run main.py input --output-dir outputs/demo --stage 09_design_frontend_triggers
-
-# 10: Implement triggers and run end-to-end tests
-uv run main.py input --output-dir outputs/demo --stage 10_implement_frontend_tdd
+# Restore the preceding completed checkpoint, then run this stage and all later stages.
+uv run main.py input --output-dir outputs/demo --from-stage analyze_db_requirements
 ```
 
-The `--stage` option accepts only a full stage name such as `06_implement_backend_tdd`. Use `uv run main.py --help` to see all stages. Add `--pause` for teaching pauses or `--model-log` for detailed model I/O. Set a custom backend port with `--port` in stage 00.
+`--stage` restores the preceding successful Git checkpoint before running only the selected stage.
+`--from-stage` restores the same checkpoint and continues to the end. These commands operate
+on the output application's Git repository; uncommitted output changes must be saved first.
+Historical numbered names and equivalent completed Git checkpoints remain supported.
+New logs, reports and repair commands use the names above. Use `uv run main.py --help`
+to list the stages. Add `--pause` or `--model-log` as needed.
 
 For structured authorization/BPMN inputs, see [backend evidence contracts](infrastructure/stages/backend/README.md).
 

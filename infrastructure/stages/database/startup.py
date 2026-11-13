@@ -254,12 +254,18 @@ def analysis_batches(tree, selected=None, max_nodes=5, max_chars=32000):
             continue
         node = deepcopy(tree.raw[rid])
         node.pop('children',None)
+        if isinstance(node.get('data'),list):
+            node['data'] = {'explicit_record_ids':[row['id'] for row in node['data']],
+                'note':'Original records are in source_data; do not create duplicate presets.'}
         node['steps'] = [tree.steps[key] for key in tree.own_steps[rid]]
         node.pop('scenarios',None)  # normalized steps already carry scenario labels
         ancestors, parent = [], tree.parents.get(rid)
         while parent:
             source = tree.raw[parent]
-            ancestors.append({key:source[key] for key in ('id','name','description','data') if key in source})
+            ancestor = {key:source[key] for key in ('id','name','description','data') if key in source}
+            if isinstance(ancestor.get('data'),list):
+                ancestor['data'] = {'explicit_record_ids':[row['id'] for row in ancestor['data']]}
+            ancestors.append(ancestor)
             parent = tree.parents.get(parent)
         node['parent_context'] = ancestors
         count = len(json.dumps(node,ensure_ascii=False))

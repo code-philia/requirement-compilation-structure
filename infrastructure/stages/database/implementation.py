@@ -163,7 +163,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
         result = checks.run()
         report.update(status="GREEN" if result["returncode"] == 0 else "FAILED", checks=result)
         save_json(path, report)
-        checkpoint(output, stage="04", task="database runtime", action="Execute real database and startup checks",
+        checkpoint(output, stage="implement_db", task="database runtime", action="Execute real database and startup checks",
             status=report["status"], details=result)
         if result["returncode"]:
             raise CheckFailure("Database initialization or startup failed", result)
@@ -178,8 +178,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
     sql_paths = {name: f"backend/src/db/tables/{name}.sql" for name in schema["entities"]}
     insert_paths = {name: f"backend/src/db/seeds/{name}.sql" for name in schema["entities"]}
     allowed = {*WIRING, *sql_paths.values(), *insert_paths.values()}
-    protected = {"backend/src/app.ts", "backend/src/api/register.ts", "backend/src/db/initialize.ts", "backend/src/db/seed.ts",
-        "backend/tsconfig.json", "backend/package.json", "package.json"} if (output / "backend/src/platform/settings.ts").is_file() else set()
+    protected = {"backend/src/app.ts", "backend/src/api/register.ts"} if (output / "backend/src/platform/settings.ts").is_file() else set()
     workspace = FileTools(output, ["backend", "package.json"], requirements=list(schema.get("requirements", {})),
         stage="database", files=WIRING, writable=allowed-protected, readable=allowed | {MANIFEST})
     task = {"table_order": [name for group in implementation_groups(schema) for name in group],

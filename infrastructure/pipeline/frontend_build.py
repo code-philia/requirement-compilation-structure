@@ -30,7 +30,7 @@ from infrastructure.utils.files import read_artifact, save_json
 from infrastructure.utils.presentation.console import DemoConsole
 
 
-STAGE = '06_build_frontend'
+STAGE = 'build_frontend'
 
 
 def selected_design(plan, rid):

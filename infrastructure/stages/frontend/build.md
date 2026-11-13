@@ -1,6 +1,6 @@
 # 前端逐需求设计、测试与实现
 
-入口 `06_build_frontend`，替代独立前端 outline 和旧 UI/trigger 实现阶段。
+入口 `build_frontend`，替代独立前端 outline 和旧 UI/trigger 实现阶段。
 按依赖顺序仅遍历叶节点；每个叶节点使用一个 `FrontendBuildAgent(BaseAgent)`，
 共享客户端、对话和工具日志，先设计，再生成测试，最后实现和修复。
 
@@ -42,13 +42,13 @@ runner/fixture 和所有后端文件不可编辑。失败节点归档并回滚�
 沿用 `frontend_e2e.json` 与最终 build 结果接入 dashboard。调试命令：
 
 ```bash
-uv run main.py /path/to/requirements -o /path/to/app --stage 06_build_frontend --model-log
+uv run main.py /path/to/requirements -o /path/to/app --stage build_frontend --model-log
 ```
 
-该命令先恢复 `05_build_backend` 成功结束的 Git 检查点，再执行前端阶段。
+该命令先恢复 `build_backend` 成功结束的 Git 检查点，再执行前端阶段。
 
 阶段号已统一为 00–06。旧 `07_build_frontend` 及旧前端子阶段名仍可作为 CLI 别名，
-但会执行整个 `06_build_frontend`。历史 Git 检查点保留，兼容查找仅认可对应实现阶段
+但会执行整个 `build_frontend`。历史 Git 检查点保留，兼容查找仅认可对应实现阶段
 的成功记录，不把旧设计阶段的 GREEN 当作整个构建阶段已完成。
 
 ## smoke 运行后的通用优化

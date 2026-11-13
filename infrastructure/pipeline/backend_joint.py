@@ -26,7 +26,7 @@ from infrastructure.utils.files import read_artifact, save_json
 from infrastructure.utils.presentation.console import DemoConsole
 
 
-STAGE = '05_build_backend'
+STAGE = 'build_backend'
 
 
 def traversal(tree):
