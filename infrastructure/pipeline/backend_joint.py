@@ -61,11 +61,8 @@ def build_backend(arc_dir, pause=False, max_test_iterations=None, top_k=6):
     design_backend_foundation(output, arc_dir, pause=pause)
     tree, schema = load_context(arc_dir)
     raw = read_artifact(arc_dir,'requirements.json')
-    obligations = read_artifact(arc_dir,'db_obligations.json')
+    obligations = {'requirements': {}, 'steps': {}}
     order = traversal(tree)
-    missing = set(order) - obligations['requirements'].keys()
-    if missing:
-        raise ValueError('Missing requirement obligations; finish stage 03 for: ' + ', '.join(sorted(missing)))
     prepare_runtime(output)
     groups = [{'id':'requirement-'+hashlib.sha256(rid.encode()).hexdigest()[:12],
         'owner':rid,'requirements':[rid]} for rid in order]
@@ -101,7 +98,7 @@ def build_backend(arc_dir, pause=False, max_test_iterations=None, top_k=6):
     accepted, accepted_oracles = [], []
     last_agent = None
     for rid, group in zip(order,groups):
-        required = obligations['requirements'][rid]
+        required = obligations['requirements'].get(rid,{})
         test_path = f"backend/tests/requirements/{hashlib.sha256(rid.encode()).hexdigest()[:20]}.test.ts"
         oracle = source_expectations(raw,rid)
         reused = resume.reuse(rid)
@@ -191,7 +188,7 @@ def build_backend(arc_dir, pause=False, max_test_iterations=None, top_k=6):
             while parent:
                 ancestors.append(tree.requirements[parent])
                 parent = tree.parents.get(parent)
-            task = {'requirement':context, 'obligation':required,
+            task = {'requirement':context, 'obligation':required, 'database_context_policy': 'No precomputed database obligation. Derive reads/writes from this requirement during backend design; inspect and reuse actual database tables.',
                 'ancestor_rules':list(reversed(ancestors)),
                 'retrieved':retrieved, 'provided_schema':{name:schema['entities'][name] for name in sorted(schema_names)},
                 'schema_inventory':{name:{'description':entity['description'],'fields':list(entity['fields'])} for name,entity in schema['entities'].items()},

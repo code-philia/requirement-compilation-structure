@@ -141,7 +141,7 @@ native function arguments, never wrapped in an arguments/tool_calls JSON text ob
         implementation_limit = max_turns
         if getattr(self, 'kind', None) == 'seeds':
             implementation_limit = max(max_turns, len(input.get('insert_files', {})) + 1)
-        repair_limit, discovery_limit, idle_limit = max_turns, 2, 3
+        repair_limit, discovery_limit, idle_limit = getattr(self, "repair_budget", max_turns), 2, 3
         maximum = implementation_limit + repair_limit + discovery_limit + idle_limit
         counters = {'implementation': 0, 'repair': 0, 'discovery': 0}
         idle, stop_reason = 0, 'bounded model-call budget reached'

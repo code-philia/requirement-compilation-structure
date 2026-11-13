@@ -3,7 +3,9 @@
 from infrastructure.pipeline.stages import STAGE_DESCRIPTIONS, canonical_stage
 
 # Short numbers are accepted only for legacy internal log calls.
-LEGACY_NUMBERS = dict(zip(('00','01','02','03','04','05','06'), STAGE_DESCRIPTIONS))
+LEGACY_NUMBERS = {'00':'project_initialization', '01':'read_requirements',
+    '02':'build_db_schema', '03':'correct_db', '04':'implement_db',
+    '05':'build_backend', '06':'build_frontend'}
 
 
 def stage_label(script: str) -> str:

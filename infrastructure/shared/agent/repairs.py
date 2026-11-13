@@ -7,7 +7,7 @@ from infrastructure.utils.files import save_json
 
 TARGETS = {
     "schema": "build_db_schema", "backend_foundation": "build_backend",
-    "obligations": "analyze_db_requirements", "backend_api": "build_backend",
+    "obligations": "build_backend", "backend_api": "build_backend",
     "ui_design": "build_frontend", "triggers": "build_frontend",
     "acceptance": "build_frontend", "validation_data": "implement_db",
     "input_evidence": "read_requirements", "compiler_runtime": "compiler_maintenance",

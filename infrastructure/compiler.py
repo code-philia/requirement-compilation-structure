@@ -5,8 +5,8 @@ import traceback
 
 from infrastructure.pipeline.project_initialization import project_initialization
 from infrastructure.pipeline.requirements import explore_requirement
-from infrastructure.pipeline.database_design import build_er_schema, refine_database
-from infrastructure.pipeline.database import implement_db
+from infrastructure.pipeline.database_design import build_er_schema
+from infrastructure.pipeline.database_build import implement_database, correct_database
 from infrastructure.pipeline.backend_joint import build_backend
 from infrastructure.pipeline.frontend_build import build_frontend
 from infrastructure.pipeline.stages import canonical_stage
@@ -21,8 +21,8 @@ PIPELINE = (
     ("project_initialization", project_initialization, "project_files"),
     ("read_requirements", explore_requirement, "requirements"),
     ("build_db_schema", build_er_schema, "db_schema"),
-    ("analyze_db_requirements", refine_database, "db_obligations"),
-    ("implement_db", implement_db, "db_implementations"),
+    ("implement_db", implement_database, "db_implementations"),
+    ("correct_db", correct_database, "db_corrections"),
     ("build_backend", build_backend, "backend_checks"),
     ("build_frontend", build_frontend, "frontend_e2e"),
 )
@@ -91,19 +91,19 @@ class Compiler:
         required = {
             "read_requirements": ["backend/package.json", "frontend/package.json"],
             "build_db_schema": [".arc/requirements.json"],
-            "analyze_db_requirements": [".arc/db_schema.json"],
-            "implement_db": [".arc/db_schema.json", ".arc/db_obligations.json", "backend/package.json"],
-            "build_backend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/db_obligations.json"],
+            "correct_db": [".arc/db_schema.json", "backend/src/db/initialize.ts"],
+            "implement_db": [".arc/db_schema.json", "backend/package.json"],
+            "build_backend": [".arc/requirements.json", ".arc/db_schema.json"],
             "build_frontend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_endpoints.json"],
         }
         missing = [path for path in required.get(stage, []) if not (self.output_dir / path).is_file()]
         # Do not use stale deployment/DDL artifacts after a failed current import.
         gates = {
             "read_requirements": ["project_initialization"],
-            "analyze_db_requirements": ["build_db_schema"],
-            "implement_db": ["analyze_db_requirements"],
-            "build_backend": ["analyze_db_requirements", "implement_db"],
-            "build_frontend": ["build_backend", "analyze_db_requirements", "implement_db"],
+            "implement_db": ["build_db_schema"],
+            "correct_db": ["implement_db"],
+            "build_backend": ["correct_db", "implement_db"],
+            "build_frontend": ["build_backend", "correct_db", "implement_db"],
         }
         input_pass = self.report['stages'].get('read_requirements', {})
         if stage not in {'project_initialization', 'read_requirements'} and input_pass.get('status') in {'FAILED', 'BLOCKED'}:
@@ -161,7 +161,7 @@ class Compiler:
                     continue
                 if function is project_initialization:
                     result = self._run(name, function, self.input_dir, self.output_dir, port=self.port, pause=self.pause)
-                elif function in (build_er_schema, refine_database):
+                elif function in (build_er_schema, correct_database):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
                 elif function in (explore_requirement, build_frontend):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)

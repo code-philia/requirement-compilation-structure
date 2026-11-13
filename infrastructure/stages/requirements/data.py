@@ -127,8 +127,7 @@ def data_context(catalog, rid):
 
 def load_data(arc_dir):
     path = arc_dir / "data_bindings.json"
-    from infrastructure.stages.database.startup import effective_requirements
-    raw = effective_requirements(read_artifact(arc_dir,'requirements.json'),arc_dir)
+    raw = read_artifact(arc_dir,'requirements.json')
     current = compile_data(raw, read_artifact(arc_dir, "db_schema.json"))
     if path.is_file():
         existing = read_artifact(arc_dir,path.name)

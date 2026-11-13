@@ -27,16 +27,7 @@ def load_context(arc_dir: Path, *, validate_seeds=True):
     foundation_path = arc_dir / "backend_foundation.json"
     tree.backend_foundation = read_artifact(arc_dir, foundation_path.name) if foundation_path.is_file() else {"enabled":False}
     schema = read_artifact(arc_dir, "db_schema.json")
-    obligation_path = arc_dir / "db_obligations.json"
-    tree.db_obligations = read_artifact(arc_dir, obligation_path.name) if obligation_path.is_file() else {}
-    from infrastructure.stages.database.seeds import MANIFEST, seed_assertions
-    seed_path = arc_dir.parent / MANIFEST
-    if seed_path.is_file() and validate_seeds:
-        seed_assertions(arc_dir.parent, schema, tree.validation_data)
-        import json
-        resolutions = json.loads(seed_path.read_text(encoding="utf-8-sig"))["records"]
-        for key, resolution in resolutions.items():
-            tree.validation_data["records"][key]["seed_resolution"] = resolution
+    tree.db_obligations = {}  # Reads/writes are designed by the backend agent, not a database analysis pass.
     return tree, schema
 
 

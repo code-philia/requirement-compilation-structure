@@ -56,28 +56,24 @@ The same seven named stages run in this order; stage numbers are no longer used:
 | --- | --- |
 | `project_initialization` | Create the application scaffold. |
 | `read_requirements` | Import requirements and analyze referenced images. |
-| `build_db_schema` | Build an initial logical schema from ER and explicit data. |
-| `analyze_db_requirements` | Visit dependency-ordered leaf requirements in batches of at most five; repair schema, identify required startup records and derive read/write obligations together. |
-| `implement_db` | Implement DDL, seed INSERTs and initialization, with repair feedback. |
+| `build_db_schema` | Read complete model.mmd content and design the logical schema in one native agent loop. |
+| `implement_db` | One native agent loop implements dependency-ordered schema batches, reads original root data and writes INSERTs. |
+| `correct_db` | Review every requirement node in batches of five, using only concatenated name, description.text and scenarios; directly repair schema/DDL/INSERT code as needed. |
 | `build_backend` | Design APIs and reusable modules, generate tests and implement each requirement in one agent context. |
 | `build_frontend` | Design pages/components/interactions, implement and accept using the supplied requirement tests. |
-
-Startup-data classification and obligation inference share one requirement pass.
-Backend design/implementation share a stage, as do frontend UI/trigger design and implementation.
-Database design and SQL implementation remain separate so implementation uses the converged schema.
 
 ```bash
 # Initialize, then run a single stage (repeat with the names above in order).
 uv run main.py input --output-dir outputs/demo --stage project_initialization
 uv run main.py input --output-dir outputs/demo --stage read_requirements
 uv run main.py input --output-dir outputs/demo --stage build_db_schema
-uv run main.py input --output-dir outputs/demo --stage analyze_db_requirements
 uv run main.py input --output-dir outputs/demo --stage implement_db
+uv run main.py input --output-dir outputs/demo --stage correct_db
 uv run main.py input --output-dir outputs/demo --stage build_backend
 uv run main.py input --output-dir outputs/demo --stage build_frontend
 
 # Restore the preceding completed checkpoint, then run this stage and all later stages.
-uv run main.py input --output-dir outputs/demo --from-stage analyze_db_requirements
+uv run main.py input --output-dir outputs/demo --from-stage implement_db
 ```
 
 `--stage` restores the preceding successful Git checkpoint before running only the selected stage.

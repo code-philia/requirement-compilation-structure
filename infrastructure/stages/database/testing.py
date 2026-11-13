@@ -7,8 +7,6 @@ import subprocess
 from tempfile import TemporaryDirectory
 
 from infrastructure.utils.processes import capture_process, npm_command
-from infrastructure.stages.requirements.data import load_data, startup_assertions
-from infrastructure.stages.database.seeds import seed_assertions
 
 
 PROBE_SOURCE = r'''
@@ -200,12 +198,10 @@ class DatabaseChecks:
             if build["returncode"]:
                 return {**build, "phase": "backend build"}
             with TemporaryDirectory(prefix="arc-db-check-") as temporary:
-                arc=self.output/".arc"
-                catalog = load_data(arc)
                 plan = {"directory": temporary, "database": str(self.output / "backend/data/app.db"),
                     "tables": {name: list(entity["fields"]) for name, entity in self.schema["entities"].items()},
                     "schema":self.schema["entities"],
-                    "validation_data":startup_assertions(catalog) + seed_assertions(self.output, self.schema, catalog),
+                    "validation_data": [],  # SQL-first flow does not require a seed-binding manifest.
                     "setup": [*npm_command(), "run", "db:init", "--workspace", "@arc/backend"]}
                 runner = Path(temporary) / "check-database.mjs"
                 arguments = Path(temporary) / "plan.json"
