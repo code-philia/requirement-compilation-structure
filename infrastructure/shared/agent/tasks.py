@@ -24,6 +24,8 @@ class TaskFailures:
             with task_scope(identity):
                 yield
         except Exception as error:
+            if getattr(error,'requires_schema_repair',False):
+                raise
             if isinstance(error, OSError):
                 raise
             self.report['tasks'][identity] = {'status': 'FAILED', 'error': str(error),

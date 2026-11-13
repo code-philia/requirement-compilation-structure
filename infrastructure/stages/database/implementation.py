@@ -16,6 +16,7 @@ from infrastructure.utils.files import read_artifact, save_json, save_text
 from infrastructure.stages.database.runtime import seed_source
 from infrastructure.stages.database.seeds import MANIFEST, SEED_RULES, seed_assertions, source_seed_records
 from infrastructure.stages.requirements.data import load_data, publish_seed_data, DATA_INSTRUCTIONS
+from infrastructure.shared.rag.bm25 import rank
 
 
 SEED_PATH = "backend/src/db/seed.ts"
@@ -47,29 +48,59 @@ def implement_startup_data(arc_dir, schema, model, console, failures, max_turns=
     if not selected:
         selected = list(tree.leaves)
     readable = set(insert_paths.values()) | {f"backend/src/db/tables/{name}.sql" for name in order} | {MANIFEST}
-    files = FileTools(output, ["backend/src/db"], requirements=selected, stage="database",
-        files=sorted(readable), writable=set(insert_paths.values()) | {MANIFEST}, readable=readable)
+    writable = set(readable)
     evidence_path = arc_dir / "backend_evidence.json"
     evidence = read_artifact(arc_dir, evidence_path.name) if evidence_path.is_file() else {}
-    task = {"catalog": seeds, "schema_semantics": {name: {
+    task = {"schema_semantics": {name: {
         "description": entity.get("description", ""), "source_refs": entity.get("source_refs", []),
-        "fields": {key: {k: field[k] for k in ('description', 'source_type', 'constraints') if k in field}
-            for key, field in entity['fields'].items()}} for name, entity in schema['entities'].items()},
+        "fields": entity['fields'], 'unique_constraints':entity.get('unique_constraints',[])} for name, entity in schema['entities'].items()},
+        'schema_reconciliation':read_artifact(arc_dir,'db_startup_plan.json').get('last_reconciliation') if (arc_dir/'db_startup_plan.json').is_file() else None,
         "source_sha256": catalog["source_sha256"], "schema_sha256": catalog["schema_sha256"],
         "manifest_path": MANIFEST, "insert_files": insert_paths,
-        "requirements": [{key: value for key, value in tree.raw[rid].items()
-            if key in {"id", "name", "description", "scenarios", "data"}} for rid in selected],
         "source_identity_evidence": evidence.get("authorization", {}).get("catalog", {}),
-        "reserved_future_data": {key: row for key, row in catalog["records"].items()
+        "reserved_future_data": {key: {'entity':row['entity'],'lifecycle':row['lifecycle']} for key, row in catalog["records"].items()
             if row["lifecycle"] != "SEED"}}
 
-    def generated():
-        assertions = seed_assertions(output, schema, catalog)
-        return {"status": "GENERATED", "source_records": len(seeds), "observed_rows": len(assertions)}
+    completed = []
+    for index,ids in enumerate(seed_batches(seeds),1):
+        expected = [*completed,*ids]
+        related = {rid for rid,refs in catalog.get('requirements',{}).items() if set(refs)&set(ids)}
+        query = json.dumps({key:{'entity':seeds[key]['entity'],'properties':list(seeds[key].get('properties',{}))} for key in ids},ensure_ascii=False)
+        related.update(item['symbol'] for item in rank(query,{rid:json.dumps(tree.requirements[rid],ensure_ascii=False) for rid in tree.leaves},4))
+        current = {**task,'catalog':{key:seeds[key] for key in ids},'batch_record_ids':ids,
+            'requirements':[{key:value for key,value in tree.raw[rid].items() if key in {'id','name','description','data'}} for rid in sorted(related)],
+            'completed_seed_ids':completed[:],'all_seed_inventory':{key:row['entity'] for key,row in seeds.items()},
+            'evidence_instruction':'Use record_seed_evidence with only current IDs. Earlier records are retained. Read existing SQL only for concrete shared parents; batch ready INSERT edits.'}
+        def generated(_expected=tuple(expected)):
+            assertions = seed_assertions(output,schema,catalog,record_ids=_expected)
+            return {'status':'GENERATED','source_records':len(_expected),'observed_rows':len(assertions)}
+        label = 'startup data / batch '+str(index)
+        batch_files = FileTools(output,['backend/src/db'],requirements=sorted(related),stage='database',
+            files=sorted(readable),writable=writable,readable=readable)
+        batch_files.defer_context_files = True
+        with failures.task(label):
+            DatabaseImplementationAgent('seeds',DATA_INSTRUCTIONS+SEED_RULES,batch_files,generated,
+                model=model).run(current,max_turns=max_turns,console=console,label='Implement startup INSERT batch '+str(index))
+        if failures.report['tasks'][label]['status']!='GREEN':
+            break  # A later batch must not mask a failed prerequisite's evidence.
+        completed.extend(ids)
 
-    with failures.task("startup data / semantic SQL implementation"):
-        DatabaseImplementationAgent('seeds', DATA_INSTRUCTIONS + SEED_RULES, files, generated,
-            model=model).run(task, max_turns=max_turns, console=console, label="Implement explicit startup data")
+
+def seed_batches(records, max_records=12):
+    """Resolve explicit $ref dependencies before consumers; keep cycles together."""
+    def references(value):
+        if isinstance(value,dict):
+            return ({value['$ref']} if isinstance(value.get('$ref'),str) else set()) | set().union(*(references(v) for v in value.values()))
+        if isinstance(value,list):
+            return set().union(*(references(v) for v in value))
+        return set()
+    deps = {key:references(row.get('properties',{})) & records.keys() for key,row in records.items()}
+    pending, done = set(records), set()
+    while pending:
+        ready = [key for key in records if key in pending and deps[key]<=done]
+        current = ready[:max_records] if ready else [key for key in records if key in pending]
+        yield current
+        pending.difference_update(current); done.update(current)
 
 
 REPAIR_INSTRUCTIONS = '''Repair the actual database implementation and its startup wiring.
@@ -105,6 +136,10 @@ read the canonical table DDL for missing definitions. Use edit_file/replace for 
 edit_file/create for a missing canonical SQL file under backend/src/db/tables or db/seeds.
 The compiler rebuilds, initializes/reinitializes real databases, restores a missing table,
 starts/restarts the compiled backend and initializes backend/data/app.db after every edit.
+If a source-backed schema repair adds columns while an output database already exists,
+implement guarded non-destructive migration using actual PRAGMA introspection before
+loading seeds. Never drop existing user rows, assign invented credentials or grant new
+roles. Only repair explicit source account bindings using their source values.
 '''
 
 
@@ -159,7 +194,7 @@ def verify_database_runtime(arc_dir, schema, model, console, max_turns=10):
         text = json.dumps(value, ensure_ascii=False)
         selected = {name for name in sql_paths if f"{name}.sql" in text
             or re.search(r"(?:Missing (?:table|column): |no such (?:table|column): |Storage affinity mismatch: |Required field allows null: |Missing (?:primary key|unique constraint|foreign key): )" + re.escape(name) + r"(?!\w)", text)}
-        data_failure = any(word in text.lower() for word in ('seed', 'credential'))
+        data_failure = any(word in text.lower() for word in ('seed','credential','password','source property mapping','source value','bindings','locator'))
         if data_failure:
             selected.update(sql_paths)
         pending = list(selected)

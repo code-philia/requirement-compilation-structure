@@ -61,6 +61,11 @@ strategy or tenancy architecture are imposed. Preserve source terminology and re
 necessary canonical-name bindings in source_refs. Write a specific description per entity.
 Gather enough evidence then publish definitions promptly. Batch independent reads and
 updates; do not repeatedly retrieve already supplied definitions. Native tools only.
+Explicit source_data/SEED accounts and startup facts are modeling evidence alongside ER.
+Even if ER omits credentials, model a secure persisted credential representation and
+ALL source role/unit bindings. Never narrow roles to unrelated business labels or omit
+an administrator declared by source data/catalog. Do not put plaintext passwords into
+schema defaults. Later seed implementation must be able to preserve all supplied facts.
 """
 
 OBLIGATION_RULES = """For requirement r, O(r)=(R(r),W(r)):
@@ -190,6 +195,9 @@ class DatabaseDesignAgent(BaseAgent):
             groups = entity["unique_constraints"]
             updated["unique_constraints"] = list({tuple(group): group for group in groups}.values())
         updated["source_refs"] = sorted(set(updated.get("source_refs", [])) | set(source_refs))
+        if updated==current:
+            return {'unchanged':name,'fields':list(updated['fields']),
+                'next_action':'Definition is retained. Advance to the next needed table or completion rather than repeating it.'}
         self.schema["entities"][name] = updated
         self.schema.setdefault("decisions", []).append({"entity": name, "reason": reason,
             "source_refs": source_refs, "requirement": self.input.get("requirement", {}).get("id")})
@@ -235,7 +243,7 @@ class DatabaseDesignAgent(BaseAgent):
                 self.messages.append({"role": "user", "content": str(error) + " Return a smaller complete native tool batch."})
                 continue
             if not message.tool_calls:
-                completion_tool = "finish_schema" if self.mode == "er" else "submit_obligations"
+                completion_tool = getattr(self,'completion_tool_name',"finish_schema" if self.mode == "er" else "submit_obligations")
                 self.messages.append({"role": "user", "content":
                     f"The task is not complete. Use the native tools to perform the work, "
                     f"then call {completion_tool}. A text-only answer does not submit a result."})

@@ -13,6 +13,7 @@ from infrastructure.stages.requirements.images import input_file
 from infrastructure.stages.requirements.tree import RequirementTree
 from infrastructure.utils.files import read_artifact, save_json
 from infrastructure.utils.presentation.console import DemoConsole
+from infrastructure.stages.database.startup import startup_context, model_seed_context, effective_requirements, explicit_records, digest, PLAN, DatabaseBatchAgent, analysis_batches, VERSION as STARTUP_VERSION
 
 
 def er_sources(input_dir):
@@ -35,17 +36,21 @@ def source_fingerprint(sources):
 def build_er_schema(input_dir, arc_dir, pause=False, max_turns=40):
     """One agent reads original ER and incrementally creates logical definitions."""
     sources = er_sources(input_dir)
+    raw = read_artifact(arc_dir,'requirements.json')
+    from infrastructure.stages.backend.evidence import compile_evidence
+    evidence = compile_evidence(raw,input_dir)
+    startup_signature = source_fingerprint({'source_data':startup_context(raw),
+        'authorization':evidence.get('authorization',{}).get('catalog',{}),'startup_version':STARTUP_VERSION})
     previous_path = arc_dir / "db_schema.json"
     previous = read_artifact(arc_dir, previous_path.name) if previous_path.is_file() else {}
     reusable = (previous.get("er_design", {}).get("source_sha256") == source_fingerprint(sources)
-        and previous.get("er_design", {}).get("identity_model") == "source_driven")
+        and previous.get("er_design", {}).get("identity_model") == "source_driven"
+        and previous.get('er_design',{}).get('startup_sha256')==startup_signature)
     schema = {"entities": {}, "requirements": {}, "decisions": [],
         "er_design": {"mode": "agent", "identity_model": "source_driven", "source_sha256": source_fingerprint(sources),
-            "sources": list(sources), "status": "BUILDING"}}
+            "sources": list(sources), "startup_sha256":startup_signature,"status": "BUILDING"}}
     if reusable:
         schema = previous
-    from infrastructure.stages.backend.evidence import compile_evidence
-    evidence = compile_evidence(read_artifact(arc_dir, "requirements.json"), input_dir)
     save_json(arc_dir / "backend_evidence.json", evidence)
     save_json(arc_dir / "db_schema.json", schema)
     console = DemoConsole(pause)
@@ -55,6 +60,7 @@ def build_er_schema(input_dir, arc_dir, pause=False, max_turns=40):
     console.show("ER schema | Logical design", "Read ER evidence; create definitions with native tools, without SQL or per-requirement calls.")
     agent = DatabaseDesignAgent(schema, sources, persist=lambda: save_json(arc_dir / "db_schema.json", schema))
     result = agent.run({"task": "Read the complete ER source, resolve conflicts and construct the initial canonical schema. No identity tables or user types are preset.",
+        'source_data':model_seed_context(startup_context(raw)),
         "source_authorization_catalog": evidence.get("authorization", {}).get("catalog", {}) if evidence.get("authorization") else {}}, max_turns=max_turns)
     schema["er_design"].update(status="GREEN", summary=result["summary"])
     save_json(arc_dir / "db_schema.json", schema)
@@ -64,7 +70,7 @@ def build_er_schema(input_dir, arc_dir, pause=False, max_turns=40):
 
 
 def refine_database(input_dir, arc_dir, pause=False, max_turns=16):
-    """Every node gets own effects; schema repairs and obligations are published together."""
+    """One batched leaf pass publishes schema repairs, startup facts and obligations."""
     sources = er_sources(input_dir)
     schema = read_artifact(arc_dir, "db_schema.json")
     if schema.get("er_design", {}).get("identity_model") != "source_driven":
@@ -73,7 +79,7 @@ def refine_database(input_dir, arc_dir, pause=False, max_turns=16):
         raise ValueError("ER source changed; rerun 02_build_db_schema before requirement analysis")
     raw = read_artifact(arc_dir, "requirements.json")
     tree = RequirementTree(raw)
-    signature = source_fingerprint({"requirements": raw, "er": sources, "identity_model": "source_driven"})
+    signature = source_fingerprint({"requirements": raw, "er": sources, "identity_model": "source_driven",'startup_version':STARTUP_VERSION})
     progress_path, obligations_path = arc_dir / "db_analysis.json", arc_dir / "db_obligations.json"
     previous = read_artifact(arc_dir, progress_path.name) if progress_path.is_file() else {}
     reusable = previous.get("source_sha256") == signature and previous.get("schema_sha256") == source_fingerprint(schema["entities"])
@@ -83,52 +89,69 @@ def refine_database(input_dir, arc_dir, pause=False, max_turns=16):
     console = DemoConsole(pause)
     failures = TaskFailures(arc_dir, "03_infer_db_obligations", console)
     model, retriever = TextModel(json_mode=False), SchemaRetriever()
+    evidence = read_artifact(arc_dir,'backend_evidence.json') if (arc_dir/'backend_evidence.json').is_file() else {}
+    catalog = evidence.get('authorization',{}).get('catalog',{})
+    prior_plan = read_artifact(arc_dir,PLAN) if (arc_dir/PLAN).is_file() else {}
+    plan_reusable = (prior_plan.get('version')==STARTUP_VERSION
+        and prior_plan.get('source_sha256')==digest(raw)
+        and prior_plan.get('authorization_sha256')==digest(catalog))
+    startup = prior_plan if plan_reusable else {'version':STARTUP_VERSION,
+        'source_sha256':digest(raw),'authorization_sha256':digest(catalog),
+        'explicit_records':explicit_records(raw),'derived_records':{},'requirements':{},'batches':{}}
+    startup['status'] = 'RUNNING'
 
     def publish():
         progress["schema_sha256"] = source_fingerprint(schema["entities"])
         save_json(arc_dir / "db_schema.json", schema)
         save_json(arc_dir / "db_obligations.json", obligations)
         save_json(arc_dir / "db_analysis.json", progress)
+        startup["schema_sha256"] = digest(schema["entities"])
+        save_json(arc_dir / PLAN, startup)
 
     publish()
-    for index, rid in enumerate(tree.postorder, 1):
-        if (progress["requirements"].get(rid, {}).get("status") == "GREEN"
-                and rid in obligations["requirements"]
-                and all(sid in obligations["steps"] for sid in tree.own_steps[rid])):
-            console.show(f"Database analysis | Reuse {rid}", "Unchanged source and retained schema/obligations; skip accepted node.")
-            failures.report["tasks"][rid] = {"status": "GREEN"}
-            continue
-        progress["requirements"][rid] = {"status": "RUNNING"}
-        with failures.task(rid):
-            console.show(f"Database analysis {index}/{len(tree.postorder)} | {rid}",
-                "Derive own requirement/step effects and repair missing logical schema together.")
-            node = tree.raw[rid]
-            ancestors, parent = [], tree.parents.get(rid)
-            while parent:
-                ancestors.append({**tree.requirements[parent], "description_evidence": tree.raw[parent].get("description")})
-                parent = tree.parents.get(parent)
-            query = json.dumps({"requirement": node.get("description"), "scenarios": node.get("scenarios")}, ensure_ascii=False)
-            candidates = retriever.retrieve(query, schema, top_k=12)["entities"]
-            agent = DatabaseDesignAgent(schema, sources, mode="obligations", model=model, persist=publish)
-            inferred = agent.run({"requirement": tree.requirements[rid],
-                "description_evidence": node.get("description", {}),
-                "steps": [tree.steps[sid] for sid in tree.own_steps[rid]],
-                "parent_context": ancestors, "is_organizational_parent": bool(tree.children[rid]),
-                "provided_entities": candidates}, max_turns=max_turns)
-            obligations["requirements"][rid] = inferred["requirement"]
-            obligations["steps"].update(inferred["steps"])
-            record = inferred["requirement"]
-            schema["requirements"][rid] = sorted(set(record["read"] + record["write"] + record.get("observation_read", [])))
-            progress["requirements"][rid] = {"status": "GREEN"}
+    pending = {rid for rid in tree.leaves if not (
+        progress['requirements'].get(rid,{}).get('status')=='GREEN'
+        and rid in obligations['requirements'] and rid in startup['requirements']
+        and all(sid in obligations['steps'] for sid in tree.own_steps[rid]))}
+    for rid in set(tree.leaves)-pending:
+        failures.report['tasks'][rid] = {'status':'GREEN'}
+    batches = list(analysis_batches(tree,pending))
+    for index,batch in enumerate(batches,1):
+        ids = [node['id'] for node in batch]
+        task_id = 'batch-'+digest(ids)[:12]
+        for rid in ids:
+            progress['requirements'][rid] = {'status':'RUNNING'}
+        with failures.task(task_id):
+            console.show(f'Database analysis | Batch {index}/{len(batches)}',
+                'Repair schema, collect source-required presets and derive effects together: '+', '.join(ids))
+            query = json.dumps(batch,ensure_ascii=False)
+            candidates = retriever.retrieve(query,schema,top_k=16)['entities']
+            agent = DatabaseBatchAgent(schema,{},startup,raw,model=model,persist=publish)
+            inferred = agent.run({'requirements':batch,
+                'source_data':model_seed_context(startup['explicit_records']),
+                'known_presets':model_seed_context(startup['derived_records']),
+                'source_authorization_catalog':catalog,'provided_entities':candidates},
+                max_turns=max(24,max_turns))
+            for rid,result in inferred['obligations'].items():
+                obligations['requirements'][rid] = result['requirement']
+                obligations['steps'].update(result['steps'])
+                schema['requirements'][rid] = sorted({field for mode in ('read','write','observation_read')
+                    for field in result['requirement'].get(mode,[])})
+                progress['requirements'][rid] = {'status':'GREEN'}
+            startup['batches'][task_id] = {'status':'GREEN','requirements':ids,'summary':inferred['summary']}
             publish()
-            checkpoint(arc_dir.parent, task=rid, action="Publish schema repairs and database obligations", status="GREEN")
-        if failures.report["tasks"][rid]["status"] == "FAILED":
-            progress["requirements"][rid] = failures.report["tasks"][rid]
+            checkpoint(arc_dir.parent,task=task_id,
+                action='Publish schema, startup evidence and obligations',status='GREEN')
+        if failures.report['tasks'][task_id]['status']=='FAILED':
+            for rid in ids:
+                progress['requirements'][rid] = failures.report['tasks'][task_id]
         publish()
     progress["status"] = "COMPLETED_WITH_FAILURES" if any(
         item["status"] == "FAILED" for item in progress["requirements"].values()) else "GREEN"
+    startup["status"] = progress["status"]
+    publish()
     from infrastructure.stages.requirements.data import compile_data
-    save_json(arc_dir / "data_bindings.json", compile_data(raw, schema))
+    save_json(arc_dir / "data_bindings.json", compile_data(effective_requirements(raw,arc_dir), schema))
     publish()
     failures.finish()
     return {"status": "GREEN", "requirements": obligations["requirements"],

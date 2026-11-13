@@ -123,6 +123,7 @@ native function arguments, never wrapped in an arguments/tool_calls JSON text ob
         if max_turns < 1:
             raise ValueError("max_turns must be positive")
         self.accepted, self.last_feedback, self.task = None, None, input
+        self.pending_schema_repair = None
         self._seen_writes = set()
         self._turn_progress = self._turn_failed = False
         # Filters can select relevant schema/files before building the first prompt.
@@ -169,6 +170,9 @@ native function arguments, never wrapped in an arguments/tool_calls JSON text ob
                 if message.tool_calls:
                     results = self.execute_tools(message)
                     self._turn_failed |= any(not json.loads(item['content']).get('ok', False) for item in results)
+                    if self.pending_schema_repair is not None:
+                        from infrastructure.stages.database.startup import SchemaRepairRequested
+                        raise SchemaRepairRequested(self.pending_schema_repair)
                 if self.accepted is not None:
                     return {"status": "GREEN", "turns": turn, "rounds": counters, "checks": self.accepted}
                 if self._turn_progress:
@@ -186,17 +190,16 @@ native function arguments, never wrapped in an arguments/tool_calls JSON text ob
                         self.messages.append({"role": "user", "content":
                             "A text-only answer is not completion. Publish required files and call finish_implementation."})
                     if counters['discovery'] >= discovery_limit:
-                        self.tools.pop('list_files', None)
-                        self.tools.pop('search_files', None)
                         self.messages.append({"role": "user", "content":
-                            "Discovery budget used. Use retained contents, read only a named missing span, "
-                            "then batch edits or call finish_implementation for a concrete gap. No broad rescanning."})
+                            "Several discovery rounds have no implementation progress. Reuse retained contents; "
+                            "batch only named missing definitions, then edit files or request a concrete schema repair. "
+                            "Read/search remain available; do not rescan the whole database."})
             if counters['repair'] >= repair_limit:
                 stop_reason = 'repair budget exhausted'
                 break
             if idle >= idle_limit:
-                stop_reason = 'consecutive rounds without edits or executable failure feedback'
-                break
+                self.messages.append({'role':'user','content':'No implementation progress: name the exact missing evidence, '
+                    'then batch ready SQL/evidence writes or request schema repair. Do not repeat unchanged reads.'})
         error = AgentLoopExhausted(f"{label}: {stop_reason} after {turn} model calls; "
             f"rounds={counters}; files remain available for repair")
         error.turns, error.feedback, error.rounds = turn, self.last_feedback, counters
@@ -229,24 +232,76 @@ class DatabaseImplementationAgent(DatabaseFileAgent):
 
     def build_system_prompt(self):
         instructions = super().build_system_prompt()
+        instructions += '''
+If canonical schema cannot preserve supplied startup facts (missing credential column,
+source role excluded by a CHECK, incompatible FK/required field), call request_schema_repair
+with the specific contradiction and source refs. Do not keep guessing seed property names,
+add unmodeled SQL columns, drop an account, weaken source data, or declare credentials
+display-only. Host repairs the logical design then relowers affected SQL and resumes seeds.
+Ordinary SQL syntax or incorrect evidence bindings remain local implementation repairs.
+'''
         if self.kind == 'seeds':
             instructions += """
 COORDINATED SEED TASK
 The task already supplies explicit source records, canonical DDL, insertion file paths,
 existing insertion contents and the manifest path. Do not rediscover directories,
 search for loaders/package configuration or inspect unrelated platform internals.
-Use read_file only for a concrete omitted/changed span necessary for a repair.
+Read the needed omitted DDL/INSERT files in one native batch, then implement; do not
+keep querying unrelated definitions once the actual keys/constraints are available.
 Batch related parent and child INSERT edits together. Submit all ready edits in a
 response; for small files aim for several files together instead of one or two.
 Use additional responses only when the work genuinely needs another output batch.
-The deliverable includes BOTH insertion SQL and the COMPLETE seed evidence manifest.
-Write the manifest and call finish_implementation last in the final edit batch.
+The deliverable includes insertion SQL and evidence for EVERY current batch record.
+Use record_seed_evidence to merge only this batch's records; the host supplies hashes
+and preserves previous batches. Do not regenerate the entire accumulated manifest.
+Call finish_implementation last after SQL and evidence are ready.
 Keep explanations concise; spend the response on actual edits and source bindings.
 Successful changed-file rounds have an implementation budget sized from this task's
 insertion files; failed calls/checks have a separate repair budget. Do not exhaust
 either by repeating discovery or changing files without a concrete purpose.
 """
         return instructions
+
+    def build_tools(self):
+        tools = super().build_tools()
+        if self.kind=='seeds':
+            tools.append(AgentTool('record_seed_evidence','Merge evidence for the current source-data batch; host preserves earlier records and writes current fingerprints. Prefer this to rewriting the whole manifest.',
+                {'type':'object','properties':{'records':{'type':'object','additionalProperties':True}},
+                    'required':['records'],'additionalProperties':False},self.record_seed_evidence))
+        tools.append(AgentTool('request_schema_repair','Escalate a concrete schema/source contradiction to the DB design loop; preserve source data, do not guess missing columns.',
+            {'type':'object','properties':{'reason':{'type':'string'},
+                'source_refs':{'type':'array','items':{'type':'string'}},
+                'entities':{'type':'array','items':{'type':'string'}}},
+                'required':['reason','source_refs','entities'],'additionalProperties':False},self.request_schema_repair))
+        return tools
+
+    def record_seed_evidence(self, records):
+        from infrastructure.stages.database.seeds import MANIFEST
+        from infrastructure.utils.files import save_json
+        path = self.files.output/MANIFEST
+        previous = json.loads(path.read_text()) if path.is_file() else {}
+        before = deepcopy(previous)
+        hashes = {key:self.task[key] for key in ('source_sha256','schema_sha256')}
+        if any(previous.get(key)!=value for key,value in hashes.items()):
+            previous = {**hashes,'records':{}}
+        allowed = set(self.task.get('batch_record_ids',self.task['catalog']))
+        if not set(records)<=allowed:
+            raise ValueError('Merge only evidence IDs from the current batch: '+', '.join(sorted(allowed)))
+        previous.setdefault('records',{}).update(records)
+        if previous==before and path.is_file():
+            return {'unchanged_record_ids':list(records),'instruction':'Evidence is unchanged; implement missing SQL or finish, do not resubmit it.'}
+        save_json(path,previous)
+        self._turn_progress = True
+        self.accepted = None
+        return {'saved_record_ids':list(records),'retained_record_count':len(previous['records'])}
+
+    def request_schema_repair(self, reason, source_refs, entities):
+        if not reason.strip() or not source_refs:
+            raise ValueError('Cite the precise source/schema contradiction and its record/requirement IDs')
+        self.pending_schema_repair = {'reason':reason,'source_refs':source_refs,'entities':entities,
+            'implementation_task':self.kind,'last_feedback':self.last_feedback}
+        self.accepted = None
+        return {'status':'SCHEMA_REPAIR_REQUESTED','instruction':'Host resumes after source-backed schema repair; no more INSERT guessing is needed.'}
 
     def build_user_prompt(self, input):
         return {"database_task": self.kind, **super().build_user_prompt(input)}

@@ -98,7 +98,8 @@ def compile_data(raw, schema):
         refs = node.get("data", {}).get("requires", []) if isinstance(node.get("data"), dict) else []
         if not set(refs) <= set(records):
             raise ValueError(f"{node['id']}: unknown data.requires")
-        requirements[node["id"]] = refs
+        requirements[node["id"]] = list(dict.fromkeys([*refs,*[key for key,row in records.items()
+            if node['id'] in row.get('requirements',[])]]))
         for child in node.get("children", []) or []:
             visit(child)
     visit(raw)
@@ -126,7 +127,9 @@ def data_context(catalog, rid):
 
 def load_data(arc_dir):
     path = arc_dir / "data_bindings.json"
-    current = compile_data(read_artifact(arc_dir, "requirements.json"), read_artifact(arc_dir, "db_schema.json"))
+    from infrastructure.stages.database.startup import effective_requirements
+    raw = effective_requirements(read_artifact(arc_dir,'requirements.json'),arc_dir)
+    current = compile_data(raw, read_artifact(arc_dir, "db_schema.json"))
     if path.is_file():
         existing = read_artifact(arc_dir,path.name)
         if all(existing.get(k)==current[k] for k in ("source_sha256","schema_sha256")):

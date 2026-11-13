@@ -4,6 +4,17 @@ import json
 
 MANIFEST = "backend/src/db/seed-evidence.json"
 
+
+class SeedBindingError(ValueError):
+    def __init__(self, record, prop, row, field, rows, schema):
+        super().__init__(record+': invalid source property mapping: '+prop)
+        entity = rows[row].get('entity') if type(row) is int and 0<=row<len(rows) else None
+        self.feedback = {'record':record,'property':prop,'row':row,'field':field,'entity':entity,
+            'valid_row_indices':list(range(len(rows))),
+            'available_fields':list(schema['entities'].get(entity,{}).get('fields',{})),
+            'next_action':'Correct a mistaken evidence row/field if the schema supports this source property. '
+                'If it cannot, request_schema_repair with source IDs; do not invent fields or omit source facts.'}
+
 SEED_RULES = '''Implement startup INSERT SQL from the source data records AFTER reading the actual
 CREATE TABLE files. Source entity names and properties may be UI labels (e.g. a document
 record, warehouse display name, quantity or amount), not canonical SQL identifiers.
@@ -32,8 +43,12 @@ it produces scrypt$saltHex$digestHex. Record a property binding with transform=p
 instead of putting plaintext or a random generated hash in expected row fields.
 
 Edit per-table backend/src/db/seeds/TABLE.sql files. Each inserts only into its own table.
+If a table SQL file contradicts the canonical definitions (for example an invented CHECK
+excluding valid source roles), repair that DDL to match the supplied schema. Never add
+unmodeled columns or weaken legitimate constraints. If the LOGICAL schema itself is
+incomplete, use request_schema_repair rather than editing around its missing fields.
 Use idempotent INSERT ... SELECT ... WHERE NOT EXISTS or targeted ON CONFLICT;
-never INSERT OR IGNORE, DELETE, DROP, REPLACE, schema changes or disabling foreign keys.
+never INSERT OR IGNORE, DELETE, DROP, REPLACE, unapproved schema changes or disabling foreign keys.
 The loader runs in dependency order within a transaction, with deferred FK checks.
 Use stable record identities, preserve existing records on repeat startup, and avoid
 copying SQL into seed.ts or DDL. Use edit_file for SQL and the evidence manifest.
@@ -91,9 +106,10 @@ def sql_value(value):
     return int(value) if isinstance(value, bool) else json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
 
 
-def seed_assertions(output, schema, catalog):
+def seed_assertions(output, schema, catalog, record_ids=None):
     """Validate full source coverage; return row checks for the real DB startup gate."""
-    seeds = source_seed_records(catalog)
+    all_seeds = source_seed_records(catalog)
+    seeds = all_seeds if record_ids is None else {key:all_seeds[key] for key in record_ids}
     if not seeds:
         return []
     path = output / MANIFEST
@@ -103,7 +119,8 @@ def seed_assertions(output, schema, catalog):
     for key in ('source_sha256', 'schema_sha256'):
         if evidence.get(key) != catalog[key]:
             raise ValueError('Seed evidence is stale: ' + key)
-    if set(evidence.get('records', {})) != set(seeds):
+    evidence_ids = set(evidence.get('records',{}))
+    if (record_ids is None and evidence_ids!=set(seeds)) or not set(seeds)<=evidence_ids or evidence_ids-set(all_seeds):
         raise ValueError('Seed evidence must cover exactly every explicit SEED record')
     result = []
     for rid, source in seeds.items():
@@ -157,8 +174,10 @@ def seed_assertions(output, schema, catalog):
                     selected = selected[key]
                 index, field = binding.get('row'), binding.get('field')
                 if (type(index) is not int or not 0 <= index < len(rows)
-                        or field not in schema['entities'][rows[index]['entity']]['fields']):
-                    raise ValueError(rid + ': invalid source property mapping: ' + name)
+                        or not isinstance(field,str) or field not in schema['entities'][rows[index]['entity']]['fields']):
+                    raise SeedBindingError(rid,name,index,field,rows,schema)
+                if source.get('entity')=='test account' and name=='password' and binding.get('transform')!='password_hash':
+                    raise ValueError(rid+': source account password requires transform=password_hash and seed_password_hash SQL, not plaintext storage')
                 if binding.get('transform') == 'password_hash':
                     if not isinstance(selected, str) or field in rows[index]['fields']:
                         raise ValueError(rid + ': omit generated hash from fields; source password must be text')

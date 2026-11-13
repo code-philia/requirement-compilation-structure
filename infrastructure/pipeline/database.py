@@ -96,7 +96,7 @@ def inspect_ddl(output, schema, names):
     return {'status': 'GENERATED', 'tables': names, 'check': 'DDL executed in memory'}
 
 
-def implement_db(arc_dir: Path, pause=False, max_attempts=10, max_turns=10):
+def _implement_db_attempt(arc_dir: Path, pause=False, max_attempts=10, max_turns=10, model=None):
     schema_path = arc_dir / 'db_schema.json'
     if not schema_path.is_file():
         raise ValueError('Run 02_build_db_schema and 03_infer_db_obligations before SQL implementation')
@@ -112,7 +112,7 @@ def implement_db(arc_dir: Path, pause=False, max_attempts=10, max_turns=10):
     report = {'status': 'IMPLEMENTING', 'schema_sha256': signature(schema['entities']),
         'order': order, 'tables': {}, 'batches': []}
     failures = TaskFailures(arc_dir, '04_implement_db', console)
-    model = TextModel(json_mode=False)
+    model = model or TextModel(json_mode=False)
     for index, names in enumerate(batches, 1):
         label = f'batch {index}/{len(batches)}: ' + ', '.join(names)
         entry = {'tables': names, 'status': 'RUNNING'}
@@ -120,8 +120,16 @@ def implement_db(arc_dir: Path, pause=False, max_attempts=10, max_turns=10):
         with failures.task(label):
             referenced = set().union(*(set(dependencies[name]) for name in names)) - set(names)
             definitions = {name: schema['entities'][name] for name in names}
-            inputs = signature({'tables': definitions,
-                'references': {name: schema['entities'][name] for name in referenced}})
+            # Only referenced key definitions can affect this batch's FK contract;
+            # an unrelated password/role column in the target need not regenerate it.
+            reference_keys = {}
+            for entity in definitions.values():
+                for field in entity['fields'].values():
+                    if field.get('references'):
+                        target,key = field['references'].split('.',1)
+                        if target in referenced:
+                            reference_keys.setdefault(target,{})[key] = schema['entities'][target]['fields'][key]
+            inputs = signature({'tables': definitions,'reference_keys':reference_keys})
             reused = all(previous.get('tables', {}).get(name, {}).get('input_sha256') == inputs
                 and (output / paths[name]).is_file()
                 and previous['tables'][name].get('sql_sha256') == signature(read_source(output / paths[name]))
@@ -176,3 +184,39 @@ def implement_db(arc_dir: Path, pause=False, max_attempts=10, max_turns=10):
     save_json(report_path, report)
     failures.finish()
     return report
+
+
+def implement_db(arc_dir: Path, pause=False, max_attempts=10, max_turns=10):
+    """Bounded design/DDL/INSERT feedback cycle; unchanged SQL batches are reused."""
+    from infrastructure.stages.database.startup import reconcile_startup_schema, SchemaRepairRequested
+    if not (arc_dir/'db_schema.json').is_file():
+        raise ValueError('Complete database schema and obligations before SQL implementation')
+    console, model = DemoConsole(pause), TextModel(json_mode=False)
+    repairs, request = [], None
+    for cycle in range(3):
+        schema = json.loads(read_source(arc_dir/'db_schema.json'))
+        try:
+            repair = reconcile_startup_schema(arc_dir,schema,model=model,console=console,
+                request=request,max_turns=max(24,max_turns))
+        except (ValueError,RuntimeError) as error:
+            save_json(arc_dir/'db_schema_repairs.json',{'status':'FAILED','cycles':repairs,
+                'pending_request':request,'error':str(error)})
+            raise
+        repairs.append(repair)
+        save_json(arc_dir/'db_schema_repairs.json',{'status':'RUNNING','cycles':repairs})
+        try:
+            report = _implement_db_attempt(arc_dir,pause,max_attempts,max_turns,model=model)
+            report['schema_reconciliation'] = repairs
+            save_json(arc_dir/'db_implementations.json',report)
+            save_json(arc_dir/'db_schema_repairs.json',{'status':report['status'],'cycles':repairs})
+            return report
+        except SchemaRepairRequested as error:
+            request = error.request
+            console.show('Database | Reconcile schema before resuming SQL',
+                request['reason']+'\nAffected DDL is relowered; unchanged batches stay reusable. Source records are retained.')
+    save_json(arc_dir/'db_schema_repairs.json',{'status':'FAILED','cycles':repairs,'pending_request':request})
+    if (arc_dir/'db_implementations.json').is_file():
+        report = json.loads(read_source(arc_dir/'db_implementations.json'))
+        report.update(status='FAILED',schema_reconciliation=repairs,pending_schema_repair=request)
+        save_json(arc_dir/'db_implementations.json',report)
+    raise RuntimeError('Database source/schema contradiction remains after bounded reconciliation; see .arc/db_schema_repairs.json')
