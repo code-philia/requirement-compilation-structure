@@ -43,13 +43,13 @@ def original_source_requirement_dependencies(raw, rid):
     return None
 
 
-def verify_frontend(arc_dir, tree, backend, ui, console, report, *, checks=None):
+def verify_frontend(arc_dir, tree, backend, ui, console, report, *, checks=None, source_tests=None):
     """Check current files after the requirement implementation pass."""
     output = arc_dir.parent.resolve()
     checks = checks if checks is not None else E2EChecks(output)
     ui_checks = FrontendChecks(output)
     console.show("Final frontend verification", "Run requirement acceptance suites, UI regression, backend checks and builds against current sources.")
-    files = [test_path(rid) for rid in tree.leaves
+    files = source_tests.specs if source_tests is not None else [test_path(rid) for rid in tree.leaves
         if (output / test_path(rid)).is_file()]
     ui_files = [] if ui.get("outline") else [ui_test_path(pid) for pid in ui["pages"] if (output / ui_test_path(pid)).is_file()]
     api_checks = BackendChecks(output)
@@ -67,7 +67,7 @@ def verify_frontend(arc_dir, tree, backend, ui, console, report, *, checks=None)
     raw = read_artifact(arc_dir, 'requirements.json')
     executed = verification.get('e2e', {}).get('result') or {}
     report['navigation_evidence'] = navigation_evidence(ui,executed)
-    coverage = source_coverage(tree, raw, report, output, test_path, executed)
+    coverage = source_tests.coverage(executed) if source_tests is not None else source_coverage(tree, raw, report, output, test_path, executed)
     verification['source_coverage'] = coverage
     failed_requirements = [rid for rid in tree.leaves
         if report['requirements'].get(rid, {}).get('status') not in {'GREEN', 'NO_UI'}]

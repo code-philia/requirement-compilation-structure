@@ -1,4 +1,4 @@
-"""A leaf-local native agent: lightweight UI design, browser tests, implementation."""
+"""A leaf-local native agent: design, implementation and immutable source acceptance."""
 
 from copy import deepcopy
 import hashlib
@@ -24,15 +24,13 @@ RULES = '''Complete ONE leaf requirement in this SAME conversation, in order:
 1. DESIGN: read the supplied source scenarios/UI evidence and related backend inventory.
    Reuse accepted pages, shell and components. Call save_design with a SHORT description
    of pages/components, main actions/states, routes, API IDs and actual file locations.
-   No component tree, trigger DSL or detailed UI contract. Then begin_tests.
-2. GENERATE TESTS: write_test creates the current source-based Playwright suite BEFORE
-   production implementation. Name EVERY source scenario ID in executed test titles.
-   Derive Given/When/Then assertions from source, not the plan or existing code.
-   Then begin_tdd: it checks test compilation only, without wasting browser time against
-   absent UI. TESTS_COMPILED is NOT behavioral acceptance. Missing UI is implemented next.
-3. IMPLEMENT: use edit_file for real React components, state, routing and HTTP integration.
-   Then finish_requirement runs the browser, cumulative regression and publication.
-   Use run_tests for intermediate diagnosis. Repair observed causes in this same history.
+   No component tree, trigger DSL or detailed UI contract. Then begin_implementation.
+2. IMPLEMENT FIRST: inspect the supplied tests/helpers, then use edit_file for a complete
+   initial version of real components, state, routing and HTTP integration. Reuse actual
+   working owners. Implement first instead of running tests against absent pages.
+3. ACCEPT AND REPAIR: finish_requirement runs matching EXISTING tests then publishes.
+   A final pass regresses all supplied tests. run_tests diagnoses after implementation.
+   Repair application code in this same conversation. No frontend tests are generated.
 
 COMPONENT ORGANIZATION
 App.tsx owns composition/routes, not every feature's markup, forms and business logic.
@@ -69,27 +67,20 @@ Choose ONE submission owner, e.g. Form.onSubmit. Do not post again in onClick or
 Maintain a per-operation pending flag; retries preserve actual protocol idempotency rules.
 Do not add global request deduplication that suppresses legitimate separate operations.
 
-TESTS
-Use the supplied compiler-owned Playwright fixture test/expect/database with a relative
-.js import from task.test_support. The real browser and backend share an isolated DB;
-the fixture restores startup data before each test. prepareGiven wraps ONLY prerequisite
-Given setup, not When/Then or real network/runtime errors. Do not rely on previous tests.
-Capture actual generated IDs. Never invent a business fixture convention or fixed login.
-Optional loginGiven/ownership helpers are valid only when their documented transport and
-schema match this application. Use source accounts and actual API transport for isolated
-Given, but drive the current scenario's When through accessible browser controls.
-Assert visible results and source-required rejection/persistence/ownership/atomicity.
-Use actual downloads for export; real requests supplement permission rejection tests.
-No page.route mocks, injected application state, hidden test-only branches or skipped tests.
-Keep labels accessible (Form labels alone may not label composite Arco controls).
-For duplicate activation use one actionability-checked dblclick rather than concurrent
-click promises on a disappearing button. APIResponse and browser Response have different
-types; helpers accepting page/dialog scopes should type Page | Locator. Cast database
-.get()/.all() to actual row types before accessing fields under strict TypeScript.
-Tests are retained during implementation. For an evidenced CURRENT-suite fixture/locator/
-type mechanics defect or an omitted source scenario, call repair_test_mechanics with source refs, then write_test for
-local corrections. Preserve source expectations and all prior tests. Correction permission
-lasts until the next verification. Never change assertions merely to pass wrong behavior.
+SUPPLIED TESTS ARE READONLY
+Source tests are copied byte-for-byte from input/tests. Their filenames (requirement IDs)
+select acceptance, not generated SCN title patterns. Read task.source_test_paths and
+source_test_root/support only for concrete observable requirements. Their actual imports,
+helpers, login/menu flows, expectations and configuration are authoritative test inputs.
+The runner starts the real local application on isolated ports with a new startup DB;
+E2E_BASE_URL points at that local frontend. Source-defined setup/lifecycle stays unchanged.
+Do not create, edit, skip, rewrite or weaken tests/helpers/config, add test-only code,
+mock responses, inject When/Then outcomes, or change source seed data to trick assertions.
+When no same-ID source test exists, implement the requirement and supporting shared
+modules, then finish normally as GREEN. Do not generate substitutes or request test coverage.
+Some supplied tests check only UI structure. Implement the full described business
+behavior as well; passing those tests alone is not proof of every business scenario.
+For a genuine test or backend defect, report the exact source/test evidence and blocker.
 
 TOOLS AND PROGRESS
 Read tools remain available throughout. Inspect enough evidence in one or two focused
@@ -97,12 +88,12 @@ batches, then act. Batch independent read/write calls in one response; execute v
 last. Reuse supplied startup/reference excerpts and cached results. Do not browse the whole
 application or reread unchanged helpers. Repeated reads get soft progress reminders, not
 hard discovery budgets. Only implementation verification/fix attempts have a budget
-(default 10). Initial test compilation and cached GREEN publication are free.
+(default 10). Cached GREEN publication is free. Source tests are never regenerated.
 Unchanged failed checks reuse diagnostics but count as retries. Repeated failures require
 a different evidence-based strategy or report_blocker, not another identical check.
 edit_file requires path/operation/new_content; create ONLY for absent files, otherwise
 replace with unique exact old_content or append/prepend. No rename/new_path or wrappers.
-write_test targets this suite automatically without a path. Successful tool calls remain
+All test paths are readonly. Successful tool calls remain
 saved if another batch call fails: resend only the failed call with smaller valid JSON.
 save_design updates small metadata during implementation when actual file/API choices
 change; do not restart design or rewrite correct code merely for a metadata correction.
@@ -115,31 +106,26 @@ After format feedback correct only the named fields using the supplied example, 
 another full redesign. Reads have no new hard budget; report a concrete blocker when
 you cannot resolve a specified gap instead of repeating the same invalid proposal.
 
-NAVIGATION ACCEPTANCE
-For source-required reachable pages, navigate by the real menu/link/button and assert
-both destination URL (when routed) and a page-specific landmark, not just menu text.
-page.goto may bootstrap login/entry, but must not replace the navigation being tested.
-Use supplied navigateAndAssert for reload and back/forward when appropriate to the
-source and actual routing. Dialog-only workflows are tested by opening/closing dialogs,
-not by inventing routes. Preserve source-required return destinations across login;
-unknown paths need an explicit fallback or deliberate redirect, not a silent wrong page.
-Choose actual labels/paths/identities from source, never from a fixed domain fixture.
-Reuse the shared accessible-control helper at task.accessibility_reference.path;
-do not add both an outer aria-label and an inner label association that creates two
-controls with the same name. After changing a shared helper, preserve all previous
-imports/callers and run cumulative acceptance. For large page expansion create focused
-new components and locally wire existing composition; do not keep retrying a rejected
-whole-file replacement. The tool provides exact local diff spans for that purpose.
+NAVIGATION AND ACCESSIBILITY
+Implement the real menu/link/dialog transitions expected by the existing source tests.
+Source-required return destinations, reload and back/forward should work. Dialog-only
+states need actual dialogs, not invented routes. Use actual source names and identities.
+Reuse task.accessibility_reference; do not label both outer combobox and inner input
+with the same name. Preserve prior shared helper imports/callers and cumulative behavior.
+For large page expansion create focused new components and locally wire composition;
+do not repeatedly submit rejected whole-file replacements. Never change tests to match
+an inaccessible control or a disconnected page.
+
 '''
 
 
 class FrontendBuildAgent(BaseAgent):
-    def __init__(self, plan, backend, schema, rid, files, gate, compile_tests, *,
+    def __init__(self, plan, backend, schema, rid, files, gate, *,
             fingerprint, persist=None, on_phase=None, max_test_iterations=None, **options):
         super().__init__(**options)
         self.plan, self.backend, self.schema = deepcopy(plan), backend, schema
         self.initial_plan = deepcopy(plan)
-        self.rid, self.files, self.gate, self.compile_tests = rid, files, gate, compile_tests
+        self.rid, self.files, self.gate = rid, files, gate
         self.fingerprint, self.persist = fingerprint, persist or (lambda plan:None)
         self.on_phase = on_phase or (lambda phase:None)
         self.logger.name = type(self).__name__+':'+rid
@@ -150,10 +136,9 @@ class FrontendBuildAgent(BaseAgent):
         if self.max_test_iterations < 1:
             raise ValueError('FRONTEND_TEST_ITERATIONS must be positive')
         self.revision, self.code_revision = 0, 0
-        self.allow_test_repair, self.require_build = False, False
+        self.require_build = False
         self.last_check_state, self.last_test_result, self.last_feedback = None, None, None
         self.failure_counts, self.read_observations, self.contract_observations = {}, set(), {}
-        self.test_observation_state, self.test_observation = None, None
         self.stop_reason = None
 
     def budget(self):
@@ -192,36 +177,23 @@ class FrontendBuildAgent(BaseAgent):
             description, parameters = native_file_definition(schema)
             def bind_file(selected):
                 def invoke(**arguments):
-                    if selected == 'edit_file' and arguments.get('path') == self.task['test_path']:
-                        raise ValueError('Use write_test for the current suite; prior suites are readonly')
+                    if selected == 'edit_file' and '/tests/' in arguments.get('path',''):
+                        raise ValueError('Supplied tests/support/config are readonly; repair application code')
                     return self.file_call(selected,arguments)
                 return invoke
             tools.append(AgentTool(name,description,parameters,bind_file(name)))
         empty = {'type':'object','properties':{},'additionalProperties':False}
         if self.phase == 'design':
-            tools += [AgentTool('begin_tests','Finish lightweight design and start source-based test generation in this same history.',empty,self.begin_tests),
-                AgentTool('skip_frontend','Exclude only a source-backed requirement with no browser-facing behavior; cite source evidence.',
+            tools += [AgentTool('begin_implementation','Finish lightweight design and implement an initial application version before running supplied tests.',empty,self.begin_implementation),
+                AgentTool('skip_frontend','Exclude only source-backed non-browser behavior with NO supplied tests; cite evidence.',
                     {'type':'object','properties':{'reason':{'type':'string'},'source_refs':STRINGS},
                         'required':['reason','source_refs'],'additionalProperties':False},self.skip_frontend)]
         else:
-            schema = next(s for s in self.files.schemas() if s['tool']=='edit_file')
-            _, parameters = native_file_definition(schema)
-            parameters['properties'].pop('path',None)
-            parameters['required'] = [key for key in parameters['required'] if key!='path']
-            if not self.require_build:
-                tools.append(AgentTool('write_test','Write the current suite only, with operation/new_content and exact old_content for replace. During TDD first obtain repair_test_mechanics permission; it lasts until verification.',parameters,self.write_test))
-            tools.append(AgentTool('run_tests','Optional intermediate observation: compile tests in test generation, real browser/cumulative acceptance in implementation.',empty,self.run_tests))
-            tools.append(AgentTool('require_dependency','Declare a necessary frontend npm library and semver; host installs before verification.',
-                {'type':'object','properties':{'name':{'type':'string'},'version':{'type':'string'},'reason':{'type':'string'}},
-                    'required':['name','version','reason'],'additionalProperties':False},self.require_dependency))
-            if self.phase == 'tests':
-                tools.append(AgentTool('begin_tdd','Compile generated tests then enable production edits. This does not claim browser behavior passes.',empty,self.begin_tdd))
-            else:
-                tools.append(AgentTool('finish_requirement','Verify actual UI and accepted browser scenarios, then publish this leaf; reuses unchanged GREEN.',empty,self.finish))
-                if not self.require_build:
-                    tools.append(AgentTool('repair_test_mechanics','Permit an evidenced current-suite mechanics correction only; preserve source When/Then and prior suites.',
-                        {'type':'object','properties':{'reason':{'type':'string'},'source_refs':STRINGS},
-                            'required':['reason','source_refs'],'additionalProperties':False},self.repair_test_mechanics))
+            tools += [AgentTool('run_tests','After initial implementation, run the exact supplied tests and accepted regression. Tests are never editable.',empty,self.run_tests),
+                AgentTool('finish_requirement','Accept the implementation using supplied readonly tests; reuse unchanged passing results.',empty,self.finish),
+                AgentTool('require_dependency','Declare a necessary frontend npm library and semver; host installs before verification.',
+                    {'type':'object','properties':{'name':{'type':'string'},'version':{'type':'string'},'reason':{'type':'string'}},
+                        'required':['name','version','reason'],'additionalProperties':False},self.require_dependency)]
         return tools
 
     def save_design(self, items, uses, notes):
@@ -270,7 +242,7 @@ class FrontendBuildAgent(BaseAgent):
             self.completed = None
         self.persist(self.plan)
         return {'saved':list(items),'uses':uses,'reference_diagnostics':warnings,'external_references':external,
-            'next_action':'Design is retained. Resolve source-relevant missing links as needed, then begin_tests; do not resubmit unrelated records.'}
+            'next_action':'Design is retained. Resolve source-relevant missing links as needed, then begin_implementation; do not resubmit unrelated records.'}
 
     def retained_records(self, kind, records):
         result = {}
@@ -296,36 +268,20 @@ class FrontendBuildAgent(BaseAgent):
             'already_supplied':[name for name in names if name in supplied],
             'missing':[name for name in names if name not in self.schema['entities']]}
 
-    def begin_tests(self):
+    def begin_implementation(self):
         if self.phase != 'design' or self.rid not in self.plan['requirements']:
-            raise ValueError('Save the current lightweight design before begin_tests')
-        self.phase = 'tests'
+            raise ValueError('Save the lightweight design first')
+        self.phase = 'implementation'
         self.on_phase(self.phase)
         self.tools = {tool.name:tool for tool in self.build_tools()}
-        return {'phase':self.phase,'test_path':self.task['test_path'],
-            'design_reference':'Earlier save_design and source scenarios retained in this conversation.',
-            'navigation_targets':[{key:item[key] for key in ('purpose','route') if key in item}
-                for identity in self.plan['requirements'].get(self.rid,[]) if (item:=self.plan['items'].get(identity,{})).get('route','').startswith('/')],
-            'next_action':'write_test, then begin_tdd. No full-context replay is needed.'}
+        return {'phase':self.phase,'source_test_paths':self.task['source_test_paths'],
+            'next_action':'Implement a complete initial version with edit_file, then finish_requirement. Do not write tests.'}
 
     def file_call(self, name, arguments):
         result = execute_native_file(self.files,name,arguments)
         if name=='edit_file' and any(c['before']!=c['after'] for c in self.files.last_changes):
             self.code_revision += 1
             self.completed = None
-        return result
-
-    def write_test(self, operation, new_content, old_content=''):
-        if self.require_build or (self.phase!='tests' and not self.allow_test_repair):
-            raise ValueError('Tests are retained: first repair_test_mechanics with source evidence; prior suites are readonly')
-        result = self.file_call('edit_file',{'path':self.task['test_path'],'operation':operation,
-            'new_content':new_content,'old_content':old_content})
-        if isinstance(result,dict) and result.get('status')=='NEEDS_REPAIR':
-            feedback = result.get('feedback',{})
-            feedback['tool_name'] = 'write_test'
-            if 'message' in feedback:
-                feedback['message'] = feedback['message'].replace('native edit_file','native write_test')
-            feedback.get('example_arguments',{}).pop('path',None)
         return result
 
     def require_dependency(self, name, version, reason):
@@ -339,12 +295,6 @@ class FrontendBuildAgent(BaseAgent):
         self.pending_dependencies = True
         return {'dependency':name,'version':version,'note':'Host installs before verification.'}
 
-    def repair_test_mechanics(self, reason, source_refs):
-        if self.require_build or not reason.strip() or not source_refs:
-            raise ValueError('Cite a current-suite mechanics defect and preserved source expectations; accepted suites stay readonly')
-        self.allow_test_repair = True
-        return {'editable_test':self.task['test_path'],'instruction':'Use write_test for all necessary local mechanics corrections, preserving source assertions. Next verification closes permission.'}
-
     def report_blocker(self, reason, evidence):
         if not reason.strip() or not evidence:
             raise ValueError('Supply a precise blocker with observed source/endpoint/error evidence')
@@ -354,6 +304,8 @@ class FrontendBuildAgent(BaseAgent):
     def skip_frontend(self, reason, source_refs):
         if not reason.strip() or not source_refs:
             raise ValueError('Explain and cite why no source browser behavior belongs to this leaf')
+        if self.task.get('source_test_paths'):
+            raise ValueError('This requirement has supplied browser tests and cannot be skipped')
         self.plan = deepcopy(self.initial_plan)
         self.plan['requirements'][self.rid] = []
         self.plan['notes'][self.rid] = reason
@@ -389,26 +341,12 @@ class FrontendBuildAgent(BaseAgent):
         return {'status':'NEEDS_REPAIR','feedback':self.last_feedback,'same_error_count':count,
             'budget':self.budget(),'strategy_change_recommended':count>=3,
             'next_action':('Change repair strategy using this evidence or report a precise blocker.' if count>=3 else
-                'Repair the specific source/interaction cause. For a test mechanics defect cite source before correction. Do not repeat unchanged verification.')}
+                'Repair the specific source/interaction cause. For a genuine source-test defect report the exact blocker; never edit tests. Do not repeat unchanged verification.')}
 
     def run_tests(self):
         state = (self.fingerprint(),self.require_build)
-        if self.phase=='tests':
-            path = self.files.path(self.task['test_path'])
-            if not path.is_file() or not path.read_text(encoding='utf-8-sig').strip():
-                return {'status':'WRITE_TESTS_FIRST','test_path':self.task['test_path']}
-            if state == self.test_observation_state and self.test_observation is not None:
-                return {**self.verification_feedback(self.test_observation),'reused_unchanged_observation':True}
-            try:
-                result = {'status':'TESTS_COMPILED','checks':self.compile_tests(self),
-                    'behavior':'NOT_RUN_BEFORE_IMPLEMENTATION'}
-            except (ValueError,RuntimeError) as error:
-                result = self.failed(getattr(error,'feedback',{'error':str(error)}))
-            self.test_observation_state, self.test_observation = (self.fingerprint(),self.require_build), result
-            return self.verification_feedback(result)
         if self.phase!='implementation':
-            return {'status':'DESIGN_REQUIRED','next_action':'save_design then begin_tests'}
-        self.allow_test_repair = False
+            return {'status':'DESIGN_REQUIRED','next_action':'save_design then begin_implementation, implement first, then verify'}
         if state==self.last_check_state and self.last_test_result is not None:
             result = self.last_test_result
             if result['status']!='GREEN':
@@ -430,18 +368,6 @@ class FrontendBuildAgent(BaseAgent):
             self.stop_reason = 'TDD test/fix iteration limit reached'
         return {**self.verification_feedback(result),'budget':self.budget()}
 
-    def begin_tdd(self):
-        if self.phase!='tests':
-            raise ValueError('Complete design and source tests first')
-        observation = self.run_tests()
-        if observation.get('status')!='TESTS_COMPILED':
-            return observation
-        self.phase, self.allow_test_repair = 'implementation', False
-        self.on_phase(self.phase)
-        self.tools = {tool.name:tool for tool in self.build_tools()}
-        return {'phase':self.phase,'tests_retained':True,'initial_observation':observation,
-            'next_action':'Implement real UI/components in the designed files; finish_requirement verifies browser behavior.'}
-
     def finish(self):
         self.completed = None
         result = self.run_tests()
@@ -455,12 +381,7 @@ class FrontendBuildAgent(BaseAgent):
         if call.function.name=='save_design':
             result.update(getattr(error,'feedback',{'example_arguments':deepcopy(DESIGN_EXAMPLE)}))
             result['known_ui_ids'] = list(self.plan['items'])[:20]
-        if call.function.name=='write_test':
-            result['next_action'] = 'Current-suite mechanics corrections require repair_test_mechanics, then write_test. Previous suites remain readonly.'
-            result['example_arguments'] = {'operation':'create' if not self.files.path(self.task['test_path']).is_file() else 'replace',
-                'new_content':'test source (exact replacement for replace)'}
-            if result['example_arguments']['operation']=='replace':
-                result['example_arguments']['old_content'] = 'unique exact current span'
+
         return result
 
     def exhausted(self, reason):
@@ -505,7 +426,7 @@ class FrontendBuildAgent(BaseAgent):
             if repeated or no_progress>=3 or not calls:
                 self.messages.append({'role':'user','content':json.dumps({'progress_reminder':{
                     'phase':self.phase,'repeated_reads':repeated,'rounds_without_progress':no_progress,
-                    'instruction':'Reuse retained evidence. Name one precise missing fact or advance design -> tests -> actual source edits/verification. Reading remains available.'}},ensure_ascii=False)})
+                    'instruction':'Reuse retained evidence. Name one precise missing fact or advance design -> initial implementation -> supplied-test acceptance. Reading remains available.'}},ensure_ascii=False)})
 
     def run(self, input, console):
         self.task = input
@@ -514,7 +435,7 @@ class FrontendBuildAgent(BaseAgent):
         return self.loop(console)
 
     def repair_integration(self, feedback, console):
-        self.require_build, self.completed, self.allow_test_repair = True, None, False
+        self.require_build, self.completed = True, None
         self.messages.append({'role':'user','content':json.dumps({'final_integration_feedback':compact_feedback(feedback),
             'instruction':'Repair frontend build/integration using the remaining SAME iteration budget. All accepted suites and backend are readonly.'},ensure_ascii=False)})
         return self.loop(console)

@@ -1,4 +1,4 @@
-"""One dependency-ordered leaf traversal: design, source tests, native UI TDD."""
+"""One leaf traversal: design, initial implementation, supplied-test acceptance."""
 
 from copy import deepcopy
 import hashlib
@@ -8,7 +8,6 @@ from infrastructure.shared.agent.files import editable_application_path
 from infrastructure.shared.agent.feedback import CheckFailure
 from infrastructure.shared.agent.incremental import RequirementCheckpoints
 from infrastructure.shared.agent.recovery import implementation_task
-from infrastructure.shared.agent.testing_reference import testing_reference
 from infrastructure.shared.agent.tools import FileTools
 from infrastructure.shared.models.text import TextModel
 from infrastructure.shared.project.dependencies import install_dependencies
@@ -22,11 +21,11 @@ from infrastructure.stages.frontend.check_cache import FrontendCheckCache
 from infrastructure.stages.frontend.outline import normalize_plan_paths, implementation_path
 from infrastructure.stages.frontend.context import load_frontend_context
 from infrastructure.stages.frontend.triggers.acceptance import original_requirements
-from infrastructure.stages.frontend.triggers.e2e_runtime import CONFIG, FIXTURE, VITE_CONFIG, prepare_e2e
+from infrastructure.stages.frontend.triggers.e2e_runtime import CONFIG, VITE_CONFIG
+from infrastructure.stages.frontend.source_tests import SourceTests, SourceE2EChecks, prepare_source_e2e, ROOT as SOURCE_TEST_ROOT
 from infrastructure.stages.frontend.verification import verify_frontend, require_stable_acceptance
-from infrastructure.stages.frontend.triggers.testing import E2EChecks, test_path
 from infrastructure.stages.frontend.ui.runtime import APPLICATION_ENTRYPOINTS, prepare_frontend
-from infrastructure.stages.requirements.acceptance import source_expectations, test_accounts, require_scenario_coverage
+from infrastructure.stages.requirements.acceptance import test_accounts
 from infrastructure.utils.files import read_artifact, save_json
 from infrastructure.utils.presentation.console import DemoConsole
 
@@ -71,19 +70,18 @@ def build_frontend(input_dir, arc_dir, pause=False, max_test_iterations=None):
     tree = original_requirements(input_dir)
     raw = read_artifact(arc_dir,'requirements.json')
     order = list(tree.leaves)
-    oracles = {rid:source_expectations(raw,rid) for rid in order}
-    save_json(arc_dir/'acceptance_evidence.json',oracles)
+    catalog = SourceTests(input_dir,output,order)
     console = DemoConsole(pause)
     runtime = {}
     def bind_checks():
-        runtime['checks'] = E2EChecks(output)
+        runtime['checks'] = SourceE2EChecks(output,catalog)
     preparation = prepare_with_recovery(arc_dir,[
         ('node_runtime',bind_checks),
         ('frontend_runtime',lambda:prepare_frontend(output)),
-        ('browser_runtime',lambda:prepare_e2e(output,backend)),
+        ('source_test_runtime',lambda:prepare_source_e2e(output,backend,catalog,arc_dir)),
         ('dependencies',lambda:install_dependencies(output)),
         ('arco_types',lambda:validate_component_types(output)),
-        ('chromium',lambda:runtime['checks'].install_browser())],console,report_name='frontend_preparation.json')
+        ('chromium',lambda:runtime['checks'].install_browser() if catalog.specs else None)],console,report_name='frontend_preparation.json')
     if preparation['status']!='GREEN':
         report = {'status':'FAILED','error':preparation['error'],'requirements':{},
             'preparation':preparation,'verification':{'environment':preparation},
@@ -95,68 +93,59 @@ def build_frontend(input_dir, arc_dir, pause=False, max_test_iterations=None):
     plan = read_artifact(arc_dir,'frontend_plan.json') if (arc_dir/'frontend_plan.json').is_file() else {
         'kind':'frontend','items':{},'requirements':{},'notes':{}}
     plan = normalize_plan_paths(plan,output)
-    plan.update(architecture='native_leaf_design_tests_tdd',status='IMPLEMENTING')
-    report = {'status':'IMPLEMENTING','architecture':'native_leaf_design_tests_tdd','order':order,
-        'requirements':{},'tests':{},'preparation':preparation}
+    plan.update(architecture='native_leaf_implement_source_tests',status='IMPLEMENTING')
+    report = {'status':'IMPLEMENTING','architecture':'native_leaf_implement_source_tests','order':order,
+        'requirements':{},'tests':{},'preparation':preparation,'source_tests':catalog.manifest}
     # Existing source, UI evidence and actual endpoint changes all invalidate stale
     # acceptance. Source import associations protect unrelated accepted pages.
     resume = RequirementCheckpoints(arc_dir,'frontend',raw,lambda rid:{
-        'version':'native_frontend_v2_navigation_accessibility','schema':schema,
+        'version':'native_frontend_v3_supplied_tests','source_tests':catalog.fingerprints(rid),'schema':schema,
         'backend':backend,'source_context':contexts[rid],'design':selected_design(plan,rid)})
     references = arco_references()
     if (output/'reference').is_dir():
         references['references/source'] = output/'reference'
     accepted, last_agent = [], None
     dependency_paths = ('frontend/package.json','package-lock.json','npm-shrinkwrap.json','frontend/package-lock.json')
-    fixture_paths = [FIXTURE,CONFIG,VITE_CONFIG,'frontend/tests/e2e/support/helpers.ts',
-        'frontend/tests/e2e/support/navigation.ts','frontend/src/components/accessibility.tsx','backend/tests/support/helpers.ts']
+    fixture_paths = [CONFIG,VITE_CONFIG,'frontend/src/components/accessibility.tsx',*catalog.files]
     for rid in order:
-        relative = test_path(rid)
+        test_paths = catalog.bindings[rid]
         reused = resume.reuse(rid)
         if reused:
             report['requirements'][rid] = reused
             accepted.append(rid)
-            report['tests'][rid] = relative
-            console.show('Frontend | Reuse '+rid,'Accepted source, tests, evidence and design are unchanged; cumulative regression remains enabled.')
+            report['tests'][rid] = test_paths
+            console.show('Frontend | Reuse '+rid,'Implementation and supplied test evidence are unchanged; cumulative acceptance remains enabled.')
             continue
-        entry = report['requirements'][rid] = {'status':'DESIGNING','requirements':[rid],'test_path':relative}
+        entry = report['requirements'][rid] = {'status':'DESIGNING','requirements':[rid],'test_paths':test_paths}
+        if test_paths:
+            entry['test_path'] = test_paths[0]
         save_json(arc_dir/'frontend_e2e.json',report)
         agent = None
-        with implementation_task(output,entry,console,'Frontend design/tests/implementation '+rid,extra_paths=dependency_paths):
+        with implementation_task(output,entry,console,'Frontend design/implementation/source acceptance '+rid,extra_paths=dependency_paths):
             holder = {}
-            def writable(path, _holder=holder, _test=relative):
+            def writable(path, _holder=holder):
                 owner = _holder['agent']
-                if path==_test:
-                    return not owner.require_build and (owner.phase=='tests' or owner.allow_test_repair)
                 return owner.phase=='implementation' and path.startswith('frontend/src/') and editable_application_path(output,path)
             files = FileTools(output,['frontend','backend'],requirements=[rid],stage='frontend',
-                discovery=True,references=references,files=[*APPLICATION_ENTRYPOINTS,PROVIDER_PATH,FIXTURE,relative],allow_write=writable)
-            current = [test_path(key) for key in [*accepted,rid]]
-            expectations = [oracles[key] for key in [*accepted,rid]]
+                discovery=True,references=references,files=[*APPLICATION_ENTRYPOINTS,PROVIDER_PATH,*test_paths],allow_write=writable)
+            current = catalog.selected([rid])
             def ensure_dependencies(owner):
                 if owner.pending_dependencies:
                     install_dependencies(output)
                     owner.pending_dependencies = False
-            def compile_tests(owner, _relative=relative):
+            def acceptance(owner, _current=tuple(current)):
                 ensure_dependencies(owner)
-                result = cached.typecheck([_relative],full_source=False)
-                if result['returncode']:
-                    raise CheckFailure('Current browser test compilation failed',result)
-                return {'typecheck':result}
-            def acceptance(owner, _current=tuple(current), _expected=tuple(expectations)):
-                ensure_dependencies(owner)
-                selected = [test_path(key) for key in accepted] if owner.require_build else list(_current)
-                expected = [oracles[key] for key in accepted] if owner.require_build else list(_expected)
+                catalog.verify()
+                selected = catalog.specs if owner.require_build else list(_current)
                 result = {'typecheck':cached.typecheck(selected)}
                 if result['typecheck']['returncode']:
                     raise CheckFailure('Frontend source/test compilation failed',result)
-                result['e2e'] = cached.tests(selected)
-                try:
-                    require_stable_acceptance(result['e2e'])
-                    for oracle in expected:
-                        require_scenario_coverage(result['e2e'],oracle)
-                except ValueError as error:
-                    raise CheckFailure('Real-browser source acceptance or cumulative regression failed',result) from error
+                result['e2e'] = cached.tests(selected) if selected else None
+                if selected:
+                    try:
+                        require_stable_acceptance(result['e2e'])
+                    except ValueError as error:
+                        raise CheckFailure('Supplied source-test acceptance or cumulative regression failed',result) from error
                 if owner.require_build:
                     result['build'] = cached.build()
                     if result['build']['returncode']:
@@ -164,9 +153,9 @@ def build_frontend(input_dir, arc_dir, pause=False, max_test_iterations=None):
                 return result
             draft_path = arc_dir/'frontend_node_drafts'/(hashlib.sha256(rid.encode()).hexdigest()[:20]+'.json')
             def publish_phase(phase, _entry=entry):
-                _entry['status'] = {'tests':'GENERATING_TESTS','implementation':'IMPLEMENTING'}.get(phase,'DESIGNING')
+                _entry['status'] = {'implementation':'IMPLEMENTING'}.get(phase,'DESIGNING')
                 save_json(arc_dir/'frontend_e2e.json',report)
-            agent = FrontendBuildAgent(plan,backend,schema,rid,files,acceptance,compile_tests,
+            agent = FrontendBuildAgent(plan,backend,schema,rid,files,acceptance,
                 fingerprint=cached.fingerprint,model=TextModel(json_mode=False),max_test_iterations=max_test_iterations,
                 on_phase=publish_phase,
                 persist=lambda value,_path=draft_path:save_json(_path,value))
@@ -180,7 +169,8 @@ def build_frontend(input_dir, arc_dir, pause=False, max_test_iterations=None):
                 parent = tree.parents.get(parent)
             components = retrieve_components(contexts[rid])
             record_retrieval(arc_dir,STAGE,rid,components)
-            task = {'requirement':contexts[rid],'source_expectations':oracles[rid],
+            task = {'requirement':contexts[rid], 'source_test_paths':test_paths,'source_test_root':SOURCE_TEST_ROOT,
+                'source_test_support':[path for path in catalog.files if '/support/' in path],
                 'ancestor_rules':list(reversed(ancestors)),
                 'ui_candidates':{key:plan['items'][key] for key in sorted(related) if key in plan['items']},
                 'backend_inventory':{key:{field:api[field] for field in ('description','signature','implementation') if field in api}
@@ -189,25 +179,14 @@ def build_frontend(input_dir, arc_dir, pause=False, max_test_iterations=None):
                 'provided_schema':requirement_schema(schema,rid),
                 'schema_inventory':{name:list(entity['fields']) for name,entity in schema['entities'].items()},
                 'frontend_stack':stack_context(),'component_knowledge':components,
-                'test_accounts':test_accounts(raw),'test_path':relative,'test_support':FIXTURE,
+                'test_accounts':test_accounts(raw),
                 'application_entrypoints':list(APPLICATION_ENTRYPOINTS),
                 'previous_failure':{key:previous.get('requirements',{}).get(rid,{}).get(key) for key in ('error','feedback','archive')}}
-            task['test_mechanics_reference'] = testing_reference(task)
-            task['test_mechanics_reference']['source_driven_transport'] = ('Use actual backend contracts. Fixed loginGiven/browserIdentity/ownGiven '
-                'examples are usable only if their HTTP/schema assumptions match this source; otherwise use real source transport and explicit Given records.')
             task['accessibility_reference'] = {'path':'frontend/src/components/accessibility.tsx',
                 'usage':'Import selectAriaLabel/requiredLabel from the shared helper. Spread selectAriaLabel(originalLabel) '
                     'on Arco Select; do not add a second input/label association. Preserve this helper across features.'}
-            task['navigation_reference'] = {'path':'frontend/tests/e2e/support/navigation.ts',
-                'exports_from_test_support':['navigateAndAssert','chooseNamedOption','NavigationCheck'],
-                'usage':'await navigateAndAssert(page,{trigger: realMenuOrLink, targetURL: actualURLPattern, landmark: '
-                    'pageSpecificLocator, reload: true, history: {sourceURL: actualPreviousURL, sourceLandmark: previousPageLocator}}); '
-                    'Omit history/reload only when not applicable to source behavior. chooseNamedOption(page,sourceLabel,sourceOption) '
-                    'checks one combobox before clicking. No business paths or fixture data are assumed.',
-                'accepted_route_hints':[{key:item[key] for key in ('purpose','route','implementation_hint') if key in item}
-                    for item in plan['items'].values() if isinstance(item.get('route'),str) and item['route'].startswith('/')]}
             task['landing_files'] = {}
-            for path in [*APPLICATION_ENTRYPOINTS,PROVIDER_PATH,FIXTURE,relative,'frontend/src/components/accessibility.tsx']:
+            for path in [*APPLICATION_ENTRYPOINTS,PROVIDER_PATH,'frontend/src/components/accessibility.tsx']:
                 target = output/path
                 content = target.read_text(encoding='utf-8-sig') if target.is_file() else None
                 task['landing_files'][path] = {'exists':content is not None,
@@ -220,24 +199,34 @@ def build_frontend(input_dir, arc_dir, pause=False, max_test_iterations=None):
             if entry['status']=='NO_UI':
                 entry.pop('test_path',None)
             else:
-                entry.update(verification_scope='real_browser_with_cumulative_regression',passed=entry['checks']['e2e'].get('passed',0))
+                entry.update(verification_scope='supplied_source_tests' if test_paths else 'implementation',
+                    passed=(entry['checks'].get('e2e') or {}).get('passed',0))
         if entry['status'] in {'GREEN','NO_UI'}:
             plan = agent.plan
             publish_plan(arc_dir,plan)
-            if entry['status']=='GREEN':
+            if entry['status']!='NO_UI':
                 accepted.append(rid)
-                report['tests'][rid] = relative
+                report['tests'][rid] = test_paths
                 last_agent = agent
-                resume.refresh_accepted(report['requirements'],lambda key:[test_path(key),*fixture_paths,
-                    *[item['implementation_hint'] for item in selected_design(plan,key).values()
+                resume.accept(rid,entry,[*catalog.bindings[rid],*fixture_paths,
+                    *[item['implementation_hint'] for item in selected_design(plan,rid).values()
                         if item.get('implementation_hint') and (output/item['implementation_hint']).is_file()]])
         save_json(arc_dir/'frontend_e2e.json',report)
-    built = cached.build()
-    if built['returncode'] and last_agent is not None:
+    integrated = {'typecheck':cached.typecheck(catalog.specs)}
+    if integrated['typecheck']['returncode']==0 and catalog.specs:
+        integrated['e2e'] = cached.tests(catalog.specs)
+    integrated['build'] = cached.build()
+    integration_failed = any(value.get('returncode') for value in integrated.values())
+    if integrated.get('e2e'):
+        try:
+            require_stable_acceptance(integrated['e2e'])
+        except ValueError:
+            integration_failed = True
+    if integration_failed and last_agent is not None:
         last_agent.plan = deepcopy(plan)
         repair = report['integration_repair'] = {'status':'IMPLEMENTING','requirements':[last_agent.rid]}
         with implementation_task(output,repair,console,'Frontend integration repair in retained context',extra_paths=dependency_paths):
-            last_agent.repair_integration(built,console)
+            last_agent.repair_integration(integrated,console)
             repair['status'] = 'GREEN'
             plan = last_agent.plan
             publish_plan(arc_dir,plan)
@@ -248,4 +237,9 @@ def build_frontend(input_dir, arc_dir, pause=False, max_test_iterations=None):
     report['incremental'] = {'checkpoint':resume.path.name,'reused_requirements':sum(
         bool(entry.get('reused_checkpoint')) for entry in report['requirements'].values())}
     report['check_cache'] = cached.stats
-    return verify_frontend(arc_dir,tree,backend,ui,console,report,checks=cached)
+    final = verify_frontend(arc_dir,tree,backend,ui,console,report,checks=cached,source_tests=catalog)
+    if final['status']=='GREEN':
+        resume.refresh_accepted(report['requirements'],lambda key:[*catalog.bindings[key],*fixture_paths,
+            *[item['implementation_hint'] for item in selected_design(plan,key).values()
+                if item.get('implementation_hint') and (output/item['implementation_hint']).is_file()]])
+    return final

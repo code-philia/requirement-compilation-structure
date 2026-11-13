@@ -7,7 +7,7 @@ STAGE_DESCRIPTIONS = {
     '03_infer_db_obligations': 'Refine schema and derive requirement read/write obligations',
     '04_implement_db': 'Implement database and startup data',
     '05_build_backend': 'Design APIs/modules, generate tests and implement backend requirements',
-    '06_build_frontend': 'Design UI/components, generate tests and implement frontend requirements',
+    '06_build_frontend': 'Design UI/components, implement first and accept using supplied requirement tests',
 }
 
 STAGE_SHORT_NAMES = {
