@@ -1,6 +1,6 @@
 # Requirement Compiler
 
-Compile `requirements.yaml` and reference images into a React + Express + SQLite application through 13 passes: requirements, database schema and obligations, backend APIs and tests, UI, and frontend triggers with end-to-end tests. Intermediate artifacts are saved under the output directory's `.arc/` folder.
+Compile `requirements.yaml` and reference images into a React + Express + SQLite application through seven stages (00–06). Backend construction designs APIs/modules and generates its own tests. Frontend construction designs and implements each requirement first, then accepts it using existing `input/tests/<requirement-ID>.spec.ts` files. It does not generate or edit frontend tests. Requirements without matching tests complete implementation and pass normally. Intermediate artifacts are saved under `.arc/`; see [frontend construction](infrastructure/stages/frontend/build.md).
 
 ## Environment
 
