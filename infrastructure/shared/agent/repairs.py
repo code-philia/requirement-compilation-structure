@@ -6,6 +6,7 @@ from uuid import uuid4
 from infrastructure.utils.files import save_json
 
 TARGETS = {
+    "database_correction": "correct_db",
     "schema": "build_db_schema", "backend_foundation": "build_backend",
     "obligations": "build_backend", "backend_api": "build_backend",
     "ui_design": "build_frontend", "triggers": "build_frontend",

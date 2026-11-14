@@ -1,4 +1,4 @@
-"""One native agent per leaf: design, generate tests, then TDD in one history."""
+"""One native agent per leaf: design, implement, repair compilation in one history."""
 
 from copy import deepcopy
 import hashlib
@@ -28,25 +28,19 @@ REQUIRED = ['description','name','input','output','direct_read','direct_write','
 RULES = '''Complete ONE leaf requirement in this SAME conversation, in this order:
 1. DESIGN: retrieve/reuse APIs and modules, define I/O, effects, callees and actual files,
    associate the requirement and resolve reported effect gaps using real direct effects
-   or actual callee links, then call begin_tests. Batch independent design calls;
-   association and begin_tests may follow in that same ordered tool batch.
-2. GENERATE TESTS: use write_test to implement source-based node:test acceptance BEFORE
-   production code. Normally call begin_tdd immediately after write_test: it observes
-   initial RED automatically. Use standalone run_tests only for an intermediate diagnosis.
-   Missing implementation imports/routes are actionable initial feedback, not a
-   reason to invent fixtures or weaken tests. A genuinely reused capability may already
-   be GREEN: never manufacture a failing test just to force RED.
-3. TDD IMPLEMENTATION: implement real sources with edit_file, then finish_requirement
-   to verify and publish in one call. Use run_tests for intermediate diagnosis as needed.
-   Batch independent writes and put verification last. Keep the same context.
+   or actual callee links, then begin_implementation. Batch independent design calls.
+2. IMPLEMENT: write actual API/module code at its real owners, preserving shared callers.
+3. COMPILE AND REPAIR: finish_requirement typechecks/builds the application and publishes.
+   Use check_compilation for intermediate diagnostics. No tests are generated or executed;
+   compilation success is the acceptance criterion, not a model-authored assertion suite.
 
 Each phase has its main tools. Read/search stay available for concrete missing facts.
 There are NO separate discovery or model-call budgets. Normally inspect enough evidence
 in one or two focused batches, then advance. Repeated reads/searches cause soft progress
 reminders; reuse retained results instead of browsing the whole application. Do not
 implement siblings. ancestor_rules constrain the current leaf and do not expand scope.
-The only budget is up to 10 implementation test/fix iterations (configurable).
-Initial test-generation RED and publishing cached GREEN do not consume it. Repeated
+The only budget is up to 10 implementation compile/fix iterations (configurable).
+Publishing cached GREEN does not consume it. Repeated
 unchanged failures reuse diagnostics but still count as retries. Source
 compilation failures during implementation do count. Repeated failures require a new
 concrete diagnosis/repair strategy or an evidenced blocker, not another identical check.
@@ -74,29 +68,47 @@ definitions. Keep each native call small and valid JSON; successful batch calls 
 even if another call fails. Do not resend successful registrations.
 
 SOURCE AUTHORITY
-The DB schema, DDL and explicit startup data are already implemented. Do not change them
-or invent preset identity/role/organization/session tables, accounts or auth routes.
+The existing DB schema, DDL and startup data are the starting implementation, not a
+permanent whitelist. When source behavior cannot be represented, reason about the gap
+and repair the actual responsible schema/DDL/initialization/migration in this SAME
+conversation. upsert_database_entity maintains logical metadata; edit_file implements
+the actual SQL/code; sync_database publishes metadata and loader filenames. Names,
+relationships, ownership paths, storage and migration choices are YOUR source-grounded
+design decisions. No fixed identity-table catalog or business repair template is imposed.
+Preserve existing data and unrelated behavior; describe consequential changes and evidence.
+Use read_startup_data for actual supplied records instead of guessing seed accounts.
 Implement source-required identity, user types, permissions, features, workflows and
 transactions from actual evidence and schema. Empty policy/config lists never waive
 source behavior. Capture actual persisted IDs rather than treating catalog codes as IDs.
 Use source codes/decimal storage exactly. Materialize initially absent aggregates when
 source defines absence as zero/empty; never rely on fixtures to create operation results.
 
-TESTS
-Use node:test/node:assert and task.test_path. Name each source scenario ID in executed
-test titles. Public behavior uses real HTTP (fetch), never imported handlers/mocks.
-Internal-only behavior can test actual module exports. createApiTest(t) from
- task.support_module provides {database,baseURL}; use the database only for isolated
-Given and observations. fixturePasswordHash matches the seed scrypt format. Use source
-credentials and ACTUAL transport; fixed loginSession/ownGiven/sessionIdentity helpers
-apply only if their contract matches the implemented source system. Do not assume a
-fixed login URL. Never seed When/Then results, launch a separate server or fake responses.
-Freeze the generated suite when entering TDD. For a real current-suite mechanics defect,
-repair_test_mechanics with source evidence permits a targeted correction via write_test;
-preserve all original expectations. Previously accepted tests are always readonly.
-The test_mechanics_reference supplied at startup describes the fixed runner. Reuse it;
-read helper implementations only for an exact missing fact. Cast SQL query .get()/.all()
-results to the actual row type before accessing properties (strict TypeScript).
+IDENTITY AND OWNERSHIP
+Derive the required capabilities from this system, not a universal platform checklist.
+Authentication does not by itself require teams/tenancy; add memberships, roles and
+ownership structures only when source behavior needs them. When isolation is required,
+choose a representation that can distinguish the actual actors and their owned records.
+Current seeds may share one team without making all future actors share it. Resolve data
+scope from trusted identity and actual ownership relationships, rather than arbitrary row
+ordering or untrusted client assertions. Reason about incomplete legacy ownership and
+implement an appropriate migration, fallback or rejection consistent with the source.
+Apply that decision consistently to the actual exposed operations. Determine whether
+administrator permissions include cross-team scope from the source, not from a fixed role catalog.
+Reuse existing guards/session modules across APIs and register the real source-required
+login/session/logout/password handlers. Do not publish a pure helper as if it served HTTP.
+Choose persistence, caches and session transport according to required durability,
+revocation, deployment and actual interfaces. In-memory state is a valid implementation
+choice when it satisfies those requirements; it cannot substitute for required persistent
+facts. Explain ownership/migration decisions from evidence, then implement them rather
+than stopping solely because a new table or field is needed. Reads should not silently
+assign unrelated data to an actor. An explicitly justified migration is different from
+guessing ownership. Report a blocker only when genuinely essential information/access is
+unavailable, after exhausting the authorized local implementation choices.
+No test generation, fixture construction or source assertions are needed in this stage.
+Old generated backend/tests files are not requirement authority or acceptance inputs.
+Enforce scope in the real business queries/commands, not an invented public permission-
+check endpoint whose only consumer would be a self-test. Compiler progress/compilation
+feedback controls workflow; it is distinct from untrusted application evidence.
 
 IMPLEMENTATION
 Register APIs in task.registry via registerModuleApis(app,connection), already connected
@@ -104,11 +116,12 @@ by the host. Preserve earlier registrations/callers; don't rewrite host aggregat
 create duplicate APIs. Use parameterized SQL, exact decimal arithmetic where required,
 trusted authorization and atomic rejection/rollback. require_dependency declares a
 necessary library; host manages installation/scripts. No production fixture shortcuts,
-WHEN pre-execution, mocks, test-sensitive code, or schema/seed changes.
+WHEN pre-execution, mocks or test-sensitive code. Source-backed schema/seed corrections
+are normal implementation work; preserve source facts and existing data.
 edit_file requires path, operation, new_content. create only for exists=false; for existing
 files use replace with unique exact old_content, or append/prepend. Compiler registrars
 already exist. No new_path/rename or tool/arguments/changes wrappers. Batch independent
-writes together. write_test targets the current suite automatically and needs no path.
+writes together. All backend tests remain readonly and are not acceptance inputs.
 
 finish_requirement publishes only actual accepted capabilities. Reuse saved context and
 failure evidence. If no backend behavior exists and effects are empty, skip_backend with
@@ -119,7 +132,7 @@ Report a specific blocker with evidence when progress is genuinely impossible.
 
 class BackendBuildAgent(BaseAgent):
     def __init__(self, graph, schema, rid, files, gate, *, persist=None,
-            acceptance_fingerprint=None, test_gate=None, **options):
+            acceptance_fingerprint=None, **options):
         super().__init__(**options)
         self.graph, self.schema, self.rid, self.files, self.gate = deepcopy(graph), schema, rid, files, gate
         self.accepted_graph = deepcopy(graph)
@@ -128,8 +141,6 @@ class BackendBuildAgent(BaseAgent):
         self.phase = 'design'
         self.completed = None
         self.associated = False
-        self.tests_frozen = False
-        self.test_repairs = 0
         self.retriever = BackendRetriever()
         self.retrieval_cache = {}
         self.capability_observations = {}
@@ -141,7 +152,6 @@ class BackendBuildAgent(BaseAgent):
         self.last_feedback = None
         self.budget = BackendBudget.from_environment()
         self.acceptance_fingerprint = acceptance_fingerprint
-        self.test_gate = test_gate
         self.acceptance_attempted = False
         self.last_check_state = None
         self.last_failure_signature = None
@@ -152,13 +162,17 @@ class BackendBuildAgent(BaseAgent):
         self.read_streak = 0
         self.read_observations = set()
         self.code_revision = 0
-        self.allow_test_repair = False
-        self.baseline_state = None
-        self.baseline_result = None
-        self.test_ok = False
-        self.last_test_result = None
+        self.compilation_ok = False
+        self.last_compile_result = None
         self.stop_reason = None
         self.no_progress_rounds = 0
+        from infrastructure.stages.database.design_agent import DatabaseDesignAgent
+        self.database_editor = DatabaseDesignAgent(self.schema,{},mode='implementation',model=self.model)
+        # Reuse only the metadata tool handlers; this helper never runs a model loop.
+        self.model.logger = self.logger
+        self.database_editor.input = {'requirement':{'id':rid}}
+        self.database_dirty = False
+        self.database_revision = 0
 
     def build_system_prompt(self):
         return RULES
@@ -168,15 +182,12 @@ class BackendBuildAgent(BaseAgent):
 
     def tool_error_feedback(self, call, error):
         result = super().tool_error_feedback(call,error)
-        if call.function.name in {'write_test','edit_file','repair_test_mechanics'}:
-            result['next_action'] = ('For a current-suite correction call repair_test_mechanics with source evidence, '
-                'then write_test for all necessary local edits before verification. Production edits use edit_file. '
-                'Previous suites remain readonly.')
+
         return result
 
     def build_tools(self):
         tools = []
-        # Design metadata remains editable during TDD when evidence reveals a real
+        # Design metadata remains editable during implementation when evidence reveals a real
         # interface correction. Code-writing tools are specific to the phase.
         for kind in ('api','module'):
             fields, required = deepcopy(COMMON), list(REQUIRED)
@@ -218,43 +229,33 @@ class BackendBuildAgent(BaseAgent):
             description, parameters = native_file_definition(schema)
             def bind_file(selected):
                 def invoke(**arguments):
-                    if selected == 'edit_file':
-                        if self.phase != 'implementation':
-                            raise ValueError('Generate tests and call begin_tdd before production edits')
-                        if arguments.get('path') == self.task['test_path']:
-                            raise ValueError('Use write_test for the current suite; accepted tests remain readonly')
+                    if selected == 'edit_file' and self.phase != 'implementation':
+                        raise ValueError('Complete design and begin_implementation before production edits')
                     self.completed = None
                     result = execute_native_file(self.files,selected,arguments)
                     if selected == 'edit_file' and any(c['before'] != c['after'] for c in self.files.last_changes):
                         self.code_revision += 1
+                        if arguments.get('path','').startswith('backend/src/db/'):
+                            self.database_dirty = True
                     return result
                 return invoke
             tools.append(AgentTool(name,description,parameters,bind_file(name)))
+        empty = {'type':'object','properties':{},'additionalProperties':False}
+        schema_tool = next(tool for tool in self.database_editor.build_tools() if tool.name=='upsert_entity')
+        tools += [AgentTool('upsert_database_entity','Add/repair a source-backed logical table definition, then implement matching SQL/code yourself. No preset entity names or migration strategy.',
+                schema_tool.parameters,self.upsert_database_entity),
+            AgentTool('read_startup_data','Read original source startup facts, accounts and memberships on demand; never invent them.',empty,self.read_startup_data)]
         if self.phase == 'design':
-            tools += [AgentTool('begin_tests','Complete current design/association and move to writing source-based tests in this same history.',
-                {'type':'object','properties':{},'additionalProperties':False},self.begin_tests),
-                AgentTool('skip_backend','Explain an exclusively frontend/container requirement with empty backend effects.',
-                {'type':'object','properties':{'reason':{'type':'string'}},'required':['reason'],'additionalProperties':False},self.skip_backend)]
+            tools += [AgentTool('begin_implementation','Finish API/module design and start real implementation directly, without generating tests.',empty,self.begin_implementation),
+                AgentTool('skip_backend','Explain a source-backed backend-free requirement with empty effects.',
+                    {'type':'object','properties':{'reason':{'type':'string'}},'required':['reason'],'additionalProperties':False},self.skip_backend)]
         else:
-            edit = next(s for s in self.files.schemas() if s['tool']=='edit_file')
-            _, parameters = native_file_definition(edit)
-            parameters['properties'].pop('path',None)
-            parameters['required'] = [k for k in parameters['required'] if k != 'path']
-            if self.phase == 'tests' or not self.require_build:
-                tools.append(AgentTool('write_test','Write only task.test_path. Required operation/new_content; replace also needs exact old_content. No path/new_path. During TDD first obtain repair_test_mechanics permission; multiple local corrections remain allowed until verification. Preserve source assertions.',parameters,self.write_test))
-            tools.append(AgentTool('run_tests','Optional intermediate diagnosis. begin_tdd observes initial RED; finish_requirement runs final current/cumulative acceptance. Unchanged observations are reused.',
-                {'type':'object','properties':{},'additionalProperties':False},self.run_tests))
-            tools.append(AgentTool('require_dependency','Declare a needed npm library; host installs before real verification.',
-                {'type':'object','properties':{'name':{'type':'string'},'version':{'type':'string'},'reason':{'type':'string'}},'required':['name','version','reason'],'additionalProperties':False},self.require_dependency))
-            if self.phase == 'tests':
-                tools.append(AgentTool('begin_tdd','Retain generated tests, observe initial RED if needed, then enable production implementation.',
-                    {'type':'object','properties':{},'additionalProperties':False},self.begin_tdd))
-            else:
-                tools.append(AgentTool('finish_requirement','Publish the completed graph only after real acceptance; reuses unchanged passing tests.',
-                    {'type':'object','properties':{},'additionalProperties':False},self.finish))
-                if not self.require_build:
-                    tools.append(AgentTool('repair_test_mechanics','Permit a source-evidenced correction of CURRENT test mechanics only; never weaken original behavior or prior suites.',
-                        {'type':'object','properties':{'reason':{'type':'string'},'source_refs':STRINGS},'required':['reason','source_refs'],'additionalProperties':False},self.repair_test_mechanics))
+            tools += [AgentTool('sync_database','Publish agent-edited schema and ordered SQL loader filenames; does not generate business SQL or choose a repair strategy.',empty,self.sync_database),
+                AgentTool('check_compilation','Compile the actual backend sources/build; no business tests or generated fixtures.',empty,self.check_compilation),
+                AgentTool('finish_requirement','Publish the actual implemented graph after successful TypeScript/build checks.',empty,self.finish),
+                AgentTool('require_dependency','Declare a necessary npm dependency; host installs before compilation.',
+                    {'type':'object','properties':{'name':{'type':'string'},'version':{'type':'string'},'reason':{'type':'string'}},
+                        'required':['name','version','reason'],'additionalProperties':False},self.require_dependency)]
         return tools
 
     def upsert(self, kind, id, definition):
@@ -284,7 +285,7 @@ class BackendBuildAgent(BaseAgent):
         self.completed = None
         self.revision += 1
         self.persist(self.graph)
-        return {'saved':id, 'note':'Forward module references may be defined before begin_tests/finish_requirement'}
+        return {'saved':id, 'note':'Forward module references may be defined before begin_implementation/finish_requirement'}
 
     def associate(self, api_ids, module_ids):
         api_ids, module_ids = list(dict.fromkeys(api_ids)), list(dict.fromkeys(module_ids))
@@ -383,9 +384,9 @@ class BackendBuildAgent(BaseAgent):
         self.retrieval_cache[cache_id] = result
         return {'cache_id':cache_id, **result}
 
-    def begin_tests(self):
+    def begin_implementation(self):
         if self.phase != 'design':
-            raise ValueError('Design is already completed; continue tests or TDD in this retained context')
+            raise ValueError('Design is already completed; continue implementation in this retained context')
         if not self.associated:
             raise ValueError('Associate the current requirement first, including [] for genuinely empty roots')
         refresh_graph(self.graph, self.schema)
@@ -400,14 +401,14 @@ class BackendBuildAgent(BaseAgent):
             return {'status':'DESIGN_CORRECTION_NEEDED','issues':issues,
                 'example_arguments':{'patches':[{'id':issue['id'],'changes':{
                     'name':'actualCallableName','description':'Source-backed responsibility'}} for issue in issues]},
-                'next_action':'Use patch_capabilities to correct all listed items in one batch, then begin_tests. Do not redesign or inspect unrelated files.'}
-        self.phase = 'tests'
+                'next_action':'Use patch_capabilities to correct all listed items in one batch, then begin_implementation. Do not redesign or inspect unrelated files.'}
+        self.phase = 'implementation'
         owners = [record['implementation'] for record in closure(self.graph, roots(self.graph,self.rid)).values()]
         self.files.files.update(owners)
         self.files.preferred_files.update(owners)
         self.tools = {tool.name:tool for tool in self.build_tools()}
         targets = {}
-        for role in ('registry','test_path'):
+        for role in ('registry',):
             path = self.task[role]
             target = self.files.path(path)
             exists = target.is_file()
@@ -417,12 +418,11 @@ class BackendBuildAgent(BaseAgent):
         return {'phase':self.phase,'design_completed':True,
             'design_reference':'Earlier saved upsert/patch calls in this conversation; get_capabilities for a named missing contract.',
             'design_feedback':self.design_feedback(),'implementation_targets':targets,
-            'test_mechanics_reference':'Initial test_mechanics_reference; no need to reread the runner.',
-            'next_action':'Write source tests, then begin_tdd (automatically observes initial RED).'}
+            'next_action':'Implement actual API/modules, then finish_requirement to compile and publish. Do not write tests.'}
 
     def require_dependency(self, name, version, reason):
         if self.phase == 'design':
-            raise ValueError('Complete design and begin_tests before declaring concrete test/implementation libraries')
+            raise ValueError('Complete design and begin_implementation before declaring libraries')
         if not re.fullmatch(r'(?:@[a-z0-9_.-]+/)?[a-z0-9_.-]+',name) or not re.fullmatch(r'[~^]?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?',version) or not reason.strip():
             raise ValueError('Supply an npm registry name, explicit semver version/range, and a concrete source implementation reason')
         from infrastructure.utils.files import save_json
@@ -443,17 +443,6 @@ class BackendBuildAgent(BaseAgent):
         self.completed = {'status':'GREEN','backend_disposition':'frontend_or_container_only','reason':reason}
         return self.completed
 
-    def repair_test_mechanics(self, reason, source_refs):
-        if self.require_build:
-            raise ValueError('Final integration keeps all accepted suites readonly; repair source code')
-        if not reason.strip() or not source_refs:
-            raise ValueError('Cite the observed CURRENT-suite mechanics error and source expectations to preserve')
-        self.test_repairs += 1
-        self.allow_test_repair = True
-        self.tests_frozen = False
-        return {'editable_test':self.task['test_path'],
-            'instruction':'Use write_test for the evidenced mechanics correction, preserving every source assertion. There is no separate repair quota.'}
-
     def change_repair_strategy(self, diagnosis, evidence, actions):
         if not diagnosis.strip() or not evidence or not actions or any(not isinstance(v,str) or not v.strip() for v in [*evidence,*actions]):
             raise ValueError('Provide a concrete diagnosis, observed evidence and different repair actions')
@@ -466,13 +455,44 @@ class BackendBuildAgent(BaseAgent):
         if self.last_failure_signature:
             self.failure_counts[self.last_failure_signature] = 0
         return {'strategy_recorded':True,'budget':self.budget.state(),
-            'instruction':'Apply the concrete source repair now. The single TDD iteration budget is unchanged.'}
+            'instruction':'Apply the concrete source repair now. The single compilation repair budget is unchanged.'}
 
     def report_blocker(self, reason, evidence):
         if not reason.strip() or not evidence:
             raise ValueError('Report the concrete unresolved gap and observed evidence, not a generic inability to continue')
         self.blocker = {'reason':reason,'evidence':evidence}
         return {'status':'BLOCKED','blocker':self.blocker}
+
+    def upsert_database_entity(self, **arguments):
+        result = self.database_editor.upsert_entity(**arguments)
+        name = arguments['name']
+        if not result.get('unchanged'):
+            self.database_dirty = True
+            self.database_revision += 1
+            self.revision += 1
+            self.completed = None
+            self.task.get('provided_schema',{}).pop(name,None)
+        for kind in ('tables','seeds'):
+            path = f'backend/src/db/{kind}/{name}.sql'
+            self.files.files.add(path)
+            self.files.available_paths.add(path)
+        from infrastructure.utils.files import save_json
+        save_json(self.files.output/'.arc/db_schema.json',self.schema)
+        return {**result,'next_action':'Implement the chosen DDL, migration/initialization and source-backed startup values with edit_file; then sync_database/compile.'}
+
+    def read_startup_data(self):
+        from infrastructure.utils.files import read_artifact
+        return {'data':read_artifact(self.files.output/'.arc','requirements.json').get('data',[]),
+            'instruction':'Use actual SEED facts. Scenario-created records are not automatic production presets.'}
+
+    def sync_database(self):
+        from infrastructure.pipeline.database_build import synchronize_loaders
+        synchronize_loaders(self.files.output/'.arc',self.schema)
+        self.database_dirty = False
+        return {'status':'SYNCHRONIZED','entities':list(self.schema['entities']),
+            'table_files_to_implement':[f'backend/src/db/tables/{name}.sql' for name in self.schema['entities']
+                if not (self.files.output/f'backend/src/db/tables/{name}.sql').is_file()],
+            'instruction':'Only metadata/loader names were synchronized. Actual SQL, migrations and business behavior remain agent-owned.'}
 
     def _failed(self, feedback):
         self.last_feedback = compact_feedback(feedback)
@@ -492,7 +512,7 @@ class BackendBuildAgent(BaseAgent):
         self.last_failure_signature = signature
         return {'status':'NEEDS_REPAIR','feedback':self.last_feedback,
             'same_error_count':self.same_failures,'strategy_change_recommended':self.same_failures >= 3,
-            'budget':self.budget.state(),'test_assertions_frozen':self.tests_frozen,
+            'budget':self.budget.state(),'acceptance_basis':'compilation',
             'next_action':('Correct source-backed design fields/callee links with patch_capabilities, then finish_requirement. '
                 'Do not edit correct source or rerun passing tests for a metadata-only gap.'
                 if feedback.get('repair_target') == 'design_metadata' else
@@ -501,7 +521,7 @@ class BackendBuildAgent(BaseAgent):
 
     @staticmethod
     def verification_feedback(result):
-        """Keep complete checks in node reports; avoid replaying passing TAP to the model."""
+        """Keep complete checks in node reports; avoid replaying passing compiler output to the model."""
         result = dict(result)
         if 'checks' in result:
             result['checks'] = {kind:({key:value for key,value in check.items() if key in
@@ -511,109 +531,46 @@ class BackendBuildAgent(BaseAgent):
         return result
 
     def _observation_state(self):
-        return (self.acceptance_fingerprint() if self.acceptance_fingerprint else self.code_revision,self.require_build)
+        return (self.acceptance_fingerprint() if self.acceptance_fingerprint else self.code_revision,
+            self.require_build,self.database_revision)
 
-    def write_test(self, operation, new_content, old_content=''):
-        if self.phase != 'tests' and not self.allow_test_repair:
-            raise ValueError('Tests are retained during TDD; use repair_test_mechanics only for an evidenced current-suite defect')
-        arguments = {'path':self.task['test_path'],'operation':operation,'new_content':new_content}
-        if old_content:
-            arguments['old_content'] = old_content
-        result = execute_native_file(self.files,'edit_file',arguments)
-        if isinstance(result,dict) and result.get('status') == 'NEEDS_REPAIR':
-            feedback = result.get('feedback',{})
-            feedback['tool_name'] = 'write_test'
-            if 'message' in feedback:
-                feedback['message'] = feedback['message'].replace('native edit_file','native write_test')
-            feedback.get('example_arguments',{}).pop('path',None)
-        if any(change['before'] != change['after'] for change in self.files.last_changes):
-            self.code_revision += 1
-            self.completed = None
-            if self.phase == 'implementation':
-                # One evidenced correction can need several local edits. Close the
-                # correction window at verification, not after the first edit.
-                self.tests_frozen = False
-        return result
-
-    def run_tests(self):
-        if self.phase == 'tests':
-            path = self.files.path(self.task['test_path'])
-            if not path.is_file() or not path.read_text(encoding='utf-8-sig').strip():
-                return {'status':'WRITE_TESTS_FIRST','test_path':self.task['test_path']}
-            state = self._observation_state()
-            if state == self.baseline_state and self.baseline_result is not None:
-                return {**self.baseline_result,'reused_unchanged_observation':True}
-            if self.test_gate is None:
-                raise ValueError('Host must provide the initial test observation callback')
-            try:
-                observation = self.test_gate(self)
-                typed, tested = observation.get('typecheck') or {}, observation.get('tests') or {}
-                green = (typed.get('returncode') == 0 and tested.get('returncode') == 0
-                    and tested.get('pass',0) > 0 and not any(tested.get(k) for k in ('fail','skipped','todo')))
-                result = {'status':'GREEN' if green else 'INITIAL_RED','checks':compact_feedback(observation)}
-            except (ValueError,RuntimeError) as error:
-                result = {'status':'INITIAL_RED','feedback':compact_feedback(getattr(error,'feedback',{'error':str(error)}))}
-            self.baseline_state = self._observation_state()
-            self.baseline_result = result
-            return {**result,'counts_as_tdd_iteration':False,
-                'next_action':'Refine test mechanics if necessary, then begin_tdd. Preserve source expectations; do not force RED for already-correct reused code.'}
+    def check_compilation(self):
         if self.phase != 'implementation':
-            return {'status':'TESTS_REQUIRED','next_action':'Complete design, begin_tests, write source tests, then begin_tdd.'}
-        self.allow_test_repair = False
-        self.tests_frozen = True
+            return {'status':'DESIGN_REQUIRED','next_action':'Complete design and begin_implementation first.'}
         state = self._observation_state()
-        if state == self.last_check_state and self.last_test_result is not None:
-            observed = self.last_test_result
-            if self.last_test_result.get('status') != 'GREEN':
-                observed = self._failed(self.last_feedback or self.last_test_result.get('feedback',{}))
+        if state == self.last_check_state and self.last_compile_result is not None:
+            observed = self.last_compile_result
+            if self.last_compile_result.get('status') != 'GREEN':
+                observed = self._failed(self.last_feedback or self.last_compile_result.get('feedback',{}))
                 if self.budget.test_iterations < self.budget.max_test_iterations:
                     self.budget.test_iterations += 1
                 if self.budget.test_iterations >= self.budget.max_test_iterations:
-                    self.stop_reason = 'TDD test/fix iteration limit reached'
+                    self.stop_reason = 'Compilation/fix iteration limit reached'
             return {**self.verification_feedback(observed),'budget':self.budget.state(),'reused_unchanged_observation':True,
                 'next_action':'Reuse this result. Change the actual source cause before rerunning failed acceptance, or finish_requirement when GREEN.'}
         if self.budget.test_iterations >= self.budget.max_test_iterations:
-            self.stop_reason = 'TDD test/fix iteration limit reached'
-            return {'status':'TEST_ITERATION_LIMIT','budget':self.budget.state(),'feedback':self.last_feedback}
+            self.stop_reason = 'Compilation/fix iteration limit reached'
+            return {'status':'COMPILE_ITERATION_LIMIT','budget':self.budget.state(),'feedback':self.last_feedback}
         self.acceptance_attempted = False
         try:
             checks = self.gate(self)
-            self.test_ok = True
+            self.compilation_ok = True
             result = {'status':'GREEN','checks':checks}
         except (ValueError,RuntimeError) as error:
-            self.test_ok = False
+            self.compilation_ok = False
             result = self._failed(getattr(error,'feedback',{'error':str(error)}))
         self.budget.test_iterations += 1
         self.last_check_state = self._observation_state()
-        self.last_test_result = result
-        if not self.test_ok and self.budget.test_iterations >= self.budget.max_test_iterations:
-            self.stop_reason = 'TDD test/fix iteration limit reached'
+        self.last_compile_result = result
+        if not self.compilation_ok and self.budget.test_iterations >= self.budget.max_test_iterations:
+            self.stop_reason = 'Compilation/fix iteration limit reached'
         result['budget'] = self.budget.state()
         return self.verification_feedback(result)
-
-    def begin_tdd(self):
-        if self.phase != 'tests':
-            raise ValueError('Generate the current tests after design before beginning TDD')
-        path = self.files.path(self.task['test_path'])
-        if not path.is_file() or not path.read_text(encoding='utf-8-sig').strip():
-            raise ValueError('Use write_test to create the current source-based suite first')
-        already_observed = self.baseline_state == self._observation_state() and self.baseline_result is not None
-        baseline = self.run_tests()
-        self.phase = 'implementation'
-        self.tests_frozen = True
-        self.allow_test_repair = False
-        self.tools = {tool.name:tool for tool in self.build_tools()}
-        return {'phase':self.phase,'tests_retained':True,'initial_observation':
-                {'status':baseline['status'],'context_reference':'Earlier run_tests observation; unchanged sources.'}
-                if already_observed else baseline,
-            'registry':self.task['registry'],'budget':self.budget.state(),
-            'next_action':'Implement real sources with edit_file, then finish_requirement to verify and publish. '
-                'Use run_tests only for intermediate diagnosis. Reads remain available when needed.'}
 
     def finish(self):
         self.completed = None
         if self.phase != 'implementation':
-            return {'status':'TDD_REQUIRED','next_action':'Follow design -> begin_tests/write_test -> begin_tdd -> implementation/run_tests.'}
+            return {'status':'IMPLEMENTATION_REQUIRED','next_action':'Follow design -> begin_implementation -> actual code -> compilation.'}
         try:
             refresh_graph(self.graph,self.schema)
             associated = [key for ids in self.graph['requirements'].values() for key in ids]
@@ -629,10 +586,10 @@ class BackendBuildAgent(BaseAgent):
                     return self._failed({'error':f'{identity}: implement {record["implementation"]}'})
         except (ValueError,RuntimeError) as error:
             return self._failed({'error':str(error)})
-        result = self.run_tests()
+        result = self.check_compilation()
         if result.get('status') != 'GREEN':
             return result
-        self.completed = {'status':'GREEN','phase':'implemented','checks':self.last_test_result['checks']}
+        self.completed = {'status':'GREEN','phase':'implemented','checks':self.last_compile_result['checks']}
         return self.verification_feedback(self.completed)
 
     def _exhausted(self, reason):
@@ -691,9 +648,9 @@ class BackendBuildAgent(BaseAgent):
                 self.messages.append({'role':'user','content':json.dumps({'progress_reminder':{
                     'phase':self.phase,'repeated_reads':repeated,'consecutive_read_batches':self.read_streak,
                     'rounds_without_design_test_or_code_progress':self.no_progress_rounds,
-                    'instruction':'Reuse retained evidence. Explain one precise missing fact if essential; otherwise advance design -> tests -> TDD source edits. Reading is still available; this is a soft progress reminder.'}},ensure_ascii=False)})
+                    'instruction':'Reuse retained evidence. Explain one precise missing fact if essential; otherwise advance design -> implementation -> compilation. Reading is still available; this is a soft progress reminder.'}},ensure_ascii=False)})
             if not calls:
-                self.messages.append({'role':'user','content':'Advance the current step using its main native tools: design, write_test/begin_tdd, then edit_file/run_tests/finish_requirement.'})
+                self.messages.append({'role':'user','content':'Advance the current step using its main native tools: design, begin_implementation, then edit_file/check_compilation/finish_requirement.'})
 
     def run(self, input, console, max_test_iterations=None):
         if max_test_iterations is not None:
@@ -709,8 +666,6 @@ class BackendBuildAgent(BaseAgent):
         self.accepted_graph = deepcopy(self.graph)
         self.retrieval_cache.clear()
         self.require_build = True
-        self.tests_frozen = True
-        self.allow_test_repair = False
         self.messages.append({'role':'user','content':json.dumps({'final_integration_feedback':compact_feedback(feedback),
-            'budget':self.budget.state(),'instruction':'Use the remaining SAME test/fix iterations to repair shared source/build failure; preserve accepted tests.'},ensure_ascii=False)})
+            'budget':self.budget.state(),'instruction':'Use the remaining SAME compile/fix iterations to repair shared source/build failure; preserve accepted tests.'},ensure_ascii=False)})
         return self._loop(console)

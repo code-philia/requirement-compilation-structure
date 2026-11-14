@@ -1,4 +1,4 @@
-"""One backend budget: implementation test/fix iterations, not exploration turns."""
+"""One backend budget: compile/fix iterations; legacy configuration names are retained."""
 
 from dataclasses import dataclass
 import os
@@ -26,5 +26,6 @@ class BackendBudget:
 
     def state(self):
         return {'test_iterations':self.test_iterations,'test_iteration_limit':self.max_test_iterations,
+            'compile_iterations':self.test_iterations,'compile_iteration_limit':self.max_test_iterations,
             'model_calls':self.calls,'read_batches':self.reads,
-            'policy':'Implementation verification/fix attempts consume the budget; initial RED and cached passing publication are free. Cached failures count retries without rerunning commands.'}
+            'policy':'Compilation/build repair attempts consume the budget; cached passing publication is free. No generated self-tests run. Cached failures count retries without rerunning commands.'}

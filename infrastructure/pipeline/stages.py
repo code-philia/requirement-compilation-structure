@@ -6,7 +6,7 @@ STAGE_DESCRIPTIONS = {
     'build_db_schema': 'Design logical database schema from the complete ER source',
     'implement_db': 'Implement schema batches, then INSERTs from original root data',
     'correct_db': 'Review requirement prose in batches of five and repair database code',
-    'build_backend': 'Design APIs/modules, generate tests and implement backend requirements',
+    'build_backend': 'Design APIs/modules, implement and repair compilation without generated self-tests',
     'build_frontend': 'Design UI/components, implement and accept using supplied requirement tests',
 }
 

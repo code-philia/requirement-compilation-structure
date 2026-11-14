@@ -1,8 +1,7 @@
 """Shared real-browser, source coverage and build acceptance for frontend construction."""
 
 from infrastructure.shared.agent.recovery import final_checks, complete_report
-from infrastructure.stages.backend.runtime import api_test_paths
-from infrastructure.stages.backend.testing import BackendChecks, require_green as require_backend_green
+from infrastructure.stages.backend.testing import BackendChecks
 from infrastructure.stages.frontend.triggers.diagnosis import source_coverage
 from infrastructure.stages.frontend.triggers.testing import E2EChecks, test_path
 from infrastructure.stages.frontend.ui.testing import FrontendChecks, require_green, test_path as ui_test_path
@@ -53,7 +52,6 @@ def verify_frontend(arc_dir, tree, backend, ui, console, report, *, checks=None,
         if (output / test_path(rid)).is_file()]
     ui_files = [] if ui.get("outline") else [ui_test_path(pid) for pid in ui["pages"] if (output / ui_test_path(pid)).is_file()]
     api_checks = BackendChecks(output)
-    api_files = api_test_paths(output, backend["apis"])
     verification = final_checks(console,
         typecheck=(lambda: checks.typecheck(files), None),
         e2e=(lambda: checks.tests(files), require_stable_acceptance)) if files else final_checks(console,
@@ -61,8 +59,7 @@ def verify_frontend(arc_dir, tree, backend, ui, console, report, *, checks=None,
     if ui_files:
         verification.update(final_checks(console, ui=(lambda: ui_checks.tests(ui_files), require_green)))
     verification.update(final_checks(console,
-        backend_typecheck=(api_checks.typecheck, None),
-        backend_tests=(lambda: api_checks.tests(api_files), require_backend_green if api_files else None),
+        backend_typecheck=(lambda:api_checks.typecheck([]), None),
         build=(checks.build, None)))
     raw = read_artifact(arc_dir, 'requirements.json')
     executed = verification.get('e2e', {}).get('result') or {}

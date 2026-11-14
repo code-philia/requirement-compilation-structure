@@ -34,10 +34,25 @@ separate design proposal, seed manifest, property mapping or read/write obligati
 Use description and scenarios as evidence: ordinary scenario-created records and
 Given examples are not automatically startup presets. Never invent business rows.
 
+During correction, derive necessary supporting persistence from functional prose even
+when omitted from ER. Signed-in users/password change/logout require representable
+accounts and credentials, revocable sessions, and source-defined roles/memberships.
+Team isolation requires an unambiguous persisted account-to-team association AND a
+persisted ownership path for each exposed resource (direct tenant key or justified FK
+path). Add missing support entities/fields with upsert_entity and matching DDL/migrations
+in this correction phase; do not defer them to API handlers. Choose names and shape from
+the source, never a fixed application/role catalog. Current seed accounts may legitimately
+share one team; preserve that data without making all future accounts share it. Business
+rows without ownership need explicit source-backed initialization/migration, not a
+reading-time adoption rule. Do not seed hypothetical scenario A/B data as production
+records. Use read_root_data to inspect actual supplied accounts/memberships instead of
+guessing them. Preserve source account credentials as hashes and declared memberships.
+
 Use CREATE TABLE IF NOT EXISTS, actual keys/FKs/constraints, idempotent INSERTs and
 dependency-ordered parent rows. Source record IDs are references, not automatically
 persisted keys; resolve them to actual referenced rows. Preserve source values and
-roles. Hash supplied account passwords using seed_password_hash, never plaintext.
+roles. Store source-required credentials with an appropriate hash, implementing or
+reusing actual hashing/verification code. Do not assume an unadvertised helper exists.
 If schema cannot represent supplied facts, use upsert_entity and immediately update
 the corresponding SQL in this SAME loop. Logical metadata and SQL must stay in sync.
 This is not a request to restart database design. Preserve unrelated schema/code/data.
@@ -119,6 +134,9 @@ class DatabaseBuildAgent(DatabaseFileAgent):
                 AgentTool('read_root_data', 'Read the original root data after implementing all schema batches. No path or mappings required.',
                     {'type': 'object', 'properties': {}, 'additionalProperties': False}, self.read_root_data),
             ])
+        else:
+            tools.append(AgentTool('read_root_data','Read original account/role/team and other startup facts while correcting schema; do not invent seed values.',
+                {'type':'object','properties':{},'additionalProperties':False},self.read_root_data))
         return tools
 
     def upsert_entity(self, **arguments):
@@ -144,11 +162,12 @@ class DatabaseBuildAgent(DatabaseFileAgent):
             'output_paths': {name: f'backend/src/db/tables/{name}.sql' for name in names}}
 
     def read_root_data(self):
-        if self.batch_index < len(self.batches):
+        if not self.correction and self.batch_index < len(self.batches):
             raise ValueError('Implement the remaining schema batches before reading root data')
         from infrastructure.pipeline.database import inspect_ddl, table_batches
         names = [name for batch in table_batches(self.schema) for name in batch]
-        inspect_ddl(self.arc_dir.parent, self.schema, names)
+        if not self.correction:
+            inspect_ddl(self.arc_dir.parent, self.schema, names)
         self.root_read = True
         return {'data': deepcopy(self.raw.get('data', [])),
             'instruction': 'Preserve the original records. Generate required SEED INSERTs; future CREATED/DERIVED rows are not startup data.'}
