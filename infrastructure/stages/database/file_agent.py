@@ -24,12 +24,13 @@ class DatabaseFileAgent(BaseAgent):
 Use the advertised NATIVE function tools; do not serialize tool calls in response text.
 Implement promptly from supplied files, schema and evidence. Batch independent reads;
 do not reread unchanged supplied files or search without a named missing dependency.
-Use edit_file for all persistent writes; file scope is enforced by the existing tools.
+Use advertised task-specific writers for their owned files (write_sql for full SQL when
+available), and edit_file for remaining shared source wiring. File scope remains enforced.
 Use local exact-span replacements in shared files and preserve unrelated behavior.
 When implementation is ready call finish_implementation. Its real result decides whether
 this task is complete. On failure repair the reported cause and call it again. Do not
 claim completion in text, suppress an initialization failure or weaken expected behavior.
-Return independent edit_file calls together, rather than limiting each response to one
+Return independent write calls together, rather than limiting each response to one
 or two files. When all required files are ready, include finish_implementation as the
 LAST call in the SAME response. Do not spend another model turn just to announce completion.
 edit_file arguments are path, operation, new_content and optional old_content; they are
@@ -99,8 +100,9 @@ native function arguments, never wrapped in an arguments/tool_calls JSON text ob
                 "using separate read_file entries in one tool_calls array (at most eight context calls total)",
                 "using several native read_file calls in the same response")
             if name == 'edit_file' and getattr(self.files, 'replaceable_files', None):
-                description = ("Create or edit a scoped file using exact old_content. Full replacement is allowed only "
-                    "for explicitly task-owned table SQL and the seed evidence manifest; other files require local edits.")
+                description = ("Edit shared source/build/client wiring using operation and unique exact old_content for replace. "
+                    "If write_sql is advertised, use it for table/seed SQL instead; it needs no operation/old_content. "
+                    "Other existing files require local edits.")
             tools.append(AgentTool(name, description, parameters, bind_handler(name)))
         tools.append(AgentTool("finish_implementation", "Run the task's real publication/initialization checks and receive repair feedback.",
             {"type": "object", "properties": {}, "additionalProperties": False}, self.finish))

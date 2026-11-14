@@ -13,7 +13,11 @@ FIELD = {"type": "object", "properties": {
     "description": {"type": "string"},
     "type": {"type": "string", "enum": ["string", "uuid", "integer", "number", "boolean", "date", "datetime", "json"]},
     "nullable": {"type": "boolean"}, "primary_key": {"type": "boolean"},
-    "unique": {"type": "boolean"}, "references": {"type": ["string", "null"]},
+    "unique": {"type": "boolean"}, "references": {"anyOf": [
+        {"type":"string"},{"type":"null"},
+        {"type":"object","properties":{"entity":{"type":"string"},"field":{"type":"string"}},
+            "required":["entity"],"additionalProperties":False}],
+        "description":"Prefer {entity: targetTable, field: actualKey} or targetTable.actualKey. A bare table is resolved only when it has exactly one PK column; otherwise deferred, never guessed as id."},
     "constraints": {"type": "array", "items": {"type": "string"}},
     "sqlite_type": {"type": "string", "enum": ["TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"]},
     "source_type": {"type": "string"}},
@@ -40,6 +44,11 @@ source conflicts. Record aliases as source_refs in your decisions. Never silentl
 an ER entity/relationship just because it is hard to represent. M:N can use a junction
 table; 1:N should normally use one FK, not duplicate representations. Forward references
 are allowed across upsert_entity calls. Finish only after all targets and keys resolve.
+references accepts {"entity":"target","field":"actual_pk"}, "target.actual_pk", a
+bare "target", or null. The host normalizes equivalent forms, defers forward references,
+and resolves bare targets ONLY from a known single-column primary key. Never assume id.
+Inspect normalized/pending feedback; do not resend already saved fields merely to expand
+a resolved FK. At finish, unresolved/ambiguous references are returned together.
 Use upsert_entity for one table at a time or many calls together. Updates merge fields
 and preserve omitted earlier fields; retrieve unseen definitions before revising them.
 Only change existing definitions to repair a concrete evidence-backed defect. Include
@@ -97,6 +106,59 @@ supplied step (steps={} when none), all together. No separate schema-design pass
 """
 
 
+def reference_value(value):
+    """Canonical syntax, without choosing an ambiguous target key."""
+    if value is None:
+        return None
+    if isinstance(value,dict):
+        if set(value)-{'entity','field'} or not isinstance(value.get('entity'),str):
+            raise ValueError('references object needs entity and optional field only')
+        target, field = value['entity'], value.get('field')
+        if not IDENTIFIER.fullmatch(target) or (field is not None and (not isinstance(field,str) or not IDENTIFIER.fullmatch(field))):
+            raise ValueError('Use SQL-safe entity/field identifiers for references')
+        return target+'.'+field if field is not None else target
+    if isinstance(value,str):
+        value = value.strip()
+        if len(value.split('.')) in {1,2} and all(IDENTIFIER.fullmatch(part) for part in value.split('.')):
+            return value
+    raise ValueError('references must be null, Entity.field, a table name, or {entity, field}')
+
+
+def normalize_references(schema):
+    """Resolve all newly available forward references; preserve uncertain targets."""
+    normalized, pending = [], []
+    entities = schema['entities']
+    for name,entity in entities.items():
+        for key,field in entity['fields'].items():
+            original = field.get('references')
+            if original is None:
+                continue
+            try:
+                ref = reference_value(original)
+            except ValueError as error:
+                pending.append({'field':name+'.'+key,'reason':str(error)})
+                continue
+            target, separator, column = ref.partition('.')
+            target_fields = entities.get(target,{}).get('fields',{})
+            if not separator:
+                primary = [column for column,definition in target_fields.items() if definition.get('primary_key')]
+                if len(primary)==1:
+                    ref = target+'.'+primary[0]
+                else:
+                    pending.append({'field':name+'.'+key,'target':target,'primary_key_candidates':primary,
+                        'reason':'Target is not defined yet' if target not in entities else 'Choose an explicit unique target column; target has no single-column PK'})
+            elif column not in target_fields:
+                pending.append({'field':name+'.'+key,'target':ref,'reason':'Target field is not defined yet'})
+            if original != ref:
+                field['references'] = ref
+                change = {'field':name+'.'+key,'from':deepcopy(original),'to':ref}
+                normalized.append(change)
+                history = schema.setdefault('reference_normalizations',[])
+                if change not in history:
+                    history.append(change)
+    return {'normalized':normalized,'pending':pending}
+
+
 def schema_issues(schema):
     """Executable representation checks, not ER semantic equivalence validation."""
     issues = []
@@ -111,6 +173,11 @@ def schema_issues(schema):
         for key, field in fields.items():
             ref = field.get("references")
             if not ref:
+                continue
+            try:
+                ref = reference_value(ref)
+            except ValueError as error:
+                issues.append(f'{name}.{key}: {error}')
                 continue
             target, sep, column = ref.partition(".")
             target_fields = entities.get(target, {}).get("fields", {})
@@ -180,6 +247,7 @@ class DatabaseDesignAgent(BaseAgent):
             raise ValueError("Use an SQL-safe canonical name and cite evidence/reason")
         current = self.schema["entities"].get(name, {})
         updated = deepcopy(current or {"origin": "agent_er" if self.mode == "er" else "agent_requirement", "fields": {}})
+        syntax_changes = []
         updated["description"] = entity.get("description", updated.get("description", name))
         for key, definition in entity.get("fields", {}).items():
             if not IDENTIFIER.fullmatch(key):
@@ -193,8 +261,10 @@ class DatabaseDesignAgent(BaseAgent):
                     raise ValueError(f"{name}.{key}.{flag} must be boolean")
             if not isinstance(field["constraints"], list) or any(not isinstance(v, str) for v in field["constraints"]):
                 raise ValueError(f"{name}.{key}.constraints must be strings")
-            if field["references"] is not None and not isinstance(field["references"], str):
-                raise ValueError(f"{name}.{key}.references must be Entity.field or null")
+            original_reference = deepcopy(field['references'])
+            field['references'] = reference_value(original_reference)
+            if original_reference != field['references']:
+                syntax_changes.append({'field':name+'.'+key,'from':original_reference,'to':field['references']})
             if field["primary_key"]:
                 field["nullable"] = False
             updated["fields"][key] = field
@@ -203,24 +273,38 @@ class DatabaseDesignAgent(BaseAgent):
             updated["unique_constraints"] = list({tuple(group): group for group in groups}.values())
         updated["source_refs"] = sorted(set(updated.get("source_refs", [])) | set(source_refs))
         if updated==current:
+            references = normalize_references(self.schema)
+            if references['normalized']:
+                self.persist()
+            references['normalized'] = syntax_changes+references['normalized']
             return {'unchanged':name,'fields':list(updated['fields']),
+                'references':references,
                 'next_action':'Definition is retained. Advance to the next needed table or completion rather than repeating it.'}
         self.schema["entities"][name] = updated
+        references = normalize_references(self.schema)
+        references['normalized'] = syntax_changes+references['normalized']
+        for change in syntax_changes:
+            history = self.schema.setdefault('reference_normalizations',[])
+            if change not in history:
+                history.append(change)
         self.schema.setdefault("decisions", []).append({"entity": name, "reason": reason,
             "source_refs": source_refs, "requirement": self.input.get("requirement", {}).get("id")})
         self.persist()
-        return {"saved": name, "fields": list(updated["fields"])}
+        return {"saved": name, "fields": list(updated["fields"]), 'references':references,
+            'next_action':'Keep saved definitions. Continue with other tables; normalized references need no resubmission. Resolve pending choices before finish_schema.'}
 
     def ensure_complete(self):
+        references = normalize_references(self.schema)
+        if references['normalized']:
+            self.persist()
         issues = schema_issues(self.schema)
         if not self.schema["entities"] or issues:
             raise ValueError("Repair schema before completing: " + "; ".join(issues or ["no entities"]))
 
     def finish_schema(self, summary, requirement_support=None):
-        self.ensure_complete()
         expected = {node['id'] for node in self.input.get('requirements',[])}
         if expected:
-            support = requirement_support or {}
+            support = requirement_support if requirement_support is not None else self.schema.get('requirement_support',{})
             missing = sorted(expected-support.keys())
             invalid = [rid for rid in expected & support.keys() if not isinstance(support[rid],dict)
                 or not isinstance(support[rid].get('entities'),list)
@@ -232,6 +316,14 @@ class DatabaseDesignAgent(BaseAgent):
                     'unknown_entities':unknown,'next_action':'Complete the short requirement_support inventory in finish_schema; keep existing entity definitions. No per-node redesign is needed.'}
             self.schema['requirement_support'] = {rid:deepcopy(support[rid]) for rid in sorted(expected)}
             self.persist()
+        references = normalize_references(self.schema)
+        if references['normalized']:
+            self.persist()
+        issues = schema_issues(self.schema)
+        if not self.schema['entities'] or issues:
+            return {'status':'NEEDS_DECISION','issues':issues or ['No entities defined'],**references,
+                'next_action':'Resolve all listed FK/key ambiguities in one batch, then finish_schema. Valid definitions and requirement_support are retained; no need to resend them.',
+                'reference_example':{'entity':'actual_target_table','field':'actual_unique_key'}}
         self.completed = {"summary": summary}
         return {"status": "COMPLETE", "entities": len(self.schema["entities"])}
 

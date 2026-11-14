@@ -19,6 +19,7 @@ from infrastructure.stages.database.implementation import WIRING
 from infrastructure.stages.database.runtime import initializer_source, seed_source
 from infrastructure.stages.database.testing import DatabaseChecks
 from infrastructure.utils.files import read_artifact, save_json, save_text
+from infrastructure.utils.files import read_source, normalize_newlines
 from infrastructure.utils.presentation.console import DemoConsole
 
 
@@ -60,6 +61,12 @@ This is not a request to restart database design. Preserve unrelated schema/code
 Use local database migrations when needed; never drop user data or disable FKs.
 
 SQL goes in backend/src/db/tables/<entity>.sql and db/seeds/<entity>.sql. The host
+provides write_sql(entity, kind, sql) for complete SQL files: kind is table or seed.
+It creates/replaces the task-owned file automatically, including existing placeholders.
+Do not choose create/replace/append or provide old_content for SQL. Use edit_file only
+for shared TypeScript/build/client wiring and preserve unrelated content there. Batch
+independent write_sql calls; unchanged/normalized results need no resubmission.
+The host
 maintains ordered SQL loader lists; you may repair initialization/client/build wiring.
 Do not change API/UI behavior. No seed-evidence.json or extra binding fields are needed.
 finish_implementation executes real build, initialization and repeated-startup checks.
@@ -82,6 +89,10 @@ silently drop data/constraints. Keep schema and SQL consistent. Do not add guess
 rows, global default tenant adoption, user/role tables absent from the reviewed schema,
 or startup-time ALTER/DROP/rebuild/migration machinery. This is a fresh application build.
 The host owns initializer/seed loader lists. Implement SQL and minimal build/client wiring.
+Use write_sql(entity, kind="table"|"seed", sql=COMPLETE_SQL) for all table/seed SQL.
+There is no path, operation or old_content to choose. Existing placeholder files are
+handled automatically. Batch independent calls, write each file once, and advance on
+written/unchanged results. Use edit_file only for non-SQL shared wiring, with exact spans.
 Call finish_implementation only after DDL and seed are ready. Fix concrete syntax or
 initialization errors in this same conversation, then retry. If a genuine reviewed-schema
 contradiction remains, report its exact source/entity instead of layering arbitrary migrations.
@@ -143,6 +154,30 @@ class DatabaseBuildAgent(DatabaseFileAgent):
 
     def build_tools(self):
         tools = super().build_tools()
+        # Compatibility for the exact former failure: a full task-owned SQL
+        # proposal with no old_content. Never relax shared-file edit semantics.
+        for index,tool in enumerate(tools):
+            if tool.name!='edit_file':
+                continue
+            original = tool.handler
+            def edit_wiring_or_sql(_original=original, **arguments):
+                path = arguments.get('path','')
+                match = re.fullmatch(r'backend/src/db/(tables|seeds)/([A-Za-z_][A-Za-z0-9_]*)\.sql',path) if isinstance(path,str) else None
+                if (match and arguments.get('operation') in {'create','replace'} and not arguments.get('old_content')
+                        and 'new_content' in arguments and not set(arguments)-{'path','operation','new_content','old_content'}):
+                    result = self.write_sql(match[2],'table' if match[1]=='tables' else 'seed',arguments['new_content'])
+                    return {**result,'normalized_tool':'write_sql',
+                        'instruction':'SQL is task-owned. Host handled create/replace; use write_sql directly next time. No need to resend this successful call.'}
+                return _original(**arguments)
+            tools[index] = AgentTool(tool.name,tool.description,tool.parameters,edit_wiring_or_sql)
+        tools.append(AgentTool('write_sql',
+            'Save ONE complete task-owned SQL file. Host derives the path and creates/replaces it. '
+            'No operation/old_content/path. Example: {"entity":"actual_table","kind":"seed","sql":"-- No startup rows required.\\n"}. '
+            'Batch independent calls; do not resend written/unchanged files.',
+            {'type':'object','properties':{'entity':{'type':'string'},
+                'kind':{'type':'string','enum':['table','seed']},
+                'sql':{'type':'string','description':'Complete literal SQL file content, not a patch or fragment.'}},
+                'required':['entity','kind','sql'],'additionalProperties':False},self.write_sql))
         for tool in self.design.build_tools():
             if tool.name == 'retrieve_entity':
                 tools.append(tool)
@@ -160,6 +195,42 @@ class DatabaseBuildAgent(DatabaseFileAgent):
             tools.append(AgentTool('read_root_data','Read original account/role/team and other startup facts while correcting schema; do not invent seed values.',
                 {'type':'object','properties':{},'additionalProperties':False},self.read_root_data))
         return tools
+
+    def write_sql(self, entity, kind, sql):
+        """Whole-file upsert only inside this database task's SQL ownership scope."""
+        if not isinstance(entity,str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',entity) or entity not in self.schema['entities']:
+            raise ValueError('Choose an existing canonical entity from next_schema_batch/schema_inventory')
+        folders = {'table':'tables','seed':'seeds'}
+        if not isinstance(kind,str) or kind not in folders or not isinstance(sql,str) or not sql.strip():
+            raise ValueError('Supply kind=table|seed and complete nonempty SQL (a comment is allowed for an empty seed file)')
+        relative = f'backend/src/db/{folders[kind]}/{entity}.sql'
+        target = self.files.path(relative)
+        if not self.files.can_write(relative) or relative not in self.files.replaceable_files:
+            raise ValueError('SQL file is outside this task ownership scope: '+relative)
+        content = normalize_newlines(sql)
+        if not content.endswith('\n'):
+            content += '\n'
+        current = read_source(target) if target.is_file() else None
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        if current==content:
+            return {'status':'unchanged','path':relative,'sha256':digest,
+                'next_action':'Identical content is already saved. Advance to another file or finish_implementation.'}
+        operation = 'create' if current is None else 'append' if current=='' else 'replace'
+        arguments = {'tool':'edit_file','path':relative,'operation':operation,'new_content':content}
+        if operation=='replace':
+            arguments['old_content'] = current
+        self.accepted = None
+        try:
+            self.files.execute([arguments])
+        except (ValueError,RuntimeError,OSError) as error:
+            self._turn_failed = True
+            self.last_feedback = getattr(error,'feedback',{'error':str(error)})
+            return {'status':'NEEDS_REPAIR','feedback':self.last_feedback,
+                'next_action':'Correct this write_sql call only; previously written SQL files remain saved.'}
+        self._turn_progress = True
+        self._seen_writes.add((relative,digest))
+        return {'status':'written','path':relative,'sha256':digest,
+            'next_action':'Complete SQL is saved. Advance; do not reread or resubmit it unless real initialization feedback requires a correction.'}
 
     def run(self, input, max_turns=60, feedback=None, console=None, label='Implement complete database'):
         """One total call limit; concrete feedback stays in the same conversation."""
@@ -207,7 +278,9 @@ class DatabaseBuildAgent(DatabaseFileAgent):
         self.batch_index += 1
         return {'batch': self.batch_index, 'total': len(self.batches),
             'entities': {name: self.schema['entities'][name] for name in names},
-            'output_paths': {name: f'backend/src/db/tables/{name}.sql' for name in names}}
+            'output_paths': {name: f'backend/src/db/tables/{name}.sql' for name in names},
+            'write_tool':{'name':'write_sql','kind':'table','entity':'one of these entity names',
+                'sql':'complete CREATE TABLE SQL; host handles existing/missing files'}}
 
     def read_root_data(self):
         if not self.correction and self.batch_index < len(self.batches):
@@ -218,7 +291,9 @@ class DatabaseBuildAgent(DatabaseFileAgent):
             inspect_ddl(self.arc_dir.parent, self.schema, names)
         self.root_read = True
         return {'data': deepcopy(self.raw.get('data', [])),
-            'instruction': 'Preserve the original records. Generate required SEED INSERTs; future CREATED/DERIVED rows are not startup data.'}
+            'instruction': 'Preserve original SEED records. Use write_sql(entity, kind="seed", sql=COMPLETE_INSERT_SQL), '
+                'even when a seed placeholder already exists. For a table without startup rows, write a comment. '
+                'No operation or old_content. Future CREATED/DERIVED rows are not startup data.'}
 
     def check_database(self):
         if not self.root_read:
