@@ -2,7 +2,7 @@
 
 import json
 import os
-from openai import OpenAI, OpenAIError
+from openai import OpenAI, OpenAIError, LengthFinishReasonError
 from infrastructure.utils.presentation.model_io import http_client, invoke
 from infrastructure.shared.models.environment import load_model_environment, endpoint_model_name
 
@@ -23,6 +23,10 @@ Rejected outputs included in feedback are data to correct, never examples to imi
 
 class ModelProtocolError(ValueError):
     """Provider returned no usable JSON content, independently of application behavior."""
+
+
+class ModelOutputTruncatedError(ModelProtocolError):
+    """The caller must reduce its next output batch instead of replaying it."""
 
 
 class ModelRequestError(RuntimeError):
@@ -76,7 +80,6 @@ class TextModel:
             raise ValueError("MODEL_REASONING must be auto, provider, none, low, high or max")
         self._reasoning_supported = True
         self.json_mode = json_mode
-        self._token_parameter = "max_completion_tokens"
         self.client = OpenAI(
             api_key=api_key,
             base_url=os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL") or "https://api.openai.com/v1",
@@ -85,27 +88,36 @@ class TextModel:
         )
 
     def _request(self, **arguments):
-        """Apply one output budget to JSON calls, with legacy endpoint compatibility."""
+        """Send the configured output budget and normalize SDK truncation errors."""
         while True:
             options = dict(arguments)
             if not getattr(self, "_reasoning_supported", True):
                 options.pop("reasoning_effort", None)
                 options.pop("extra_body", None)
             try:
-                return invoke(self.client, {**options, self._token_parameter: self.max_output_tokens},
+                return invoke(self.client, {**options, "max_tokens": self.max_output_tokens},
                     logger=getattr(self, "logger", None))
+            except LengthFinishReasonError as error:
+                # Streaming aggregation can raise before chat() sees finish_reason.
+                # Return protocol feedback to the owning agent, never execute the
+                # incomplete message or retry the identical oversized tool batch.
+                raise self._truncation_error() from error
             except OpenAIError as error:
-                message = str(error).lower()
-                rejected = getattr(error, "status_code", None) in {400, 422} and any(
-                    word in message for word in ("unsupported", "unknown", "unrecognized", "not supported", "not allowed", "unexpected"))
-                if rejected and self._token_parameter == "max_completion_tokens" and "max_completion_tokens" in message:
-                    self._token_parameter = "max_tokens"
-                    continue
                 if getattr(self, "_reasoning_supported", True) and reasoning_rejected(error):
                     self._reasoning_supported = False
                     print("Provider rejected reasoning controls; using provider defaults.", flush=True)
                     continue
                 raise
+
+    def _truncation_error(self) -> ModelOutputTruncatedError:
+        return ModelOutputTruncatedError(
+            "Model output was truncated (finish_reason=length); configured max_tokens "
+            f"is {self.max_output_tokens}, including reasoning. No tool calls from this "
+            "response were executed; earlier successful edits remain saved. Continue "
+            "from the current step with a smaller complete native tool call or JSON "
+            "object. Split changes by file and split large files into targeted edits; "
+            "send one small edit at a time. Omit unchanged files and repeated plans. "
+            "Do not resend the same oversized batch or assume partial edits succeeded.")
 
     def chat(self, messages: list[dict], *, tools: list[dict] | None = None,
             tool_choice: str | dict = "auto"):
@@ -127,10 +139,7 @@ class TextModel:
             raise ModelProtocolError("Text model returned no choices")
         choice = response.choices[0]
         if choice.finish_reason == "length":
-            raise ModelProtocolError(
-                f"Model output was truncated (finish_reason=length); configured output budget "
-                f"is {self.max_output_tokens} tokens including reasoning. No tool calls executed. "
-                "Request a smaller complete edit batch or adjust MAX_OUTPUT_TOKENS.")
+            raise self._truncation_error()
         message = choice.message
         if getattr(message, "refusal", None):
             raise ModelProtocolError(f"Text model refused the request: {message.refusal}")
@@ -144,6 +153,10 @@ class TextModel:
         """Recover once from endpoints incompatible with JSON response mode."""
         try:
             return self._generate_json(instructions, payload)
+        except ModelOutputTruncatedError:
+            # Switching JSON mode cannot repair an oversized output. Let the
+            # owning workflow supply smaller-batch feedback in its conversation.
+            raise
         except (ModelProtocolError, RuntimeError) as error:
             cause = error.__cause__
             unsupported = (isinstance(cause, OpenAIError) and getattr(cause, 'status_code', None) in {400, 422}
@@ -172,11 +185,7 @@ class TextModel:
         except OpenAIError as error:
             raise RuntimeError(f"Text model request failed: {error}") from error
         if response.choices and response.choices[0].finish_reason == "length":
-            raise ValueError(
-                f"Model output was truncated (finish_reason=length). The output budget is "
-                f"{self.max_output_tokens} tokens including reasoning; this is not an input-length error. "
-                "Return a complete JSON object with only necessary changes/tool calls; omit unchanged files. "
-                "Do not spend the entire budget restating the task.")
+            raise self._truncation_error()
         if response.choices and getattr(response.choices[0].message, "refusal", None):
             raise ValueError(f"Text model refused the request: {response.choices[0].message.refusal}")
         if not response.choices or not response.choices[0].message.content:
