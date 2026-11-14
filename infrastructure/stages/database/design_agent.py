@@ -133,7 +133,10 @@ class DatabaseDesignAgent(BaseAgent):
 
     def build_system_prompt(self):
         if self.mode == "er":
-            return SCHEMA_RULES + "\nRead the ER source, build the COMPLETE initial schema, then call finish_schema. No requirement-node traversal in this task."
+            return SCHEMA_RULES + ('\nRead ER and ALL supplied requirements/source_data/evidence together. Build the COMPLETE schema before SQL. '
+                'Review cross-cutting persistence and source SEED representability now; no later per-node SQL corrections or obligatory fixed infrastructure. '
+                'In finish_schema provide requirement_support for every supplied requirement ID: entities plus a short reason. '
+                'UI-only behavior may use entities=[] with an explanation. This is a coverage inventory, not read/write obligations.')
         return SCHEMA_RULES + "\n" + OBLIGATION_RULES
 
     def build_user_prompt(self, input):
@@ -154,7 +157,11 @@ class DatabaseDesignAgent(BaseAgent):
                  "required": ["name", "entity", "reason", "source_refs"], "additionalProperties": False}, self.upsert_entity)]
         if self.mode == "er":
             tools.append(AgentTool("finish_schema", "Finish the complete ER-based logical schema; unresolved FK/key issues are repair feedback.",
-                {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"], "additionalProperties": False}, self.finish_schema))
+                {"type": "object", "properties": {"summary": {"type": "string"},
+                    "requirement_support":{"type":"object","additionalProperties":{"type":"object","properties":{
+                        "entities":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"}},
+                        "required":["entities","reason"],"additionalProperties":False}}},
+                    "required": ["summary"], "additionalProperties": False}, self.finish_schema))
         else:
             tools.append(AgentTool("submit_obligations", "Submit complete current requirement and scenario-step effects after schema repairs.",
                 {"type": "object", "properties": {"requirement": RECORD,
@@ -209,8 +216,22 @@ class DatabaseDesignAgent(BaseAgent):
         if not self.schema["entities"] or issues:
             raise ValueError("Repair schema before completing: " + "; ".join(issues or ["no entities"]))
 
-    def finish_schema(self, summary):
+    def finish_schema(self, summary, requirement_support=None):
         self.ensure_complete()
+        expected = {node['id'] for node in self.input.get('requirements',[])}
+        if expected:
+            support = requirement_support or {}
+            missing = sorted(expected-support.keys())
+            invalid = [rid for rid in expected & support.keys() if not isinstance(support[rid],dict)
+                or not isinstance(support[rid].get('entities'),list)
+                or not isinstance(support[rid].get('reason'),str) or not support[rid]['reason'].strip()]
+            unknown = {rid:sorted(set(item['entities'])-self.schema['entities'].keys()) for rid,item in support.items()
+                if rid in expected and rid not in invalid and set(item['entities'])-self.schema['entities'].keys()}
+            if missing or invalid or unknown:
+                return {'status':'COVERAGE_PENDING','missing_requirement_ids':missing,'invalid_entries':invalid,
+                    'unknown_entities':unknown,'next_action':'Complete the short requirement_support inventory in finish_schema; keep existing entity definitions. No per-node redesign is needed.'}
+            self.schema['requirement_support'] = {rid:deepcopy(support[rid]) for rid in sorted(expected)}
+            self.persist()
         self.completed = {"summary": summary}
         return {"status": "COMPLETE", "entities": len(self.schema["entities"])}
 

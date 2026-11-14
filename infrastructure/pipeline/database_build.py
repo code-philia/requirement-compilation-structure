@@ -5,7 +5,8 @@ import hashlib
 import json
 import re
 
-from infrastructure.shared.agent import AgentTool
+from infrastructure.shared.agent import AgentTool, AgentLoopExhausted
+from infrastructure.shared.models.streaming import IncompleteModelStreamError
 from infrastructure.shared.agent.feedback import CheckFailure
 from infrastructure.shared.agent.tasks import TaskFailures
 from infrastructure.shared.agent.tools import FileTools
@@ -67,6 +68,26 @@ After a repeated unchanged error, change repair strategy and inspect the exact c
 if blocked, report that cause instead of repeating the same edit indefinitely.
 """
 
+GLOBAL_IMPLEMENTATION_RULES = '''Implement the complete reviewed database in ONE conversation.
+The schema already considers the full ER, all requirements, authorization/process evidence
+and source startup facts. Use next_schema_batch to obtain complete definitions; implement
+the supplied DDL files in dependency order, batching independent writes. Then read_root_data
+and write idempotent startup INSERTs. Preserve source values, all accounts and memberships;
+hash credentials securely using actual code or explicitly supplied helpers. Scenario-created
+records are not startup seeds. No new schema design or per-requirement correction here.
+Use one clean canonical definition per SQL file. These SQL files are task-owned and may
+be replaced as complete files; do not accumulate duplicate fragments or hide them in comments.
+Use the reviewed exact numeric storage, keys, FKs, uniqueness and required fields. Never
+silently drop data/constraints. Keep schema and SQL consistent. Do not add guessed business
+rows, global default tenant adoption, user/role tables absent from the reviewed schema,
+or startup-time ALTER/DROP/rebuild/migration machinery. This is a fresh application build.
+The host owns initializer/seed loader lists. Implement SQL and minimal build/client wiring.
+Call finish_implementation only after DDL and seed are ready. Fix concrete syntax or
+initialization errors in this same conversation, then retry. If a genuine reviewed-schema
+contradiction remains, report its exact source/entity instead of layering arbitrary migrations.
+No separate repair agent, batch correction pass or read/write obligation artifact is needed.
+'''
+
 
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -102,9 +123,10 @@ class DatabaseBuildAgent(DatabaseFileAgent):
 
     repair_budget = 10
 
-    def __init__(self, arc_dir, schema, raw, *, correction=False, **options):
+    def __init__(self, arc_dir, schema, raw, *, correction=False, frozen_schema=False, **options):
         self.arc_dir, self.schema, self.raw = arc_dir, schema, raw
         self.correction, self.batch_index, self.root_read = correction, 0, correction
+        self.frozen_schema = frozen_schema
         from infrastructure.pipeline.database import table_batches
         self.batches = table_batches(schema)
         paths = set(WIRING) | {f'backend/src/db/{kind}/{name}.sql'
@@ -117,14 +139,14 @@ class DatabaseBuildAgent(DatabaseFileAgent):
         files.replaceable_files = {p for p in paths if p.endswith('.sql')}
         self.design = DatabaseDesignAgent(schema, {}, mode='implementation',
             persist=lambda: save_json(arc_dir / 'db_schema.json', schema))
-        super().__init__(RULES, files, self.check_database, **options)
+        super().__init__(GLOBAL_IMPLEMENTATION_RULES if frozen_schema else RULES, files, self.check_database, **options)
 
     def build_tools(self):
         tools = super().build_tools()
         for tool in self.design.build_tools():
             if tool.name == 'retrieve_entity':
                 tools.append(tool)
-            elif tool.name == 'upsert_entity':
+            elif tool.name == 'upsert_entity' and not self.frozen_schema:
                 tools.append(AgentTool(tool.name, 'Repair logical metadata, then edit matching SQL in this loop.',
                     tool.parameters, self.upsert_entity))
         if not self.correction:
@@ -138,6 +160,32 @@ class DatabaseBuildAgent(DatabaseFileAgent):
             tools.append(AgentTool('read_root_data','Read original account/role/team and other startup facts while correcting schema; do not invent seed values.',
                 {'type':'object','properties':{},'additionalProperties':False},self.read_root_data))
         return tools
+
+    def run(self, input, max_turns=60, feedback=None, console=None, label='Implement complete database'):
+        """One total call limit; concrete feedback stays in the same conversation."""
+        console = console or DemoConsole(False)
+        self.task, self.accepted, self.last_feedback = input, None, feedback
+        self._seen_writes = set()
+        self._turn_failed = self._turn_progress = False
+        self.start(input)
+        for turn in range(1,max_turns+1):
+            self._turn_failed = self._turn_progress = False
+            console.show(f'{label} | Native agent {turn}/{max_turns}',
+                'Implement the reviewed schema and startup data; finish_implementation verifies the complete result.')
+            try:
+                message = self.step(tool_choice='auto')
+            except (ValueError,IncompleteModelStreamError) as error:
+                self.last_feedback = {'error':str(error)}
+                self.messages.append({'role':'user','content':str(error)+' Return a smaller complete native tool batch.'})
+                continue
+            results = self.execute_tools(message)
+            if self.accepted is not None and not self._turn_failed and all(json.loads(item['content'])['ok'] for item in results):
+                return {'status':'GREEN','turns':turn,'checks':self.accepted}
+            if not message.tool_calls:
+                self.messages.append({'role':'user','content':'Use native tools to implement the remaining SQL or call finish_implementation. A text-only answer is not completion.'})
+        error = AgentLoopExhausted(f'{label}: {max_turns} calls exhausted; complete database has not passed acceptance')
+        error.turns, error.feedback = max_turns, self.last_feedback
+        raise error
 
     def upsert_entity(self, **arguments):
         result = self.design.upsert_entity(**arguments)
@@ -190,13 +238,13 @@ class DatabaseBuildAgent(DatabaseFileAgent):
         return {'status': 'GREEN', 'checks': result}
 
 
-def implement_database(arc_dir, pause=False, max_turns=40):
+def implement_database(arc_dir, pause=False, max_turns=60, *, frozen_schema=False):
     schema, raw = read_artifact(arc_dir, 'db_schema.json'), read_artifact(arc_dir, 'requirements.json')
     console = DemoConsole(pause)
     synchronize_loaders(arc_dir, schema)
     install_dependencies(arc_dir.parent)
     try:
-        agent = DatabaseBuildAgent(arc_dir, schema, raw, model=TextModel(json_mode=False))
+        agent = DatabaseBuildAgent(arc_dir, schema, raw, frozen_schema=frozen_schema, model=TextModel(json_mode=False))
         result = agent.run({'task': 'Implement schema batches, then original root data.',
             'schema_inventory': {name: list(entity['fields']) for name, entity in schema['entities'].items()},
             'schema_batches': agent.batches}, max_turns=max_turns, console=console, label='Implement database')
@@ -206,6 +254,19 @@ def implement_database(arc_dir, pause=False, max_turns=40):
         save_json(arc_dir / 'db_implementations.json', report)
         raise
     save_json(arc_dir / 'db_implementations.json', report)
+    return report
+
+
+def build_database(input_dir, arc_dir, pause=False):
+    """One public stage: global design, SQL/seed implementation, final acceptance."""
+    from infrastructure.pipeline.database_design import build_er_schema
+    schema = build_er_schema(input_dir,arc_dir,pause=pause)
+    implemented = implement_database(arc_dir,pause=pause,frozen_schema=True)
+    report = {**implemented,'mode':'global_design_then_implementation',
+        'requirements_considered':len(schema['requirement_support']),
+        'requirement_support':'db_requirement_support.json',
+        'verification':{'database':{'status':'GREEN','result':read_artifact(arc_dir,'db_checks.json')['checks']}}}
+    save_json(arc_dir/'database_build.json',report)
     return report
 
 

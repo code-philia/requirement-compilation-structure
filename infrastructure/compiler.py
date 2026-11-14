@@ -5,8 +5,7 @@ import traceback
 
 from infrastructure.pipeline.project_initialization import project_initialization
 from infrastructure.pipeline.requirements import explore_requirement
-from infrastructure.pipeline.database_design import build_er_schema
-from infrastructure.pipeline.database_build import implement_database, correct_database
+from infrastructure.pipeline.database_build import build_database
 from infrastructure.pipeline.backend_joint import build_backend
 from infrastructure.pipeline.frontend_build import build_frontend
 from infrastructure.pipeline.stages import canonical_stage
@@ -20,9 +19,7 @@ from infrastructure.utils.presentation.events import begin_run, finish_run, begi
 PIPELINE = (
     ("project_initialization", project_initialization, "project_files"),
     ("read_requirements", explore_requirement, "requirements"),
-    ("build_db_schema", build_er_schema, "db_schema"),
-    ("implement_db", implement_database, "db_implementations"),
-    ("correct_db", correct_database, "db_corrections"),
+    ("build_database", build_database, "database_build"),
     ("build_backend", build_backend, "backend_checks"),
     ("build_frontend", build_frontend, "frontend_e2e"),
 )
@@ -90,9 +87,7 @@ class Compiler:
     def _missing_prerequisites(self, stage):
         required = {
             "read_requirements": ["backend/package.json", "frontend/package.json"],
-            "build_db_schema": [".arc/requirements.json"],
-            "correct_db": [".arc/db_schema.json", "backend/src/db/initialize.ts"],
-            "implement_db": [".arc/db_schema.json", "backend/package.json"],
+            "build_database": [".arc/requirements.json", "backend/package.json"],
             "build_backend": [".arc/requirements.json", ".arc/db_schema.json"],
             "build_frontend": [".arc/requirements.json", ".arc/db_schema.json", ".arc/backend_endpoints.json"],
         }
@@ -100,10 +95,9 @@ class Compiler:
         # Do not use stale deployment/DDL artifacts after a failed current import.
         gates = {
             "read_requirements": ["project_initialization"],
-            "implement_db": ["build_db_schema"],
-            "correct_db": ["implement_db"],
-            "build_backend": ["correct_db", "implement_db"],
-            "build_frontend": ["build_backend", "correct_db", "implement_db"],
+            "build_database": ["read_requirements"],
+            "build_backend": ["build_database"],
+            "build_frontend": ["build_backend", "build_database"],
         }
         input_pass = self.report['stages'].get('read_requirements', {})
         if stage not in {'project_initialization', 'read_requirements'} and input_pass.get('status') in {'FAILED', 'BLOCKED'}:
@@ -161,7 +155,7 @@ class Compiler:
                     continue
                 if function is project_initialization:
                     result = self._run(name, function, self.input_dir, self.output_dir, port=self.port, pause=self.pause)
-                elif function in (build_er_schema, correct_database):
+                elif function is build_database:
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
                 elif function in (explore_requirement, build_frontend):
                     result = self._run(name, function, self.input_dir, self.arc_dir, pause=self.pause)
