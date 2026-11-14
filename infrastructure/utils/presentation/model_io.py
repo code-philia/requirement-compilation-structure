@@ -61,6 +61,12 @@ def record_tool_execution(tool_call: dict, result: dict, *, logger: AgentLogger 
     session = session_info()
     if session and session.get("model_log", True):
         logger.log_tool_execution(tool_call, result)
+        value = result.get('result')
+        if not result.get('ok',True) or isinstance(value,dict) and value.get('status') in {'NEEDS_REPAIR','BLOCKED','TEST_ITERATION_LIMIT'}:
+            from infrastructure.shared.agent.feedback import compact_feedback
+            name = tool_call.get('function',{}).get('name','?')
+            show_panel('[TOOL FEEDBACK] '+name,
+                json.dumps(compact_feedback(result),ensure_ascii=False,indent=2),tone='error',max_lines=18,max_chars=2400)
 
 
 def _message_text(message: dict) -> str:
@@ -131,8 +137,8 @@ def http_client() -> httpx.Client:
 
 def _input_summary(arguments: dict) -> str:
     messages = arguments.get("messages", [])
-    lines = [f"Model: {arguments.get('model')} | Messages: {len(messages)}"]
-    for message in messages:
+    lines = [f"Model: {arguments.get('model')} | Total messages: {arguments.get('_total_messages',len(messages))}"]
+    for message in messages[-6:]:
         content = message.get("content", "")
         if isinstance(content, str):
             line = str(message["role"])
@@ -166,9 +172,17 @@ def _usage_summary(usage: dict) -> str:
 
 
 def _input_view(arguments):
-    """Show bounded literal prompts and a file access inventory, excluding image data."""
+    """Preview latest new context, never the first turns of the growing conversation."""
     views = [Text(_input_summary(arguments))]
-    for message in arguments.get("messages", [])[:6]:
+    messages = arguments.get('messages',[])
+    omitted = arguments.get('_history_omitted',0)
+    if omitted:
+        views.append(Text(f'已省略 {omitted} 条已记录历史；新增 {len(messages)} 条消息。'))
+    if len(messages)>6:
+        views.append(Text(f'以下展示最新 6 条；其余 {len(messages)-6} 条新增消息见 compiler.log。'))
+    if not messages:
+        views.append(Text('本轮无新增上下文：正在重试同一请求。'))
+    for message in messages[-6:]:
         prompt = _message_text(message)
         views.append(Panel(Text(preview(prompt, max_lines=10, max_chars=1000)),
             title=Text(str(message.get("role", "message"))), border_style="dim blue"))
@@ -182,6 +196,31 @@ def _input_view(arguments):
                 for path, record in list(payload["files"].items())[:16]:
                     files.add_row(text(path), text("edit" if isinstance(record, dict) and record.get("writable") else "read"))
                 views.append(files)
+    return Group(*views)
+
+
+def _native_output_view(response, usage, elapsed):
+    """Summarize every current native call instead of truncating the first call's code."""
+    views = [_usage_view(usage,elapsed)]
+    calls = table('Tool / call', 'Target', 'Operation / argument size')
+    for choice in response.get('choices',[]):
+        message = choice.get('message',{})
+        if message.get('content'):
+            views.append(Text(preview(str(message['content']),max_lines=12,max_chars=1800)))
+        for call in message.get('tool_calls') or []:
+            function = call.get('function',{})
+            raw = function.get('arguments','')
+            try:
+                arguments = json.loads(raw)
+            except (ValueError,TypeError):
+                arguments = {}
+            if not isinstance(arguments,dict):
+                arguments = {}
+            target = arguments.get('path') or arguments.get('id') or arguments.get('ids') or arguments.get('query') or ''
+            action = arguments.get('operation') or ('read' if function.get('name')=='read_file' else '')
+            calls.add_row(text(str(function.get('name','?'))+' / '+str(call.get('id',''))[:12]),
+                text(str(target),240), text(f'{action} · {len(str(raw)):,} chars'))
+    views.append(calls)
     return Group(*views)
 
 
@@ -307,8 +346,8 @@ def invoke(client, arguments: dict, *, logger: AgentLogger | None = None):
     token = _call.set({"id": call_id, "activity": activity, "logger": logger})
     verbose = session is None or session.get("model_log", True)
     if verbose:
-        logger.log_input(label, arguments)
-        show_panel(f"[MODEL INPUT] {label} | call {call_id[:8]}", _input_view(arguments), tone="input")
+        visible_input = logger.log_input(label, arguments)
+        show_panel(f"[MODEL INPUT] {label} | call {call_id[:8]}", _input_view(visible_input), tone="input")
     else:
         show_panel(f"[MODEL CALL] {label} | call {call_id[:8]}", f"Model: {arguments.get('model')}", tone="input")
     waiting = WaitingStatus()
@@ -337,7 +376,8 @@ def invoke(client, arguments: dict, *, logger: AgentLogger | None = None):
         full_detail(f"[MODEL OUTPUT] {label}", _usage_summary(usage) + f"\nRound-trip latency: {elapsed:.2f} s"
             + ("\n" + logger.format_output(raw) if verbose else ""))
         show_panel(f"[MODEL OUTPUT] {label} | {elapsed:.2f}s",
-            _output_view(content, usage, elapsed) if verbose else _usage_view(usage, elapsed), tone="output")
+            (_native_output_view(raw,usage,elapsed) if any(choice.get('message',{}).get('tool_calls') for choice in raw.get('choices',[]))
+                else _output_view(content,usage,elapsed)) if verbose else _usage_view(usage, elapsed), tone="output")
         return response
     except BaseException as error:
         elapsed = monotonic() - started

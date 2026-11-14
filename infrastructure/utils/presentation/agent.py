@@ -1,6 +1,7 @@
 """Readable agent conversation and tool execution logs."""
 
 import json
+import hashlib
 
 from infrastructure.utils.presentation.logging import full_detail
 
@@ -9,6 +10,7 @@ class AgentLogger:
     def __init__(self, name: str) -> None:
         self.name = name
         self.last_call_id: str | None = None
+        self._logged_messages: list[str] = []
 
     def format_message(self, message: dict) -> str:
         parts = []
@@ -72,8 +74,22 @@ class AgentLogger:
                 self.format_message(choice.get("message", {})))
         return "\n\n".join(parts)
 
-    def log_input(self, label: str, arguments: dict) -> None:
-        full_detail(f"[MODEL INPUT] {label}", self.format_input(arguments))
+    def log_input(self, label: str, arguments: dict) -> dict:
+        """Human logs show new context only; the transport audit keeps full requests."""
+        messages = arguments.get('messages',[])
+        fingerprints = [hashlib.sha256(json.dumps(message,sort_keys=True,ensure_ascii=False,
+            default=str).encode()).hexdigest() for message in messages]
+        prefix = 0
+        for previous,current in zip(self._logged_messages,fingerprints):
+            if previous!=current:
+                break
+            prefix += 1
+        self._logged_messages = fingerprints
+        visible = {**arguments,'messages':messages[prefix:],'_history_omitted':prefix,'_total_messages':len(messages)}
+        note = f'已省略 {prefix} 条已记录历史；本轮新增 {len(messages)-prefix} 条消息。\n'
+        full_detail(f"[MODEL INPUT] {label}", note + (self.format_input(visible)
+            if visible['messages'] else '没有新增上下文；重试同一请求，不重复展示旧对话。'))
+        return visible
 
     def log_tool_execution(self, tool_call: dict, result: dict) -> None:
         text = self.format_message({"tool_calls": [tool_call]})
